@@ -1,0 +1,111 @@
+%% Leo la fase y los parametros estereos
+close all
+
+
+%%%%%%%%%% Load calibration parameters
+% These were obtained with the Python calibration code
+pathExp   = '23-03-07 - Pruebas';
+pathSteCalib = 'Estereo';
+StereoCalibNom = 'Estereo_TSC_0_2';
+StereoType = 'MT'; % 'BT'
+% StereoCalibNom = 'Ste_R0C11000P00000S00';
+% StereoCalibNom = 'Ste_R0C11111P11111S00';
+
+
+
+% load(['..\Data\',pathExp,'\',pathSteCalib,'\',pathSteCalib,'_TSC_0_3.mat']);
+
+load(['..\Data\',pathExp,'\',pathSteCalib,'\',pathSteCalib,'_PhasesData.mat'],'Fxa','Fya','Indi','MaskP')
+load(['..\Data\',pathExp,'\',pathSteCalib,'\',StereoCalibNom,'.mat']);
+
+
+nPoses = StereoParams.NumPatterns; % Number of calibration poses
+
+% Camera and projector resolutions
+m_imageWidth = 1600;        %1936   %1280 ;     %2048
+m_imageHeight = 1200;       %1464   %1024 ;     %1536
+m_projectorWidth =  912;    %912    %1280;      %912
+m_projectorHeight = 1140;   %1140   %800;       %1140
+
+% Fringe features: patterns period and shifts
+FringePitch = 18; NStep = 18; NBits = 7;
+
+%% Estimate 3D coordinates of the target using the Extrinsic parameters obtained by StereoCalib
+% Method Proposed by Zhang
+%
+
+% Page transpose to transpose all pages of R(:,:,nPoses)
+if(isfield(StereoParams,'RotationMatrices'))
+    R = StereoParams.RotationMatrices;
+    t = StereoParams.TranslationVectors;
+else
+    R = pagetranspose(StereoParams.CameraParameters1.RotationMatrices);
+    t = StereoParams.CameraParameters1.TranslationVectors';
+end
+
+[Dx,Dy,Dz,Up,Vp] = BackPropagation_Planes2(StereoParams,StereoType,R,t,[m_imageHeight m_imageWidth],0);
+TPhx = Up*(2*pi)/FringePitch; % 
+TPhy = Vp*(2*pi)/FringePitch;
+
+
+
+
+
+%% Reconstruyo los planos para el valor inicial
+
+[erms,dist,Dx_ip, Dy_ip, Dz_ip, Dx_rp, Dy_rp, Dz_rp,errDis] = XYZ_R3D_Target(StereoParams,StereoType,Fxa,Fya,FringePitch,Indi>0,'Fy',Indi>0);
+
+
+%%  Regresion entre las coordenadas de los puntos corregidos y las fases ajustadas  con ITERACION
+Indeex = [1:10 12:25];
+Mask = MaskP*0+1;
+cb = 15;
+Mask([1:cb end-cb:end],:,:) = 0;
+Mask(:,[1:cb end-cb:end],:) = 0;
+
+aa = [];
+
+[coefx_eit,coefy_eit,coefz_eit,erms] = HybridIterativeOpt(Dx(:,:,Indeex),Dy(:,:,Indeex),Dz(:,:,Indeex),Fya(:,:,Indeex),Mask(:,:,Indeex)>0,7,aa);
+
+N_eit= sum(Mask(:,:,Indeex)>0,3);
+
+
+Lip_eit = min(Fya,[],3,'omitnan'); % Limite inferior de fase utilizado en la regresión
+Lsp_eit = max(Fya,[],3,'omitnan'); % Limite superior de fase utilizado en la regresión
+%%  Regresion entre las coordenadas de los puntos corregidos y las fases ajustadas  con ITERACION
+Indeex = [1:10 12:25];
+Mask = MaskP*0+1;
+cb = 15;
+Mask([1:cb end-cb:end],:,:) = 0;
+Mask(:,[1:cb end-cb:end],:) = 0;
+
+aa = [];
+
+[coefx_eit,coefy_eit,coefz_eit,erms] = HybridIterativeOpt(Dx_rp(:,:,Indeex),Dy_rp(:,:,Indeex),Dz_rp(:,:,Indeex),Fya(:,:,Indeex),Mask(:,:,Indeex)>0,4,aa);
+
+N_eit= sum(Mask(:,:,Indeex)>0,3);
+
+
+Lip_eit = min(Fya,[],3,'omitnan'); % Limite inferior de fase utilizado en la regresión
+Lsp_eit = max(Fya,[],3,'omitnan'); % Limite superior de fase utilizado en la regresión
+
+
+%%
+
+[Dz5th,FX] =  PhaseAdj5(coefz,~isnan(coefz),5,1,[],5);
+
+
+% [meanRMS_e, coefx, coefy, coefz] = FunctionCostRecalib(points,phases,pointsW);
+% params0 = cat(4,Dx_rp,Dy_rp,Dz_rp);
+% sol2 = fminsearch(@(params) FunctionCostRecalib(params,Fya,Maps),params0);
+
+
+
+
+
+
+
+
+
+
+

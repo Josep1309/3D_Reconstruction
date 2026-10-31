@@ -1,0 +1,69 @@
+function [erms,dist,Dx_ip, Dy_ip, Dz_ip, Dx_rp, Dy_rp, Dz_rp,errdist] = XYZ_R3D_Target(StereoParams,StereoType,Fx,Fy,FringePitch,MaskC,PhaseSen,MaskFit)
+%%
+% This function estimates the 3D points of the each target used in the
+% stereo calibration, and return the coordinates of the recontructed plane
+% (Dx_rp, Dy_rp, Dz_rp) and the coordinates of the plane corrected to a
+% ideal plane (Dx_ip, Dy_ip, Dz_ip) using least square fitting.
+%
+%
+
+[uc,vc] = meshgrid(1:size(Fx,2),1:size(Fx,1));
+
+% MaskC2 = MaskC; 
+
+N = size(Fx,3); a =1; jj=0; X ={};
+for i=1:1:N
+    jj = jj+1;
+    ind = find(MaskC(:,:,i));
+
+    indfit = MaskFit(:,:,i)>0;
+    indfit = indfit(ind(:));
+    
+
+    up = Fx(:,:,i)*FringePitch/(2*pi);
+    vp = Fy(:,:,i)*FringePitch/(2*pi);
+
+    X{jj}=[uc(ind(1:a:end)),vc(ind(1:a:end)),up(ind(1:a:end)),vp(ind(1:a:end))]; 
+    indFit{jj} = indfit>0;
+%     indis{jj} = find(MaskC(:,:,i));
+end
+
+
+[erms,dist,Xi,Xr] = PoseEstimation_Hybrid(StereoParams,X,StereoType,PhaseSen,indFit);
+
+% Conversion Cell 2 matrices
+Dx_ip = NaN*MaskC;     
+Dy_ip = Dx_ip;          
+Dz_ip = Dx_ip;          
+
+aux = Dx_ip(:,:,1);  
+
+if(nargout>5)
+ errdist = Dx_ip;  
+ Dx_rp = Dx_ip;
+ Dy_rp = Dx_ip; 
+ Dz_rp = Dx_ip; 
+end
+
+for i =1:N
+
+    indi = find(MaskC(:,:,i));
+    
+    aux = NaN*aux;
+    aux(indi) = Xi{i}(:,1);  Dx_ip(:,:,i) = aux;
+    aux(indi) = Xi{i}(:,2);  Dy_ip(:,:,i) = aux;
+    aux(indi) = Xi{i}(:,3);  Dz_ip(:,:,i) = aux;
+
+    if(nargout>5)
+    aux(indi) = Xr{i}(:,1);  Dx_rp(:,:,i) = aux;
+    aux(indi) = Xr{i}(:,2);  Dy_rp(:,:,i) = aux;
+    aux(indi) = Xr{i}(:,3);  Dz_rp(:,:,i) = aux;
+    
+    aux(indi) = dist{i};  errdist(:,:,i) = aux;
+    end
+
+
+
+end
+
+end

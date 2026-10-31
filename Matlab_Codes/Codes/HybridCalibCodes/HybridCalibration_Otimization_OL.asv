@@ -1,0 +1,138 @@
+%% Cargar la fase 
+close all
+addpath('StereoCalibCodes')
+
+
+%%%%%%%%%% Load calibration parameters
+% These were obtained with the Python calibration code
+pathExp   = '23-05-05 - Pruebas';
+pathSteCalib = 'Estereo';
+
+
+load(['..\Data\',pathExp,'\',pathSteCalib,'\',pathSteCalib,'_PhasesData.mat'],'Fxa','Fya','Indi','MaskP','M')
+
+
+nPoses = 20; % Number of calibration poses
+
+% Camera and projector resolutions
+m_imageWidth = 1600;        %1936   %1280 ;     %2048
+m_imageHeight = 1200;       %1464   %1024 ;     %1536
+m_projectorWidth =  912;    %912    %1280;      %912
+m_projectorHeight = 1140;   %1140   %800;       %1140
+
+% Fringe features: patterns period and shifts
+FringePitch = 18; NStep = 18; NBits = 7;
+
+
+%%  Camara lineal y extrinsecos de inicializacion
+
+pathExp   = '23-05-05 - Pruebas';
+pathSteCalib = 'Estereo';
+StereoCalibNom = 'Ste_R0C00000P00000S00';
+StereoType = 'BT';
+StereoParams = load(['..\Data\',pathExp,'\',pathSteCalib,'\',StereoCalibNom,'.mat']);
+
+focalLength = StereoParams.fc_left;
+principalPoint = StereoParams.cc_left;
+imageSize = [m_imageHeight m_imageWidth];
+cameraParams = cameraIntrinsics(focalLength,principalPoint,imageSize,'RadialDistortion',StereoParams.kc_left([1 2 5]),'TangentialDistortion',StereoParams.kc_left([3 4]));
+
+
+patternSize = [16, 21];         % [7, 21]
+centerDistance = 10;            % 20
+Pattern_type = 'symmetric';     % asymmetric
+worldPoints = generateCircleGridPoints(patternSize,centerDistance,'PatternType', Pattern_type);
+%  worldPoints = (worldPoints/15).*[15.0588 14.9090];
+
+RR =[]; tt =[];
+ii=0;
+ve = 1:20;
+for i =ve
+    ii=ii+1;
+    [worldOrientation,worldLocation] = estimateWorldCameraPose(M(:,:,i,1),[worldPoints worldPoints(:,1)*0],cameraParams);
+    RR(:,:,ii) = worldOrientation;
+    tt(:,ii) = -worldOrientation*worldLocation';
+end
+
+
+[Dx1,Dy1,Dz1,Up1,Vp1] = BackPropagation_Planes2(StereoParams,StereoType,RR,tt,[m_imageHeight m_imageWidth],1);
+% TPhx1 = Up1*(2*pi)/FringePitch; % 
+% TPhy1 = Vp1*(2*pi)/FringePitch;
+
+aa = [];
+
+Mask = MaskP*0+1;
+cb = 20;
+Mask([1:cb end-cb:end],:,:) = 0;
+Mask(:,[1:cb end-cb:end],:) = 0;
+
+
+[coefx_1,coefy_1,coefz_1,erms_1] = HybridIterativeOpt(Dx1,Dy1,Dz1,Fya,Mask>0,9,aa);
+
+%% Camara con distorsion añadida
+
+pathExp   = '23-05-05 - Pruebas';
+pathSteCalib = 'Estereo';
+StereoCalibNom = 'Estereo_TSC_0_2';
+StereoType = 'MT'; % 'BT'
+
+StereoParamsa = load(['..\Data\',pathExp,'\',pathSteCalib,'\',StereoCalibNom,'.mat']);
+
+StereoParams2 = StereoParamsa.StereoParams;
+
+
+if(isfield(StereoParams2,'RotationMatrices'))
+    R = StereoParams2.RotationMatrices;
+    t = StereoParams2.TranslationVectors;
+else
+    R = pagetranspose(StereoParams2.CameraParameters1.RotationMatrices);
+    t = StereoParams2.CameraParameters1.TranslationVectors';
+end
+
+[Dx2,Dy2,Dz2,Up2,Vp2] = BackPropagation_Planes2(StereoParams2,StereoType,R,t,[m_imageHeight m_imageWidth],0);
+
+[coefx_2,coefy_2,coefz_2,erms_2] = HybridIterativeOpt(Dx2,Dy2,Dz2,Fya,Mask>0,9,aa);
+
+
+%% Reconstruyo los planos para el valor inicial
+
+% pathExp   = '23-05-05 - Pruebas';
+% pathSteCalib = 'Estereo';
+% StereoCalibNom = 'Estereo_TSC_0_2';
+% StereoType = 'MT'; % 'BT'
+% StereoParamsa = load(['..\Data\',pathExp,'\',pathSteCalib,'\',StereoCalibNom,'.mat']);
+% StereoParams2 = StereoParamsa.StereoParams;
+
+[erms,dist,Dx_ip, Dy_ip, Dz_ip, Dx_rp, Dy_rp, Dz_rp, errDis] = XYZ_R3D_Target(StereoParams2,StereoType,Fxa,Fya,FringePitch,Mask>0,'Fy',Mask>0);
+%%
+
+[coefx_3,coefy_3,coefz_3,erms_3] = HybridIterativeOpt(Dx_ip,Dy_ip,Dz_ip,Fya,Mask>0,9,aa);
+%% Guardar Pixel-wise models
+
+
+coefx = coefx_1; coefy = coefy_1; coefz = coefz_1;
+nomHybrid = '2';
+
+direc = ['..\Data\',pathExp,'\',\',nomHybrid,'_Vrc.mat'];
+% save(direc,'coefx','coefy','coefz','ex','ey','ez','N3')
+save(direc,'coefx','coefy','coefz')
+
+disp(['Guardado ...'])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
