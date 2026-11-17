@@ -13,6 +13,8 @@ import struct
 import time
 from pathlib import Path
 
+import configuracion as cfg
+
 # ==============================================================================
 # --- PARÁMETROS DE CONFIGURACIÓN (EDITA AQUÍ) ---
 # ==============================================================================
@@ -24,8 +26,8 @@ from pathlib import Path
 #                  EXPOSICION_US + 230 us (ej. 45000 y 48000). Si lo tiene desactivado,
 #                  el DLPC350 exige EXPOSICION_US == PERIODO_US (el script lo ajusta
 #                  automáticamente si detecta esa bandera en la validación).
-EXPOSICION_US = 49700         # 45 ms de exposición del patrón
-PERIODO_US = 50000            # 48 ms de período (menor a los 50 ms del pulso de 20 Hz)
+EXPOSICION_US = cfg.LCR_EXPOSICION_US   # 49.7 ms de exposición del patrón (en configuracion.py)
+PERIODO_US = cfg.LCR_PERIODO_US         # 50 ms de período (= pulso de 20 Hz del Arduino)
 
 REINICIAR_SECUENCIA = True     # True = inicia (START) la proyección tras validar los tiempos
 SOLO_LEER = False              # True = solo consulta los valores actuales sin modificarlos
@@ -276,7 +278,12 @@ class LightCrafter4500:
         return codigo_val
 
 
-def main() -> None:
+def main(
+    exposicion_us: int = EXPOSICION_US,
+    periodo_us: int = PERIODO_US,
+    reiniciar: bool = REINICIAR_SECUENCIA,
+    solo_leer: bool = SOLO_LEER,
+) -> None:
     with LightCrafter4500(DISPOSITIVO_HID) as lcr:
         print(f"[OK] Conectado a DLP LightCrafter 4500 en '{lcr.device_path}'")
 
@@ -288,17 +295,17 @@ def main() -> None:
             f"Período: {per_antes} us ({per_antes / 1000:.2f} ms, ~{fps_antes:.2f} Hz)"
         )
 
-        if SOLO_LEER:
+        if solo_leer:
             return
 
         print(
             f"[INFO] Enviando nuevos parámetros -> "
-            f"Exposición: {EXPOSICION_US} us | Período: {PERIODO_US} us..."
+            f"Exposición: {exposicion_us} us | Período: {periodo_us} us..."
         )
         codigo_val = lcr.configurar_exposicion_y_periodo(
-            exposure_us=EXPOSICION_US,
-            period_us=PERIODO_US,
-            reiniciar=REINICIAR_SECUENCIA,
+            exposure_us=exposicion_us,
+            period_us=periodo_us,
+            reiniciar=reiniciar,
         )
 
         exp_despues, per_despues = lcr.leer_exposicion_y_periodo()
@@ -309,7 +316,7 @@ def main() -> None:
             f"Período: {per_despues} us ({per_despues / 1000:.2f} ms, ~{fps_despues:.2f} Hz) | "
             f"Validación: 0x{codigo_val:02X}"
         )
-        if REINICIAR_SECUENCIA:
+        if reiniciar:
             print("[OK] Secuencia validada e iniciada (START enviado).")
 
 

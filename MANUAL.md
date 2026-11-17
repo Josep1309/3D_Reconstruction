@@ -1,0 +1,917 @@
+# Manual del sistema de reconstrucción 3D por proyección de franjas
+
+**Phase shifting + código Gray · Calibración estéreo cámara–proyector · Triangulación**
+
+Este manual explica, de principio a fin y con detalle, cómo funciona el sistema, cómo se usa y
+qué hace cada función importante del código. Está pensado para que alguien que llega nuevo al
+proyecto pueda operar el montaje, entender los resultados y modificar el código con criterio.
+
+---
+
+## Índice
+
+1. [Qué hace el sistema](#1-qué-hace-el-sistema)
+2. [Uso rápido](#2-uso-rápido)
+3. [Hardware y sincronización](#3-hardware-y-sincronización)
+4. [Estructura del proyecto](#4-estructura-del-proyecto)
+5. [Configuración: `configuracion.py` y `pipeline.py`](#5-configuración)
+6. [Etapa `patrones`: la secuencia proyectada](#6-etapa-patrones-la-secuencia-proyectada)
+7. [Etapa `lightcrafter`: tiempos del proyector](#7-etapa-lightcrafter-tiempos-del-proyector)
+8. [Etapa `captura`: adquisición con la cámara](#8-etapa-captura-adquisición-con-la-cámara)
+9. [Etapa `organizar`: de capturas crudas a poses](#9-etapa-organizar-de-capturas-crudas-a-poses)
+10. [Etapa `fase_relativa`: phase shifting](#10-etapa-fase_relativa-phase-shifting)
+11. [Etapa `fase_absoluta`: código Gray y coordenadas del proyector](#11-etapa-fase_absoluta-código-gray-y-coordenadas-del-proyector)
+12. [Etapa `calibracion` (opcional): calibración estéreo](#12-etapa-calibracion-opcional-calibración-estéreo)
+13. [Etapa `reconstruccion`: triangulación 3D](#13-etapa-reconstruccion-triangulación-3d)
+14. [Etapa `visualizacion`](#14-etapa-visualizacion)
+15. [Resultados de referencia y precisión](#15-resultados-de-referencia-y-precisión)
+16. [Diagnóstico de problemas](#16-diagnóstico-de-problemas)
+17. [Correspondencia con el código MATLAB y diferencias](#17-correspondencia-con-el-código-matlab-y-diferencias)
+18. [Referencia de archivos de salida](#18-referencia-de-archivos-de-salida)
+
+---
+
+## 1. Qué hace el sistema
+
+Un proyector **TI DLP LightCrafter 4500** (912 × 1140 px) proyecta sobre el objeto una secuencia
+de 50 imágenes: franjas desplazadas y código Gray, en horizontal y en vertical, más una imagen
+negra y una blanca. Una cámara **FLIR Blackfly S** (1280 × 1024 px), disparada por el mismo pulso
+de un **Arduino**, captura una imagen por cada patrón.
+
+Para cada píxel de la cámara, las franjas codifican **qué columna y qué fila del proyector lo
+ilumina**. Con esa correspondencia cámara↔proyector y un modelo calibrado de ambos dispositivos,
+el sistema se comporta como un par estéreo y se puede **triangular** la posición 3D de cada
+píxel.
+
+El proceso completo:
+
+```
+ captura ─► organizar ─► fase relativa ─► fase absoluta ─► [calibración] ─► reconstrucción ─► visualización
+ (cámara)   (ordena los   (N-step phase    (código Gray →    (solo cuando     (X, Y, Z en mm,
+            50 frames)    shifting)        u_p, v_p)         se recalibra)    nubes .ply)
+```
+
+La **calibración es opcional**: se hace una vez (o cuando se mueve la cámara o el proyector) y
+después se pueden medir tantos objetos como se quiera reutilizando la calibración guardada.
+
+---
+
+## 2. Uso rápido
+
+Todo se controla desde `pipeline.py`, que **no recibe argumentos**: se editan las variables de
+la sección `CONFIGURACIÓN DEL PIPELINE` y se ejecuta:
+
+```bash
+cd ~/Documents/Tesis
+.env/bin/python pipeline.py
+```
+
+### 2.1 Medir objetos con el sistema ya calibrado (caso habitual)
+
+```python
+ETAPAS = {
+    "patrones": False,
+    "lightcrafter": False,     # True si hay que reconfigurar tiempos del proyector
+    "captura": True,
+    "organizar": True,
+    "fase_relativa": True,
+    "fase_absoluta": True,
+    "calibracion": False,      # ← NO se recalibra
+    "reconstruccion": True,
+    "visualizacion": True,
+}
+CATEGORIAS = ["plano", "objeto"]
+CAPTURA_CATEGORIA = "objeto"
+CAPTURA_POSES = 3              # pide Enter antes de cada objeto/pose
+```
+
+- Antes de capturar, el pipeline **comprueba que exista una calibración** y muestra cuál usará
+  (número de poses, error RMS y fecha). Si no existe, se detiene antes de encender la cámara.
+- Las fases del patrón **no** se calculan (no hacen falta sin calibración).
+- Las poses ya procesadas **se reutilizan** (fases y reconstrucción): solo se calculan las
+  nuevas. Medir un objeto más cuesta ~5 s de proceso, más la visualización.
+- La visualización muestra por defecto **la última pose** capturada (`VIS_POSE = "ultima"`).
+
+### 2.2 Recalibrar el sistema
+
+1. Captura 10–15 poses del tablero de círculos (`CAPTURA_CATEGORIA = "patron"`,
+   `CAPTURA_POSES = 12`). Cubre **todo el campo** del proyector: tablero en el centro, en las
+   cuatro esquinas, en los bordes izquierdo y derecho, y con inclinaciones de ±20–30°.
+2. Pon `"calibracion": True`. El pipeline organiza, calcula las fases del patrón y calibra.
+3. Revisa en la salida: error RMS por pose, la línea `Cobertura del proyector` y los avisos.
+4. Vuelve a `"calibracion": False` para medir objetos.
+
+> Si quieres conservar una calibración anterior, copia `resultados/calibracion/` a otro lugar
+> antes de recalibrar: la etapa sobrescribe los archivos.
+
+### 2.3 Otros flujos
+
+| Quiero… | Etapas en `True` |
+|---|---|
+| Procesar capturas que copié a mano a `capturas/` | `organizar` → `reconstruccion` (+ `visualizacion`) |
+| Solo ver resultados ya calculados | `visualizacion` |
+| Recalcular todo tras cambiar umbrales | Las de fase y `reconstruccion`, con `REHACER = True` |
+| Cambié período o bits de los patrones | `patrones`, recargar los `.bmp` en el LightCrafter y recapturar todo (incluida la calibración) |
+
+### 2.4 Scripts sueltos
+
+Algunos módulos se pueden correr solos con argumentos (`--help` los lista):
+
+```bash
+.env/bin/python organizar_capturas.py --simular                # qué haría, sin escribir
+.env/bin/python organizar_capturas.py --entrada ~/sesion3 --categoria objeto
+.env/bin/python calibracion_estereo.py --distancia 15.0588 14.909
+.env/bin/python reconstruccion_3d.py --categorias objeto --fase Fy
+.env/bin/python capturar_patrones.py --categoria patron --poses 12
+.env/bin/python visualizacion.py                               # usa su cabecera
+```
+
+`configurar_lightcrafter.py` se configura en su cabecera. `fase.py` se usa desde el pipeline.
+
+---
+
+## 3. Hardware y sincronización
+
+```
+Arduino (20 Hz) ──pin 9──► Cámara Line0 (trigger, flanco de subida)
+                └─pin 10─► LightCrafter (trigger de entrada)
+```
+
+- **Arduino** (`arduino_pulses/arduino_pulses.ino`): conmuta los pines 9 y 10 **a la vez**
+  escribiendo directamente en `PORTB`, cada 25 ms. Resulta una onda cuadrada de 20 Hz (50 ms por
+  ciclo). El tiempo se acumula sumando `semiPeriodo` a `tiempoPrevio`, en lugar de leer `micros()`
+  de nuevo, para que no haya deriva acumulada.
+- **LightCrafter**: tiene cargada la secuencia `f_00 … f_49` y avanza **un patrón por pulso**, en
+  bucle. La exposición y el período del patrón (49.7 ms / 50 ms) se fijan por USB con
+  `configurar_lightcrafter.py`.
+- **Cámara**: un frame por flanco de subida con 12 ms de exposición (`CAM_EXPOSICION_US`), que
+  debe ser menor que el período de 50 ms.
+- **No hace falta que la captura empiece en `f_00`**: el organizador encuentra el inicio de la
+  secuencia buscando el par negro → blanco (§9).
+
+Una secuencia completa tarda 50 × 50 ms = **2.5 s**. La escena no debe moverse durante ese
+tiempo.
+
+**Permisos USB del LightCrafter.** Si la etapa `lightcrafter` falla por permisos:
+
+```bash
+sudo chmod a+rw /dev/hidrawX       # el script dice cuál es X
+```
+
+---
+
+## 4. Estructura del proyecto
+
+```
+Tesis/
+├── pipeline.py               ← CONTROL: qué etapas correr y con qué opciones
+├── configuracion.py          ← PARÁMETROS físicos y umbrales (compartidos)
+│
+├── patterns.py               ← generador de franjas binarias desplazadas
+├── secuencia_patrones.py     ← etapa 'patrones': 50 .bmp para el LightCrafter
+├── configurar_lightcrafter.py← etapa 'lightcrafter': USB-HID con el DLPC350
+├── capturar_patrones.py      ← etapa 'captura': cámara FLIR con trigger externo
+├── organizar_capturas.py     ← etapa 'organizar': segmenta y ordena capturas crudas
+├── fase.py                   ← etapas 'fase_relativa' y 'fase_absoluta'
+├── calibracion_estereo.py    ← etapa 'calibracion'
+├── reconstruccion_3d.py      ← etapa 'reconstruccion'
+├── visualizacion.py          ← etapa 'visualizacion'
+│
+├── arduino_pulses/           ← firmware del generador de pulsos
+├── patterns/secuencia_completa_bmp/   f_00.bmp … f_49.bmp
+├── capturas/                 ← CRUDAS: nunca se modifican ni se borran
+│   └── <categoria>/<AAAAMMDD_HHMMSS>/ *_frame_XXX.tiff + captura_50_frames.avi
+├── capturas_ordenadas/       ← DERIVADAS (se pueden borrar y regenerar)
+│   ├── manifiesto.json
+│   └── <categoria>/pose_XX/{H,V}/P18_F00 … P18_F25.tiff
+├── resultados/               ← DERIVADOS
+│   ├── fases/<categoria>/pose_XX_relativa.npz|.png, pose_XX.npz|.png
+│   ├── calibracion/Estereo_TSC_0_2(.npz|_J.npz|.json), patron_PhasesData.npz, diagnóstico
+│   ├── reconstruccion/<categoria>/<cat>_pose_XX.ply|.npz, <cat>_resumen.json, figuras
+│   └── visualizacion/*.png
+└── Matlab_Codes/             ← código original de referencia (no se ejecuta)
+```
+
+**Categorías de captura:**
+
+| Categoría | Qué es | Para qué se usa |
+|---|---|---|
+| `patron` | Tablero con grilla simétrica de **9 × 12 círculos blancos**, 15 mm entre centros | Calibración |
+| `plano` | Superficie plana de referencia | Medir la exactitud (error de planitud) |
+| `objeto` | Lo que se quiere medir | Reconstrucción 3D |
+
+---
+
+## 5. Configuración
+
+### 5.1 `configuracion.py` — parámetros del sistema
+
+| Grupo | Variable | Valor | Significado |
+|---|---|---|---|
+| Directorios | `DIR_PATRONES`, `DIR_CAPTURAS`, `DIR_ORDENADAS`, `DIR_RESULTADOS` | | Rutas, relativas a la raíz del proyecto |
+| Proyector | `PROYECTOR_ANCHO/ALTO` | 912 / 1140 | Resolución nativa del LightCrafter 4500 |
+| | `PERIODO` | 18 | Período de franja en px del proyector |
+| | `N_PASOS` | = `PERIODO` | Corrimientos de 1 px hasta completar el período |
+| | `N_BITS_GRAY` | 6 | 2⁶ · 18 = 1152 ≥ 1140 px |
+| | `ORDEN_BITS_GRAY` | `"auto"` | `"msb"`, `"lsb"` o detección automática |
+| | `LCR_EXPOSICION_US/PERIODO_US` | 49700 / 50000 | Tiempos del patrón |
+| Cámara | `CAM_EXPOSICION_US` | 12000 | Exposición |
+| | `CAM_DEBOUNCE_US` | 500 | Filtro antirrebote de Line0 |
+| | `CICLOS_POR_CAPTURA` | 1 | > 1 captura varios ciclos que se promedian |
+| Fase | `GAMMA_TH` | 0.15 | Modulación mínima γ de las franjas V (fase X) |
+| | `GAMMA_TH_Y` | 0.03 | Modulación mínima γ de las franjas H (fase Y) |
+| | `SUAVIZADO_FASE_PX` | 1.5 | σ del filtro gaussiano sobre S y C |
+| | `UMBRAL_INTENSIDAD` | 25 | Nivel mínimo en la imagen blanca |
+| | `MED_FILT` | 5 | Mediana para corregir errores de orden de franja |
+| | `BORDE_MASCARA` | 15 | Píxeles descartados en el borde de la imagen |
+| Patrón | `PATRON_COLUMNAS/FILAS` | 9 / 12 | Círculos por fila / columna |
+| | `PATRON_DISTANCIA_MM` | 15.0 | Número o par `(dx, dy)` (§12.6) |
+| | `PATRON_TIPO`, `PATRON_COLOR_CIRCULOS` | symmetric / white | |
+| 3D | `FASE_TRIANGULACION` | `"auto"` | §13.3 |
+| | `CALIBRACION` | `"independiente"` | o `"conjunta"` (archivo `_J`) |
+| | `Z_MIN_MM`, `Z_MAX_MM` | 100 / 1500 | Rango físico válido de Z |
+| | `SALTO_MAX_MM` | 5 | Salto local máximo (filtro de atípicos) |
+
+### 5.2 `pipeline.py` — qué correr
+
+- `ETAPAS`: diccionario de etapas en orden fijo. `True` = se ejecuta.
+- `CATEGORIAS`: categorías a procesar en fase y reconstrucción. `patron` se agrega solo si
+  `calibracion` está activa.
+- `CAPTURA_*`: categoría, número de poses, ciclos por pose y si se espera Enter.
+- `ORGANIZAR_*`: carpetas de entrada, categoría forzada y reorganización total.
+- `REHACER`: ignora la caché y recalcula las fases y la reconstrucción de todas las poses.
+- `FASE_TRIANGULACION`, `CALIBRACION_USADA`: sobrescriben los de `configuracion.py`.
+- `VIS_CATEGORIA`, `VIS_POSE` (`"ultima"` o `"pose_XX"`), `VIS_COLOR_3D`.
+
+Funciones del pipeline:
+
+- `main()`: valida `ETAPAS`. Avisa si se captura sin organizar. Si se reconstruye sin
+  calibrar, llama a `_verificar_calibracion_existente()` **antes** de cualquier etapa. Luego
+  ejecuta cada etapa midiendo su tiempo; un error detiene el proceso indicando la etapa.
+- `_categorias_fase()`: categorías para las etapas de fase.
+- `ruta_calibracion()`: `Estereo_TSC_0_2.npz` o `Estereo_TSC_0_2_J.npz`.
+- `etapa_<nombre>()`: un envoltorio por etapa que llama al módulo correspondiente con los
+  parámetros de la configuración.
+
+**Añadir una etapa:** escribe `def etapa_x()`, agrégala a `FUNCIONES` y a `ETAPAS` en la posición
+deseada.
+
+---
+
+## 6. Etapa `patrones`: la secuencia proyectada
+
+`secuencia_patrones.py` genera **50 imágenes de 912 × 1140**:
+
+| Índices | Contenido | Uso |
+|---|---|---|
+| `f_00`–`f_17` | 18 franjas **horizontales** binarias, P = 18 px, desplazadas 1 px | Fase Y |
+| `f_18`–`f_23` | 6 bits de código Gray horizontal | Orden de franja Y |
+| `f_24`–`f_41` | 18 franjas **verticales** binarias desplazadas 1 px | Fase X |
+| `f_42`–`f_47` | 6 bits de código Gray vertical | Orden de franja X |
+| `f_48` | Negro | Detección del inicio de la secuencia |
+| `f_49` | Blanco | Textura, umbral, detección de círculos |
+
+Funciones:
+
+- `patterns.generar_patrones_binarios(width, height, periodo, num_pasos, orientacion)`: onda
+  cuadrada del 50 %: blanco donde `(x + shift) mod P < P/2`, con `shift = i·P/num_pasos`.
+- `crear_patrones_gray(ancho, alto, paso, orientacion, cantidad_bits)`: cada columna (o fila)
+  tiene índice de período `j = x // P` y código Gray `g = j XOR (j >> 1)`. Se genera un plano por
+  bit, del **más significativo al menos significativo** (MSB primero).
+- `crear_patrones_uniformes`: negro y blanco.
+- `crear_secuencia_completa()`: arma la lista en el orden de la tabla.
+- `guardar_secuencia()`: escribe `f_XX.bmp` y `secuencia.json`.
+
+**¿Por qué franjas binarias y N = P?** El DMD es binario: una franja binaria se proyecta con
+precisión y sin necesidad de calibrar la respuesta (gamma) del proyector. Una onda cuadrada tiene
+armónicos impares (3, 5, 7…), pero con N = P = 18 pasos de 1 px, un armónico k solo se confunde
+con la fundamental si k ≡ ±1 (mod 18), es decir a partir de k = 17. Ese armónico tiene amplitud
+1/17 y además el desenfoque lo atenúa casi por completo. Por eso la fase calculada es exacta: al
+decodificar los propios `.bmp`, u_p coincide con la columna real con error **0.000 px**.
+
+> **Orden de los bits Gray.** En los `.bmp` el primer bit es el MSB. Con la secuencia cargada
+> actualmente en el LightCrafter, la cámara los recibe en orden **inverso** (LSB primero). El
+> código lo detecta solo (`ORDEN_BITS_GRAY = "auto"`), así que funciona en ambos casos.
+
+Tras regenerar los patrones hay que cargarlos en el LightCrafter con el software de TI
+(*Pattern Sequence*, trigger externo, un patrón por trigger, en el orden `f_00 … f_49`).
+
+---
+
+## 7. Etapa `lightcrafter`: tiempos del proyector
+
+`configurar_lightcrafter.py` habla con el controlador DLPC350 por **USB-HID** directamente sobre
+`/dev/hidraw*`, sin el software de TI.
+
+- `LightCrafter4500._buscar_hidraw()`: busca en `/sys/class/hidraw` el dispositivo con
+  VID:PID `0451:6401` y elige la interfaz de control.
+- `_enviar_comando(cmd, payload, lectura)`: arma el paquete HID de 64 bytes + Report ID:
+  - byte de banderas (bit 7 = lectura, bit 6 = pedir respuesta);
+  - número de secuencia;
+  - longitud;
+  - comando de 16 bits;
+  - datos.
+
+  Espera la respuesta 2 s y comprueba el bit de error (NACK).
+- `configurar_exposicion_y_periodo(exp, per)`:
+  1. Pasa a *Pattern Display Mode* (`0x1A1B`).
+  2. Detiene la secuencia (`0x1A24 = 0`).
+  3. Escribe exposición y período (`0x1A29`, dos `uint32` en µs).
+  4. Valida (`0x1A1A`) y espera a que termine.
+  5. Si la validación indica que la secuencia no tiene *Insert Black* (bits 0/3), iguala
+     período = exposición y valida de nuevo.
+  6. Interpreta las banderas de error y reinicia la secuencia (`0x1A24 = 2`).
+- `main()`: lee los valores actuales, escribe los nuevos y los vuelve a leer para confirmar.
+
+---
+
+## 8. Etapa `captura`: adquisición con la cámara
+
+`capturar_patrones.py`:
+
+- **`CamaraFLIR`** (se usa con `with`): abre la cámara con PySpin **una sola vez** y la configura:
+  - exposición manual fija;
+  - filtro antirrebote en Line0;
+  - trigger *FrameStart* por flanco de subida en Line0;
+  - retardo de trigger opcional;
+  - `TriggerOverlap = Off`, para que no se encolen disparos espurios;
+  - buffer `OldestFirst`, para recibir los frames en orden.
+
+  Al salir apaga el trigger y libera la cámara aunque haya errores.
+- **`capturar(cantidad)`**: adquiere `cantidad` frames seguidos. Los guarda **en memoria**
+  durante la adquisición; escribir a disco en medio haría perder triggers. Si pasan
+  `CAM_TIMEOUT_MS` sin pulso, da un error que sugiere revisar el Arduino. Al final imprime el
+  Δt entre frames y avisa si hay un salto (pulso perdido).
+- **`guardar_captura(frames, salida, categoria)`**: crea `capturas/<categoria>/<fecha_hora>/`
+  con un `.tiff` por frame y, opcionalmente, un `.avi` FFV1 sin pérdida.
+- **`capturar_poses(categoria, poses, ciclos)`**: pide Enter antes de cada pose (`q` termina) y
+  captura `50 × ciclos` frames.
+
+**Varios ciclos.** Con `CICLOS_POR_CAPTURA = 2` o más, el organizador promedia los ciclos de la
+misma escena. El ruido baja ∝ 1/√ciclos, lo que ayuda sobre todo con las franjas H de bajo
+contraste. Cada ciclo extra son 2.5 s más de captura.
+
+---
+
+## 9. Etapa `organizar`: de capturas crudas a poses
+
+`organizar_capturas.py` convierte capturas **en cualquier forma** en poses ordenadas, sin
+modificar los originales.
+
+**Qué acepta:**
+- Carpetas de imágenes (`.tiff/.tif/.png/.bmp/.jpg/.pgm`, TIFF multipágina) con cualquier nombre.
+  Se ordenan de forma natural: `img_2` antes que `img_10`.
+- Videos (`.avi/.mp4/.mov/.mkv…`). Si un video tiene tantos frames como imágenes hay en su misma
+  carpeta, se considera duplicado y se ignora.
+- Cualquier número de frames: 50 empezando en cualquier patrón, varios ciclos o grabaciones
+  largas con varias poses.
+
+**Algoritmo (`organizar()`):**
+
+1. **`descubrir_fuentes(raices)`**: recorre las carpetas de entrada, excepto las de salida y
+   resultados.
+2. **`cargar_frames(fuente)`**: lee todos los frames en gris conservando la profundidad de bits.
+3. **`segmentar_secuencias(frames, 50)`**:
+   - Calcula la intensidad media de cada frame.
+   - **`detectar_pares_negro_blanco`** busca frames muy brillantes precedidos de uno muy oscuro
+     (umbrales al 20 % del rango). Ese par es `f_48 → f_49`, el final de un ciclo.
+   - Con **exactamente 50 frames**, el ciclo se reordena circularmente (el `circshift` de MATLAB).
+   - Con **más frames**, los blancos deben estar separados por múltiplos de 50. Si no, se perdió
+     o sobró un frame: la grabación se parte en tramos continuos y los ciclos rotos se descartan.
+   - **`_ciclo_estable`** compara la media de los corrimientos H con la de los V. Si su
+     correlación es < 0.97, la escena se movió durante el ciclo y este se descarta.
+   - **`_agrupar_ciclos`** promedia los ciclos consecutivos de la misma escena (correlación de la
+     imagen blanca ≥ 0.98). Si la escena cambió, se crean poses distintas.
+4. **`verificar_secuencia`** calcula, para H y V:
+   - la **pureza**: fracción de la energía temporal (sin DC) en la frecuencia fundamental. Cerca
+     de 1 si la secuencia está bien alineada, < 0.5 si se coló un frame Gray, negro o blanco;
+   - la **modulación** mediana.
+
+   También comprueba que el negro y el blanco sean los frames extremos.
+5. **Categoría**:
+   1. `categoria_por_nombre`: palabras clave en la ruta (`patron/pattern/calib/circle…`,
+      `plano/plane/flat…`, `objeto/object/pieza…`). Basta con guardar en `capturas/patron/` etc.
+   2. Si el nombre no lo indica, `categoria_por_contenido`: si se detecta la grilla de círculos es
+      `patron`; si no, **se pregunta en la terminal** si es plano u objeto.
+   3. `ORGANIZAR_CATEGORIA_FORZADA` asigna una categoría a todo lo nuevo.
+6. **`guardar_pose`** escribe `H/` = `[f_00…f_23, negro, blanco]` y
+   `V/` = `[f_24…f_47, negro, blanco]` como `P18_F00 … P18_F25.tiff`, igual que `savePatterns.m`.
+7. Todo se registra en **`capturas_ordenadas/manifiesto.json`**:
+   - fuente y su firma (nombres, tamaños y fechas de los archivos);
+   - frames usados y ciclos promediados;
+   - cómo se decidió la categoría;
+   - métricas de calidad.
+
+**Incremental:** las fuentes ya registradas se omiten y las nuevas reciben el siguiente número de
+pose. `ORGANIZAR_REHACER = True` rehace todo. Para **excluir** una pose mala: saca su captura
+cruda de `capturas/`, borra `capturas_ordenadas/` y vuelve a organizar.
+
+---
+
+## 10. Etapa `fase_relativa`: phase shifting
+
+### 10.1 Teoría
+
+En cada píxel, la intensidad del paso n (n = 0…N−1) es aproximadamente
+
+```
+I_n = A + B·cos(φ + 2πn/N)
+```
+
+donde A es el fondo, B la amplitud de las franjas y φ la fase buscada. Proyectando sobre la
+frecuencia fundamental:
+
+```
+S = Σ I_n · sin(2πn/N)        C = Σ I_n · cos(2πn/N)
+
+φ = −atan2(S, C)               ∈ [−π, π]   (fase envuelta)
+B = 2·√(S² + C²) / N
+A = media(I_n)
+γ = B / A                      (modulación o contraste, entre 0 y 1)
+```
+
+γ mide la calidad de cada píxel: cerca de 0 no hay franjas (sombra, fondo, desenfoque fuerte);
+en estas capturas vale ≈ 0.55 en las franjas V y solo 0.08–0.25 en las H (§16).
+
+### 10.2 Implementación: `fase.fase_relativa(imagenes, gamma_th, suavizado)`
+
+1. Convierte la pila a `float32`. Las capturas son de 8 bits, así que no se pierde nada y se usa
+   la mitad de memoria.
+2. Calcula S y C como **un producto matriz-vector** (BLAS) del vector de senos/cosenos por la
+   pila aplanada (N × píxeles). Es mucho más rápido que multiplicar y sumar imagen por imagen.
+3. Calcula B **sin suavizar**, para que el umbral γ signifique siempre lo mismo.
+4. Si `suavizado > 0` (por defecto 1.5 px), aplica un **filtro gaussiano a S y a C**. Promediar el
+   numerador complejo, en lugar de la fase, no sesga la fase en superficies suaves. A cambio:
+   - elimina el **moteado de la rejilla del DMD**, visible como una trama fina en los mapas;
+   - reduce el ruido;
+   - suaviza ~2 px los bordes de discontinuidades de profundidad.
+
+   Con las capturas actuales baja el error de planitud de ~0.71 a ~0.39 mm.
+5. Calcula `φ = −atan2(S, C)` y `γ = B / A`.
+
+### 10.3 Sobre el filtro de `ComputeNStepPhase.m`
+
+El MATLAB convoluciona la pila, en el eje temporal, con un coseno ventaneado (Hanning) antes de
+calcular S y C. Pero S y C **solo miran la frecuencia fundamental**, y una convolución circular se
+convierte en un producto en frecuencia. Por eso ese filtro equivale **exactamente** a multiplicar
+el coeficiente de la fundamental por una constante H[1]. Se verificó numéricamente:
+
+- la fase sale rotada −0.0052 rad (= −0.015 px);
+- B queda multiplicado por una ganancia constante (el código Python anterior la compensaba).
+
+El filtro no quitaba ningún armónico que importara, porque ya los rechaza N = P (§6). Costaba
+3 FFT sobre toda la pila. En Python se eliminó: el resultado es el mismo sin el sesgo de 0.015 px
+y la etapa es ~6 veces más rápida.
+
+### 10.4 Etapa: `fase.etapa_fase_relativa(...)`
+
+- Para cada categoría y pose calcula la fase de `V/` (X) y de `H/` (Y).
+- **Caché:** si `pose_XX_relativa.npz` es más reciente que todas las imágenes de la pose, se
+  reutiliza (`_actualizado`).
+- **Paralelismo:** las poses pendientes se procesan en hasta 4 hilos (`_en_paralelo`). NumPy y
+  OpenCV liberan el GIL en las operaciones pesadas, así que varios hilos trabajan de verdad en
+  paralelo sin copiar datos entre procesos.
+- **Salida:** `resultados/fases/<cat>/pose_XX_relativa.npz` con `phiX, phiY, AX, AY, BX, BY,
+  qX, qY` (q = γ), más un `.png` con las fases envueltas y los mapas de modulación.
+
+---
+
+## 11. Etapa `fase_absoluta`: código Gray y coordenadas del proyector
+
+La fase relativa se repite cada período (18 px del proyector). El **código Gray** dice en qué
+período está cada píxel (el *orden de franja* k = 0…63).
+
+### 11.1 Binarización — `bits_gray(imagenes_gray, umbral, med_filt_size)`
+
+- `bit = I_gray > A`: el umbral es el fondo A de las franjas de la misma orientación, que está
+  justo a mitad de camino entre blanco y negro en cada píxel. Se adapta solo a la reflectividad
+  del objeto.
+- Filtro de **mediana 5×5** en cada plano binario: elimina el moteado del DMD sin desplazar los
+  bordes rectos del código.
+
+### 11.2 Decodificación — `decodificar_gray(bits, orden_bits)`
+
+Gray → binario por XOR acumulado desde el bit más significativo:
+`b₀ = g₀`, `bᵢ = bᵢ₋₁ XOR gᵢ`, y `k = Σ bᵢ·2^(B−1−i)`.
+
+`orden_bits = "msb"` usa el primer plano capturado como MSB; `"lsb"` invierte el orden.
+
+### 11.3 Detección del orden — `detectar_orden_bits(...)`
+
+Decodifica con los dos órdenes y se queda con el que da una fase absoluta **más continua**: la
+menor fracción de vecinos con saltos > π (`_saltos_fase`). Con el orden equivocado, k salta
+caóticamente, así que la diferencia es enorme. Por eso se evalúa sobre la imagen submuestreada a
+la mitad en cada eje, lo que la hace 4 veces más barata.
+
+### 11.4 Desenvolvimiento — `fase_absoluta(phi, k, P, med_filt_size)`
+
+1. **Alinear el corte.** La fase envuelta salta de π a −π en un lugar que no coincide con los
+   bordes del código Gray. Con la onda cuadrada de `patterns.py`, la franja blanca está centrada
+   en c = (⌈P/2⌉ − 1)/2 = 4 px, y los bordes Gray caen en φ = −2π(c + 0.5)/P = −π/2
+   (`desfase_corte`). Se rota la fase para que su corte coincida con esos bordes.
+2. `Φ = φ_rotada + 2πk − rotación`.
+3. **Corrección de errores de ±1 orden.** En los bordes de cada período, el bit Gray puede leerse
+   del lado equivocado. Se compara Φ con su mediana local y se corrige el número entero de
+   períodos de diferencia:
+
+   ```
+   Φ ← Φ − 2π·round((Φ − mediana(Φ)) / 2π)
+   ```
+
+   Es igual que `UnwrapPhaseGrayCode.m`.
+
+### 11.5 Coordenada del proyector — `coordenada_proyector(Φ, P)`
+
+```
+u_p = Φx · P / (2π) + c        v_p = Φy · P / (2π) + c        (c = 4 px para P = 18)
+```
+
+u_p es la **columna** del proyector que ilumina el píxel y v_p la **fila**. Verificado con los
+`.bmp`: error 0.000 px.
+
+> En este montaje la cámara ve el proyector girado 180°: u_p y v_p **decrecen** al avanzar en la
+> imagen. Es válido para el modelo pinhole y no requiere ningún cambio.
+
+### 11.6 Máscaras — `mascara_valida(...)`
+
+- `MaskX = (γx ≥ GAMMA_TH) & (blanco > UMBRAL_INTENSIDAD) & fuera del borde`.
+- `MaskY` = lo mismo con `γy ≥ GAMMA_TH_Y`. El umbral es menor porque las franjas H tienen poco
+  contraste en este proyector (§16) y aun así Fy es la fase más útil (§13.3).
+- `MaskC = MaskX & MaskY`.
+
+### 11.7 Etapa: `fase.etapa_fase_absoluta(...)` / `_fase_absoluta_pose(...)`
+
+- Lee **solo las 8 imágenes que necesita**: los 6 bits Gray de cada orientación y la imagen
+  blanca. La fase relativa ya está en el `.npz` anterior.
+- Usa la misma caché y el mismo paralelismo que la fase relativa.
+- **Salida:** `resultados/fases/<cat>/pose_XX.npz` con:
+  - `Fx, Fy`: fase absoluta;
+  - `up, vp`: coordenadas del proyector;
+  - `kX, kY`: orden de franja;
+  - `qFx, qFy`: modulación;
+  - `BX, BY`: amplitud;
+  - `Itex`: textura, la imagen blanca;
+  - `MaskX, MaskY, MaskC`;
+  - `orden_bits_V/H`.
+
+  Más un `.png` con la textura, u_p y v_p.
+
+---
+
+## 12. Etapa `calibracion` (opcional): calibración estéreo
+
+El proyector se modela como una **cámara inversa**: tiene intrínsecos, distorsión y una pose
+respecto a la cámara. Para calibrarlo hacen falta, en varias poses de un tablero plano,
+correspondencias entre:
+
+- la posición conocida de cada círculo en el tablero (mm);
+- su posición en la cámara (u_c, v_c), detectada en la imagen blanca;
+- su posición en el proyector (u_p, v_p), leída de la fase.
+
+**Cuándo recalibrar:** si se movió o se reenfocó la cámara o el proyector, o si cambió el zoom.
+Si el montaje no cambió, no hace falta: la etapa queda desactivada y la reconstrucción usa la
+calibración guardada.
+
+### 12.1 Detección del tablero — `detectar_puntos_tablero(...)`
+
+- Suaviza la imagen blanca (gaussiana 5×5) y la **invierte**: `findCirclesGrid` busca blobs
+  oscuros y los círculos son blancos.
+- `crear_detector_circulos()` configura un `SimpleBlobDetector` tolerante al moteado del DMD:
+  - área entre 80 y 15000 px;
+  - circularidad ≥ 0.55;
+  - convexidad ≥ 0.65;
+  - inercia ≥ 0.45.
+- Prueba primero la búsqueda normal y, si falla, con `CALIB_CB_CLUSTERING`.
+- Si no encuentra los 9 × 12 círculos, la pose se descarta con un aviso.
+
+### 12.2 Máscara del tablero — `create_mask_cb(...)`
+
+Envolvente convexa de los círculos, expandida `offset` px (10) hacia afuera, como
+`createMaskCB.m`. Se quitan los bordes de la imagen.
+
+### 12.3 Limpieza de fase — `ajustar_polinomio_2d(...)` (CleanPhase)
+
+Sobre un plano, u_p(u_c, v_c) y v_p(u_c, v_c) son funciones suaves. En lugar de leer la fase
+ruidosa directamente en el centro de cada círculo, se ajusta un **polinomio 2D de grado 5**
+(21 términos) sobre todo el tablero y se evalúa en los centros:
+
+- Coordenadas normalizadas (media 0, desviación 1) para que el sistema esté bien condicionado.
+- Submuestreo 2×2, que da suficientes puntos y es 4 veces más rápido.
+- **Rechazo iterativo de atípicos:** hasta 3 iteraciones descartando residuos > 3σ, con σ robusta
+  calculada por MAD.
+- `_mascara_ajuste`: si la modulación H es tan baja que quedaría < 30 % del tablero, baja el
+  umbral (×0.7 cada vez) hasta conservarlo. El ajuste con rechazo compensa el ruido extra.
+
+El residuo del ajuste se reporta por pose (`residuo ajuste u=… v=… px`): con el suavizado de
+fase es ~0.05 px en u y ~0.1–0.3 px en v.
+
+### 12.4 Calibración con OpenCV — `ejecutar_calibracion_estereo(...)`
+
+Igual que `Traditional_StereoCalib.m` (2 coeficientes radiales y tangencial, sin skew):
+
+1. `calibrateCamera` de la cámara y del proyector **por separado** (`CALIB_FIX_K3` → k1, k2, p1,
+   p2).
+2. `stereoCalibrate` con los intrínsecos fijos → **`Estereo_TSC_0_2.npz`** (equivale a
+   `estimateStereoBaseline`).
+3. `stereoCalibrate` refinando todo junto → **`Estereo_TSC_0_2_J.npz`**.
+4. Error RMS **por pose** (`_errores_por_pose`), marcando las que superan 2× la mediana.
+5. **Cobertura del proyector:** el rango de u_p y v_p que cubren los círculos de todas las poses.
+   Fuera de ese rango el modelo, sobre todo la distorsión, **se extrapola**. Si cubre menos del
+   70 % en algún eje, se avisa. El rango se guarda en el `.npz` y la reconstrucción avisa cuando
+   usa puntos fuera de él.
+
+### 12.5 Salidas
+
+- `Estereo_TSC_0_2.npz` y `Estereo_TSC_0_2_J.npz`:
+  - `Ac, Ap`: matrices intrínsecas de cámara y proyector;
+  - `dist_cam, dist_proj`: `[k1, k2, p1, p2, k3]`;
+  - `Kr1, Kt1, Kr2, Kt2`: los mismos coeficientes en el formato del MATLAB;
+  - `R, T`: pose del proyector respecto a la cámara, `X_p = R·X_c + T`, en mm;
+  - `E, F`;
+  - errores RMS, `cobertura_up`, `cobertura_vp`.
+- `Estereo_TSC_0_2.json`: resumen legible con fecha, poses, errores por pose, parámetros y
+  cobertura.
+- `patron_PhasesData.npz`: correspondencias `M` (ajustadas) y `M_raw` (sin ajustar), puntos del
+  mundo e imágenes; equivale a `Estereo_PhasesData.mat`. Los mapas de `RegWcordtoImage.m`
+  (`Maps`) solo se guardan con `--mapas`, porque solo los usan las calibraciones híbridas de
+  MATLAB y ocupan ~10 MB por pose.
+- `diagnostico_calibracion_pose_00.png`: círculos detectados y residuos del ajuste polinomial.
+
+### 12.6 Sobre el tamaño real del tablero
+
+La cámara calibrada sale con fx/fy = 1.0098, algo raro en un sensor de píxeles cuadrados. Los
+scripts de MATLAB tienen comentada la corrección `worldPoints = (worldPoints/15).*[15.0588
+14.9090]`, cuyo cociente es 1.0100. Al calibrar con esa escala, la cámara queda con fx ≈ fy y
+el mismo error RMS. Esto indica que **el tablero impreso no mide exactamente 15 × 15 mm**.
+
+- **Mídelo con un calibrador** (por ejemplo, la distancia entre el primer y el último círculo de
+  una fila y de una columna) y pon el resultado en `PATRON_DISTANCIA_MM = (dx, dy)`.
+- Un error de escala del tablero se traslada directamente a la escala de toda la reconstrucción.
+
+---
+
+## 13. Etapa `reconstruccion`: triangulación 3D
+
+### 13.1 Rayo de la cámara
+
+Para el píxel (u_c, v_c): `r = Ac⁻¹·[u_c, v_c, 1]ᵀ`. Se le quita la distorsión con
+**`comp_distortion_oulu`**, que invierte iterativamente (20 iteraciones) el modelo radial +
+tangencial, como `comp_distortion_oulu.m`. El punto 3D está en `X = Z·r̃`, con `r̃ = (x, y, 1)`.
+
+### 13.2 Ecuaciones en Z
+
+Las coordenadas del proyector se normalizan con `Ap⁻¹` y se les quita la distorsión, dando
+(x_p, y_p). Como el punto en el sistema del proyector es `R·X + T`, su proyección cumple
+`x_p = (R₁·X + T₁)/(R₃·X + T₃)`. Sustituyendo `X = Z·r̃` queda **una ecuación lineal en Z** por
+cada coordenada (Rᵢ = fila i de R):
+
+```
+con u_p:  (R₁·r̃ − x_p·R₃·r̃)·Z = x_p·T₃ − T₁
+con v_p:  (R₂·r̃ − y_p·R₃·r̃)·Z = y_p·T₃ − T₂
+```
+
+Esto es lo que hace `StereoReconstruction.m`. Luego `X = Z·x`, `Y = Z·y`, en el sistema de la
+cámara y en mm.
+
+### 13.3 Qué fase usar — `elegir_fase(fd, stereo_params)`
+
+| `FASE_TRIANGULACION` | Qué hace |
+|---|---|
+| `"auto"` (por defecto) | Usa la coordenada alineada con la **línea base**: Fx si \|T_x\| > \|T_y\|, Fy si no |
+| `"Fx"` | Solo u_p (franjas verticales) |
+| `"Fy"` | Solo v_p (franjas horizontales) — lo que usaba `R3D_ComplexShape.m` |
+| `"ambas"` | Mínimos cuadrados con las dos ecuaciones, pesos (f_p·B)² |
+
+**¿Por qué no "ambas"?** Un error de δ px en la coordenada del proyector produce un error en Z
+inversamente proporcional a la componente de la línea base en esa dirección. Aquí
+T ≈ (25, −88, −6) mm: **v_p es ~3.5 veces más sensible a la profundidad que u_p**.
+
+Además, con la calibración actual u_p tiene un **sesgo sistemático**. Al comparar Z obtenida con
+Fx y con Fy sobre los planos de referencia, difieren entre −10 y −20 mm en el borde izquierdo de
+la imagen. Esa zona corresponde a u_p > 750, que ninguna pose del tablero cubrió: allí el modelo
+del proyector se extrapola.
+
+Mezclar ambas fases arrastraba ese sesgo. Resultados en los 8 planos de referencia:
+
+| Modo | Error de planitud (RMS) |
+|---|---|
+| `"ambas"`, código anterior | 1.27 mm |
+| `"Fy"` sin suavizado de fase | 0.76 mm |
+| `"Fy"` con suavizado σ = 1.5 (actual) | **0.50 mm** |
+
+Si en el futuro se calibra con poses que cubran todo el ancho del proyector, vale la pena
+volver a comparar `"ambas"` con `"Fy"`.
+
+### 13.4 `triangular(up, vp, mascara_x, mascara_y, stereo_params, fd, peso_x, peso_y)`
+
+1. Resuelve `fd` con `elegir_fase`.
+2. Arma la máscara de píxeles a usar según la fase.
+3. Calcula los rayos y les quita la distorsión.
+4. Normaliza u_p y v_p y les quita la distorsión del proyector. Esa corrección necesita las dos
+   coordenadas a la vez.
+5. Acumula `num = Σ w·a·b` y `den = Σ w·a²` con las ecuaciones activas y resuelve `Z = num/den`.
+
+Devuelve X, Y, Z (NaN fuera de la máscara) y la máscara final. Todo está vectorizado: ~1.5 s por
+pose de 1.3 Mpx.
+
+### 13.5 Filtrado — `filtrar_outliers_3d(z, mask, salto_max, z_min, z_max)`
+
+Descarta los puntos que se alejan más de `SALTO_MAX_MM` de la mediana local 5×5 y los que están
+fuera de `[Z_MIN_MM, Z_MAX_MM]`. Equivale al `pcdenoise` de MATLAB.
+
+### 13.6 Ajuste de plano — `plane_fitting(x, y, z, mask)` (solo categoría `plano`)
+
+1. **RANSAC**: 300 iteraciones sobre 20 000 puntos al azar. Elige el plano con más puntos a menos
+   de 3 mm, para que la placa de soporte u otras superficies no sesguen el ajuste.
+2. **Mínimos cuadrados** `Z = A·X + B·Y + C` sobre los inliers, como `Plane_fitting.m`.
+3. Distancia perpendicular de cada punto al plano y **error RMS** respecto a su media.
+
+Devuelve el mapa de error, el RMS y los coeficientes. Es la métrica de exactitud del sistema.
+
+### 13.7 Cobertura — `fuera_de_cobertura(...)`
+
+Fracción de puntos cuya coordenada del proyector cae fuera del rango calibrado. Si supera el 5 %,
+la etapa lo avisa.
+
+### 13.8 Salidas y caché — `procesar_reconstruccion(...)`
+
+Por cada pose:
+
+- `<cat>_pose_XX.ply`: nube **binaria** con textura en gris (`escribir_ply_binario`). Se abre en
+  MeshLab o CloudCompare.
+- `<cat>_pose_XX.npz`:
+  - `X, Y, Z` en mm (float32, NaN fuera de la máscara);
+  - `Mask`;
+  - `fase` usada;
+  - en los planos, `E`: el mapa de error al plano.
+
+  Se lee con `cargar_reconstruccion_pose(ruta)`.
+- `reconstruccion_<cat>_pose_XX.png`: textura | Z | error del plano (solo `plano`).
+
+Por categoría, `<cat>_resumen.json` guarda por pose:
+
+- número de puntos y rango de Z;
+- fracción fuera de cobertura;
+- en los planos, `erms_mm` y los coeficientes del plano;
+- el identificador de caché.
+
+**Caché.** Una pose no se vuelve a triangular si su `.npz` es más reciente que su fase absoluta y
+se calculó con la misma calibración (ruta y fecha de modificación), el mismo modo de
+triangulación y los mismos filtros (`_id_reconstruccion`). Recalibrar o cambiar
+`FASE_TRIANGULACION` invalida la caché automáticamente; `REHACER = True` la ignora.
+
+> Antes se guardaba un único `<cat>_R3D.npz` con todas las poses apiladas, como los `.mat` de
+> MATLAB. Se reemplazó por un archivo por pose: con decenas de objetos, el apilado pesaba cientos
+> de MB y había que reescribirlo entero cada vez.
+
+---
+
+## 14. Etapa `visualizacion`
+
+`visualizacion.visualizar_pose(categoria, pose, …)`. Con `pose = "ultima"` toma la pose más
+reciente. Abre dos ventanas:
+
+1. **Cuadrícula 3×4 del proceso:**
+   - franjas V y H del paso 0;
+   - primer bit Gray;
+   - textura;
+   - fases relativas X e Y;
+   - orden de franja k;
+   - modulación γ;
+   - fases absolutas Fx y Fy;
+   - máscara (0 = ninguna fase, 1 = una, 3 = ambas);
+   - profundidad Z.
+2. **Nube 3D interactiva** (gira con el ratón):
+   - hasta 80 000 puntos a escala real;
+   - coloreada por profundidad o por textura;
+   - vista desde la cámara.
+
+Las figuras también se guardan en `resultados/visualizacion/`.
+
+---
+
+## 15. Resultados de referencia y precisión
+
+Prueba completa con las capturas del 2026-10-30: 8 poses de patrón, 8 de plano y 1 objeto.
+
+| Etapa | Antes | Ahora |
+|---|---|---|
+| fase relativa (17 poses) | 79 s | 13.5 s |
+| fase absoluta (17 poses) | 88 s | 17 s |
+| calibración (8 poses) | 56 s | 13 s |
+| reconstrucción (9 poses) | 25 s | 21 s |
+| **Total, recalculando todo** | **249 s** | **≈ 69 s** |
+| Medir 1 objeto nuevo (sin calibrar) | ≈ 115 s (rehacía todo) | **≈ 5 s** (+ 4 s de visualización) |
+| Error de planitud medio (8 planos) | 1.27 mm | **0.50 mm** |
+| Puntos del objeto | 773k | 738k |
+
+**Calibración actual:**
+
+- RMS cámara 0.54 px, proyector 0.43 px, estéreo 0.51 px.
+- Línea base de 91.6 mm, casi vertical.
+- Cobertura del proyector: u_p 364–753 (**43 % del ancho**) y v_p 160–1107 (83 % del alto).
+
+Los tiempos de proceso no incluyen la captura (2.5 s por ciclo de 50 patrones).
+
+---
+
+## 16. Diagnóstico de problemas
+
+- **Las franjas horizontales (H) tienen muy poco contraste** (γ ≈ 0.08–0.25 frente a ≈ 0.55 en
+  las V).
+  - *Causa:* la matriz de micro-espejos del LightCrafter 4500 está en **diamante**: las filas
+    están intercaladas y 18 filas equivalen a ~9 px físicos. Por eso fy del proyector es ≈ 2·fx.
+    El desenfoque borra casi por completo esas franjas finas.
+  - *Mitigación en el código:* `GAMMA_TH_Y` bajo y suavizado de fase.
+  - *Mitigación física:* capturar con `CICLOS_POR_CAPTURA = 2–4`, o usar un período mayor solo
+    para las franjas H. Esto último requiere cambiar `secuencia_patrones.py`, recargar el
+    proyector y recalibrar.
+  - *Síntoma:* en superficies oscuras o poco iluminadas aparecen huecos y estrías horizontales en
+    la reconstrucción (por ejemplo, la zona izquierda de la madera en el objeto de prueba).
+- **Error sistemático cerca del borde izquierdo de la imagen** (u_p alto). La calibración no
+  cubrió esa zona del proyector. Recaptura el tablero con poses que la cubran (tablero desplazado
+  a la izquierda de la imagen y en las esquinas) y con más inclinación. La calibración lo avisa
+  con `Cobertura del proyector … [AVISO]`.
+- **Error de planitud en forma de cuenco** (±1–2 mm en las esquinas). Viene de la calibración:
+  pocas poses, poca inclinación o poca cobertura. Se recomiendan 10–15 poses con ±20–30°.
+  Confirma también que la superficie "plana" lo sea de verdad.
+- **Escala global incorrecta.** Revisa el tamaño real del tablero (§12.6).
+- **"no se encontró el par negro → blanco".** La captura no tiene un ciclo completo o la
+  exposición satura y el blanco no se distingue. Revisa la exposición de la cámara.
+- **"pureza baja".** Se perdió un frame o la secuencia del LightCrafter no coincide con
+  `f_00…f_49`.
+- **La calibración descarta una pose.** No se detectaron los 9 × 12 círculos: tablero cortado,
+  reflejos o poca luz. Mira la imagen blanca de esa pose.
+- **"Sin trigger tras … ms".** El Arduino está apagado, Line0 desconectado o el LightCrafter no
+  está en modo de trigger externo.
+- **Los resultados no cambian tras modificar un umbral.** Las fases y la reconstrucción se
+  reutilizan desde la caché: pon `REHACER = True`.
+- **La reconstrucción avisa "% de los puntos fuera del rango calibrado".** Ver el segundo punto.
+
+---
+
+## 17. Correspondencia con el código MATLAB y diferencias
+
+| MATLAB (`Matlab_Codes/Codes/`) | Python |
+|---|---|
+| `AcquisitionCodes/SaveImagesFromVidAvi.m`, `savePatterns.m` | `organizar_capturas.segmentar_secuencias`, `guardar_pose` |
+| `AcquisitionCodes/ConfAndCapture_FLIRcam_*.m` | `capturar_patrones.CamaraFLIR` |
+| `PhaseRecoveryCodes/ComputeNStepPhase.m` | `fase.fase_relativa` |
+| `PhaseRecoveryCodes/UnwrapPhaseGrayCode.m`, `GenGrayCode.m`, `GenInverseGrayCodeLUT.m` | `fase.bits_gray`, `decodificar_gray`, `fase_absoluta` |
+| `PhaseRecoveryCodes/RecoveryPhases_objects.m` | `fase.etapa_fase_relativa` + `etapa_fase_absoluta` |
+| `PhaseRecoveryCodes/CleanPhase.m`, `Adj2D_5thPol.m`, `HybridCalibCodes/PhaseAdj5.m` | `calibracion_estereo.ajustar_polinomio_2d` |
+| `StereoCalibCodes/createMaskCB.m`, `RegWcordtoImage.m` | `calibracion_estereo.create_mask_cb`, `reg_wcord_to_image` |
+| `StereoCalibCodes/Traditional_StereoCalib.m` | `calibracion_estereo.ejecutar_calibracion_estereo` |
+| `StereoCalibCodes/StereoReconstruction.m`, `comp_distortion_oulu.m` | `reconstruccion_3d.triangular`, `comp_distortion_oulu` |
+| `3DReconstructionCodes/Plane_fitting.m`, `XYZtoPC.m`, `pcwrite` | `reconstruccion_3d.plane_fitting`, `escribir_ply_binario` |
+
+**Diferencias deliberadas:**
+
+1. **Bits Gray:** se decodifican los 6 bits reales. El MATLAB leía 7, y el 7.º era la imagen
+   negra.
+2. **Orden de bits:** se detecta automáticamente.
+3. **Desfase de la onda cuadrada:** u_p se corrige +c = 4 px para que coincida con la columna
+   real del proyector.
+4. **Filtro temporal Hanning eliminado:** era una rotación de fase constante (§10.3).
+5. **Suavizado espacial de S y C** (opcional, nuevo; §10.2).
+6. **Umbral γ separado para las franjas H** (`GAMMA_TH_Y`).
+7. **Selección automática de la fase de triangulación** por la línea base. Coincide con
+   `Fd = 'Fy'` del MATLAB en este montaje.
+8. **Ajuste polinomial con rechazo robusto de atípicos** y máscara de tablero automática. El
+   MATLAB pedía dibujar el polígono a mano.
+9. **Ajuste de plano con RANSAC.**
+10. **Cobertura del proyector** registrada y verificada.
+11. **Tablero con distancia por eje** opcional (la corrección comentada en el MATLAB).
+
+No se portaron las calibraciones híbridas ni la recalibración (`HybridCalibCodes/`,
+`Recalibracion/`), ni el registro SIFT de varias vistas (`Sift3DRegister.m`).
+
+---
+
+## 18. Referencia de archivos de salida
+
+| Archivo | Contenido | Lo genera |
+|---|---|---|
+| `capturas/<cat>/<fecha>/*.tiff, *.avi` | Frames crudos | `captura` |
+| `capturas_ordenadas/manifiesto.json` | Origen y calidad de cada pose | `organizar` |
+| `capturas_ordenadas/<cat>/pose_XX/{H,V}/P18_FYY.tiff` | 26 imágenes por orientación | `organizar` |
+| `resultados/fases/<cat>/pose_XX_relativa.npz` | `phiX/Y, AX/Y, BX/Y, qX/Y` | `fase_relativa` |
+| `resultados/fases/<cat>/pose_XX.npz` | `Fx, Fy, up, vp, kX, kY, qFx, qFy, BX, BY, Itex, MaskX/Y/C` | `fase_absoluta` |
+| `resultados/calibracion/Estereo_TSC_0_2.npz` | Calibración (intrínsecos fijos) | `calibracion` |
+| `resultados/calibracion/Estereo_TSC_0_2_J.npz` | Calibración conjunta | `calibracion` |
+| `resultados/calibracion/Estereo_TSC_0_2.json` | Resumen legible | `calibracion` |
+| `resultados/calibracion/patron_PhasesData.npz` | Correspondencias del tablero | `calibracion` |
+| `resultados/reconstruccion/<cat>/<cat>_pose_XX.ply` | Nube de puntos | `reconstruccion` |
+| `resultados/reconstruccion/<cat>/<cat>_pose_XX.npz` | `X, Y, Z, Mask` (y `E` en planos) | `reconstruccion` |
+| `resultados/reconstruccion/<cat>/<cat>_resumen.json` | Estadísticas por pose, `erms_mm` | `reconstruccion` |
+| `resultados/visualizacion/*.png` | Figuras del proceso y 3D | `visualizacion` |
+
+Para leer un `.npz` en Python:
+
+```python
+import numpy as np
+d = np.load("resultados/reconstruccion/objeto/objeto_pose_00.npz")
+Z = d["Z"]                   # mapa de profundidad (mm), NaN donde no hay medida
+```
+
+En MATLAB, los `.ply` se leen con `pcread`.

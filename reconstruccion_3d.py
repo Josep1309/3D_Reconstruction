@@ -1,7 +1,6 @@
-"""Extracción de fase de objetos/planos y Reconstrucción 3D Estéreo en Python.
+"""Reconstrucción 3D estéreo cámara-proyector a partir de la fase absoluta.
 
 Adapta los códigos de MATLAB:
-- `PhaseRecoveryCodes/RecoveryPhases_objects.m`
 - `StereoCalibCodes/StereoReconstruction.m`
 - `StereoCalibCodes/comp_distortion_oulu.m`
 - `3DReconstructionCodes/Plane_fitting.m`
@@ -10,25 +9,23 @@ Adapta los códigos de MATLAB:
 - `3DReconstructionCodes/R3D_mirrorPositions.m`
 
 Flujo:
-1. Lee las secuencias organizadas en `capturas_ordenadas/objeto` y/o `capturas_ordenadas/plano`.
-2. Recupera las fases desenvueltas `Fx` (de `V/`) y `Fy` (de `H/`), mapas de calidad
-   `qFx`, `qFy`, imagen de textura `Itex` y máscara válida `MaskC`, guardándolos en
-   `<categoria>_PhasesData.npz` (`RecoveryPhases_objects.m`).
-3. Carga los parámetros estéreo (`Estereo_TSC_0_2.npz`) y ejecuta la triangulación
-   estéreo compensando distorsiones radiales y tangenciales con el modelo iterativo
-   de Oulu (`comp_distortion_oulu.m` + `StereoReconstruction.m`).
-4. Si se procesa `plano`, ajusta un plano por mínimos cuadrados a cada pose
-   (`Plane_fitting.m`) y reporta el error RMS de planicidad en milímetros.
-5. Exporta las nubes de puntos 3D con textura a archivos `.ply` binarios (`XYZtoPC.m`
-   + `pcwrite`) y genera figuras de visualización 3D y mapas de profundidad/error.
+1. Carga las fases absolutas (`resultados/fases/<categoria>/pose_XX.npz`) y la calibración estéreo.
+2. Triangula cada píxel válido intersecando su rayo de cámara con el plano del proyector definido
+   por u_p (fase `Fx`), por v_p (fase `Fy`), o con ambos por mínimos cuadrados ponderados por la
+   modulación de cada fase (`ambas`). `auto` elige la fase alineada con la línea base.
+   Las distorsiones se compensan con el modelo de Oulu.
+3. Para `plano` ajusta un plano a cada pose (`Plane_fitting.m`) y reporta el error RMS de planitud.
+4. Exporta por pose la nube `.ply` con textura, los mapas X, Y, Z (`<categoria>_pose_XX.npz`) y una
+   figura, más `<categoria>_resumen.json`. Las poses sin cambios se reutilizan (caché).
 
 Ejemplo de uso:
-    python reconstruccion_3d.py --calibracion capturas_ordenadas/patron/Estereo_TSC_0_2.npz
+    python reconstruccion_3d.py --categorias objeto plano --fase auto
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import time
 from pathlib import Path
 from typing import Sequence
@@ -36,11 +33,9 @@ from typing import Sequence
 import cv2
 import numpy as np
 
-from calibracion_estereo import (
-    _normalizar_mapa_color,
-    buscar_imagen_patron,
-    unwrap_phase_gray_code,
-)
+import configuracion as cfg
+import fase
+from calibracion_estereo import normalizar_mapa_color
 
 
 # ==============================================================================
@@ -48,677 +43,393 @@ from calibracion_estereo import (
 # ==============================================================================
 
 
-def comp_distortion_oulu(xd: np.ndarray, k: np.ndarray) -> np.ndarray:
-    """Compensa la distorsión radial y tangencial iterativamente (`comp_distortion_oulu.m`).
+def comp_distortion_oulu(xd: np.ndarray, k: np.ndarray, iteraciones: int = 20) -> np.ndarray:
+    """Compensa iterativamente la distorsión radial y tangencial (`comp_distortion_oulu.m`).
 
-    Parámetros:
-    - xd: Coordenadas normalizadas distorsionadas de dimensión (2, N).
-    - k: Vector de 5 coeficientes de distorsión `[k1, k2, p1, p2, k3]`.
-
-    Retorna:
-    - x: Coordenadas normalizadas corregidas de dimensión (2, N).
+    - xd: coordenadas normalizadas distorsionadas (2, N).
+    - k: coeficientes `[k1, k2, p1, p2, k3]` (formato OpenCV).
     """
-    k_flat = np.asarray(k, dtype=np.float64).ravel()
-    if k_flat.size < 5:
-        k_pad = np.zeros(5, dtype=np.float64)
-        k_pad[: k_flat.size] = k_flat
-        k_flat = k_pad
-
+    k_flat = np.zeros(5, dtype=np.float64)
+    k_in = np.asarray(k, dtype=np.float64).ravel()[:5]
+    k_flat[: k_in.size] = k_in
     if np.allclose(k_flat, 0.0):
         return xd.copy()
 
-    k1, k2, p1, p2, k3 = k_flat[0], k_flat[1], k_flat[2], k_flat[3], k_flat[4]
+    k1, k2, p1, p2, k3 = k_flat
     x = xd.copy()
-
-    for _ in range(18):
+    for _ in range(iteraciones):
         r_2 = np.sum(x * x, axis=0)
-        k_radial = 1.0 + k1 * r_2 + k2 * (r_2**2) + k3 * (r_2**3)
+        k_radial = 1.0 + k1 * r_2 + k2 * r_2**2 + k3 * r_2**3
         delta_x = np.vstack(
             [
-                2.0 * p1 * x[0, :] * x[1, :] + p2 * (r_2 + 2.0 * (x[0, :] ** 2)),
-                p1 * (r_2 + 2.0 * (x[1, :] ** 2)) + 2.0 * p2 * x[0, :] * x[1, :],
+                2.0 * p1 * x[0] * x[1] + p2 * (r_2 + 2.0 * x[0] ** 2),
+                p1 * (r_2 + 2.0 * x[1] ** 2) + 2.0 * p2 * x[0] * x[1],
             ]
         )
         x = (xd - delta_x) / k_radial[np.newaxis, :]
-
     return x
 
 
-def stereo_reconstruction(
-    fx: np.ndarray,
-    fy: np.ndarray,
-    mask: np.ndarray,
-    fringe_pitch: int,
-    stereo_params: dict[str, np.ndarray],
-    fd: str = "Fy",
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
-    """Triangulación 3D cámara-proyector (réplica exacta de `StereoReconstruction.m`).
+def _distorsion(params: dict, prefijo: str) -> np.ndarray:
+    clave = f"dist_{prefijo}"
+    if clave in params:
+        return np.asarray(params[clave], dtype=np.float64).ravel()
+    idx = "1" if prefijo == "cam" else "2"
+    kr = np.asarray(params[f"Kr{idx}"], dtype=np.float64).ravel()
+    kt = np.asarray(params[f"Kt{idx}"], dtype=np.float64).ravel()
+    return np.array([kr[0], kr[1], kt[0], kt[1], kr[2] if kr.size > 2 else 0.0])
 
-    Parámetros:
-    - fx, fy: Mapas de fase desenvuelta (H, W) o (H, W, P).
-    - mask: Máscara booleana/binaria de píxeles válidos con igual forma que `fx`.
-    - fringe_pitch: Paso de las franjas proyectadas en píxeles (ej. 18).
-    - stereo_params: Diccionario o archivo `.npz` con `Ac`, `Ap`, `R`, `T`, `dist_cam`, `dist_proj`.
-    - fd: Dirección de fase usada para triangular (`'Fy'` o `'Fx'`).
 
-    Retorna:
-    - x_cm, y_cm, z_cm: Coordenadas 3D en el sistema de la cámara (en mm), con `NaN` fuera de `mask`.
-    - t_elapsed: Tiempo de cómputo en segundos.
+def elegir_fase(fd: str, stereo_params: dict | None = None) -> str:
+    """Resuelve `fd='auto'`: la coordenada del proyector alineada con la línea base.
+
+    La sensibilidad de u_p a la profundidad es proporcional a la componente T_x de la línea base
+    (expresada en el sistema del proyector) y la de v_p a T_y. Un error de fase se traduce en un
+    error de Z inversamente proporcional a esa sensibilidad, así que se usa la fase cuyo eje tiene
+    mayor |T|. En este montaje T ~ (25, -89, -4) mm: v_p (Fy) es ~3.5 veces más sensible que u_p.
+    Es lo mismo que hacían los scripts de MATLAB (`Fd = 'Fy'` en `R3D_ComplexShape.m`).
     """
-    es_2d = fx.ndim == 2
-    if es_2d:
-        fx = fx[:, :, np.newaxis]
-        fy = fy[:, :, np.newaxis]
-        mask = mask[:, :, np.newaxis]
+    if fd.lower() != "auto":
+        return fd
+    if stereo_params is None:
+        return "Fy"
+    t_vec = np.asarray(stereo_params["T"], dtype=np.float64).ravel()
+    return "Fx" if abs(t_vec[0]) > abs(t_vec[1]) else "Fy"
 
+
+def fuera_de_cobertura(
+    up: np.ndarray, vp: np.ndarray, mascara: np.ndarray, stereo_params: dict, fd: str
+) -> float:
+    """Fracción de puntos cuya coordenada del proyector cae fuera del rango que cubrieron los
+    círculos del tablero durante la calibración (ahí el modelo de distorsión se extrapola)."""
+    claves = {"fx": [("cobertura_up", up)], "fy": [("cobertura_vp", vp)]}
+    claves["ambas"] = claves["fx"] + claves["fy"]
+    fuera = np.zeros(int(np.count_nonzero(mascara)), dtype=bool)
+    for clave, mapa in claves[fd.lower()]:
+        if clave not in stereo_params:
+            return float("nan")
+        lo, hi = np.asarray(stereo_params[clave], dtype=np.float64).ravel()[:2]
+        valores = mapa[mascara]
+        fuera |= (valores < lo) | (valores > hi)
+    return float(fuera.mean()) if fuera.size else 0.0
+
+
+def triangular(
+    up: np.ndarray,
+    vp: np.ndarray,
+    mascara_x: np.ndarray,
+    mascara_y: np.ndarray,
+    stereo_params: dict,
+    fd: str = "ambas",
+    peso_x: np.ndarray | None = None,
+    peso_y: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Triangulación cámara-proyector por píxel (`StereoReconstruction.m`).
+
+    Cada píxel de cámara define un rayo X = Z * r (r normalizado y sin distorsión). Cada coordenada
+    del proyector impone una ecuación lineal en Z:
+        (R_1 . r - x_p R_3 . r) Z = x_p T_3 - T_1     (con u_p; análogo con v_p y la fila 2)
+    `Fx` usa la ecuación de u_p, `Fy` la de v_p y `ambas` las combina por mínimos cuadrados con
+    pesos (f_p * B)^2, inversos a la varianza de cada coordenada del proyector.
+
+    Retorna X, Y, Z (mm, sistema de la cámara; NaN fuera de la máscara) y la máscara usada.
+    """
     ac = np.asarray(stereo_params["Ac"], dtype=np.float64)
     ap = np.asarray(stereo_params["Ap"], dtype=np.float64)
     r_mat = np.asarray(stereo_params["R"], dtype=np.float64)
-    t_vec = np.asarray(stereo_params["T"], dtype=np.float64).reshape(3, 1)
-    w_mat = np.hstack([r_mat, t_vec])  # Matriz 3x4 [R, T]
+    t_vec = np.asarray(stereo_params["T"], dtype=np.float64).ravel()
+    k_cam = _distorsion(stereo_params, "cam")
+    k_proj = _distorsion(stereo_params, "proj")
 
-    if "dist_cam" in stereo_params:
-        k_cam = np.asarray(stereo_params["dist_cam"], dtype=np.float64).ravel()
-    else:
-        kr1 = np.asarray(stereo_params["Kr1"], dtype=np.float64).ravel()
-        kt1 = np.asarray(stereo_params["Kt1"], dtype=np.float64).ravel()
-        k_cam = np.array([kr1[0], kr1[1], kt1[0], kt1[1], kr1[2]])
+    fd = elegir_fase(fd, stereo_params).lower()
+    usar_x = fd in ("fx", "ambas")
+    usar_y = fd in ("fy", "ambas")
+    if not (usar_x or usar_y):
+        raise ValueError("fd debe ser 'Fx', 'Fy', 'ambas' o 'auto'")
+    mx = (mascara_x > 0) & np.isfinite(up) if usar_x else np.zeros(up.shape, bool)
+    my = (mascara_y > 0) & np.isfinite(vp) if usar_y else np.zeros(up.shape, bool)
+    mascara = mx | my
 
-    if "dist_proj" in stereo_params:
-        k_proj = np.asarray(stereo_params["dist_proj"], dtype=np.float64).ravel()
-    else:
-        kr2 = np.asarray(stereo_params["Kr2"], dtype=np.float64).ravel()
-        kt2 = np.asarray(stereo_params["Kt2"], dtype=np.float64).ravel()
-        k_proj = np.array([kr2[0], kr2[1], kt2[0], kt2[1], kr2[2]])
+    vc, uc = np.nonzero(mascara)
+    rc = np.linalg.solve(ac, np.vstack([uc, vc, np.ones_like(uc)]).astype(np.float64))
+    ray = np.vstack([comp_distortion_oulu(rc[:2], k_cam), np.ones(len(uc))])
 
-    alto, ancho, n_poses = fx.shape
-    mask_bool = (mask > 0) & np.isfinite(fx) & np.isfinite(fy)
-    mask_union = np.any(mask_bool, axis=2)
+    # Coordenadas del proyector -> normalizadas sin distorsión. La corrección necesita u_p y v_p a la
+    # vez; si una tiene poca modulación se usa igualmente, pues solo entra en el término de distorsión.
+    u_px = np.nan_to_num(up[vc, uc])
+    v_px = np.nan_to_num(vp[vc, uc])
+    xp = np.linalg.solve(ap, np.vstack([u_px, v_px, np.ones_like(u_px)]))
+    xp = comp_distortion_oulu(xp[:2], k_proj)
 
-    # Coordenadas de píxel en cámara (0-based, consistentes con la calibración OpenCV)
-    uc_grid, vc_grid = np.meshgrid(
-        np.arange(ancho, dtype=np.float64), np.arange(alto, dtype=np.float64)
-    )
-    uc_valid = uc_grid[mask_union]
-    vc_valid = vc_grid[mask_union]
+    num = np.zeros(len(uc))
+    den = np.zeros(len(uc))
+    for fila, coord, usar, valido, peso, focal in (
+        (0, xp[0], usar_x, mx[vc, uc], peso_x, ap[0, 0]),
+        (1, xp[1], usar_y, my[vc, uc], peso_y, ap[1, 1]),
+    ):
+        if not usar:
+            continue
+        a = r_mat[fila] @ ray - coord * (r_mat[2] @ ray)
+        b = coord * t_vec[2] - t_vec[fila]
+        w = np.ones(len(uc)) if peso is None else (focal * peso[vc, uc]) ** 2
+        w = np.where(valido, w, 0.0)
+        num += w * a * b
+        den += w * a * a
 
-    homog_cam = np.vstack([uc_valid, vc_valid, np.ones_like(uc_valid)])
-    rc = np.linalg.solve(ac, homog_cam)
-
-    t0 = time.perf_counter()
-    rc_undist = comp_distortion_oulu(rc[:2, :], k_cam)
-
-    ud_img = np.zeros((alto, ancho), dtype=np.float64)
-    vd_img = np.zeros((alto, ancho), dtype=np.float64)
-    ud_img[mask_union] = rc_undist[0, :]
-    vd_img[mask_union] = rc_undist[1, :]
-
-    ud_vol = np.repeat(ud_img[:, :, np.newaxis], n_poses, axis=2)
-    vd_vol = np.repeat(vd_img[:, :, np.newaxis], n_poses, axis=2)
-
-    ud_pts = ud_vol[mask_bool]
-    vd_pts = vd_vol[mask_bool]
-    rui = np.vstack([ud_pts, vd_pts, np.ones_like(ud_pts)])
-
-    # Conversión de fase desenvuelta a coordenadas del proyector
-    fx_pts = fx[mask_bool]
-    fy_pts = fy[mask_bool]
-    up = float(fringe_pitch) * fx_pts / (2.0 * np.pi)
-    vp = float(fringe_pitch) * fy_pts / (2.0 * np.pi)
-
-    homog_proj = np.vstack([up, vp, np.ones_like(up)])
-    x_proj = np.linalg.solve(ap, homog_proj)
-    x_proj_undist = comp_distortion_oulu(x_proj[:2, :], k_proj)
-
-    # Selección de coeficientes de triangulación según la dirección de fase ('Fx' o 'Fy')
-    if fd.lower() == "fx":
-        a_coef = w_mat[0, 0] - w_mat[2, 0] * x_proj_undist[0, :]
-        b_coef = w_mat[0, 1] - w_mat[2, 1] * x_proj_undist[0, :]
-        c_coef = w_mat[0, 2] - w_mat[2, 2] * x_proj_undist[0, :]
-        d_coef = -w_mat[0, 3] + w_mat[2, 3] * x_proj_undist[0, :]
-    elif fd.lower() == "fy":
-        a_coef = w_mat[1, 0] - w_mat[2, 0] * x_proj_undist[1, :]
-        b_coef = w_mat[1, 1] - w_mat[2, 1] * x_proj_undist[1, :]
-        c_coef = w_mat[1, 2] - w_mat[2, 2] * x_proj_undist[1, :]
-        d_coef = -w_mat[1, 3] + w_mat[2, 3] * x_proj_undist[1, :]
-    else:
-        raise ValueError("El parámetro fd debe ser 'Fx' o 'Fy'")
-
-    zc = d_coef / (a_coef * rui[0, :] + b_coef * rui[1, :] + c_coef)
-    xc = zc * rui[0, :]
-    yc = zc * rui[1, :]
-    t_elapsed = time.perf_counter() - t0
-
-    x_cm = np.full(fx.shape, np.nan, dtype=np.float64)
-    y_cm = np.full(fx.shape, np.nan, dtype=np.float64)
-    z_cm = np.full(fx.shape, np.nan, dtype=np.float64)
-
-    x_cm[mask_bool] = xc
-    y_cm[mask_bool] = yc
-    z_cm[mask_bool] = zc
-
-    if es_2d:
-        return x_cm[:, :, 0], y_cm[:, :, 0], z_cm[:, :, 0], t_elapsed
-    return x_cm, y_cm, z_cm, t_elapsed
+    zc = np.where(den > 0, num / np.where(den > 0, den, 1.0), np.nan)
+    x_cm = np.full(up.shape, np.nan)
+    y_cm = np.full(up.shape, np.nan)
+    z_cm = np.full(up.shape, np.nan)
+    x_cm[vc, uc] = zc * ray[0]
+    y_cm[vc, uc] = zc * ray[1]
+    z_cm[vc, uc] = zc
+    return x_cm, y_cm, z_cm, mascara & np.isfinite(z_cm)
 
 
 # ==============================================================================
-# 2. EXTRACCIÓN DE FASES DE OBJETOS / PLANOS (RecoveryPhases_objects.m)
-# ==============================================================================
-
-
-def recuperar_fases_directorio(
-    directorio_categoria: Path,
-    fringe_pitch: int = 18,
-    n_step: int = 18,
-    n_bits: int = 7,
-    gamma_th: float = 0.15,
-    umbral_intensidad: int = 25,
-) -> dict[str, np.ndarray]:
-    """Extrae y guarda las fases `Fx`, `Fy`, calidad `qFx`, `qFy` y máscara `MaskC` (`RecoveryPhases_objects.m`)."""
-    carpetas_poses = sorted(
-        p
-        for p in directorio_categoria.iterdir()
-        if p.is_dir() and p.name.startswith("pose_")
-    )
-    if not carpetas_poses:
-        raise FileNotFoundError(
-            f"No se encontraron carpetas 'pose_XX' en {directorio_categoria}."
-        )
-
-    n_poses = len(carpetas_poses)
-    nitext = n_step + n_bits
-
-    # Leer primera imagen para conocer dimensiones
-    primera_tex = buscar_imagen_patron(
-        carpetas_poses[0] / "H" / f"P{fringe_pitch}_F", nitext
-    )
-    img0 = cv2.imread(str(primera_tex), cv2.IMREAD_UNCHANGED)
-    if img0 is None:
-        raise OSError(f"No se pudo leer {primera_tex}")
-    alto, ancho = img0.shape[:2]
-
-    fx = np.zeros((alto, ancho, n_poses), dtype=np.float64)
-    fy = np.zeros((alto, ancho, n_poses), dtype=np.float64)
-    qfx = np.zeros((alto, ancho, n_poses), dtype=np.float64)
-    qfy = np.zeros((alto, ancho, n_poses), dtype=np.float64)
-    images = np.zeros((alto, ancho, n_poses), dtype=np.uint8)
-    mask_c = np.zeros((alto, ancho, n_poses), dtype=np.uint8)
-
-    for i, dir_pose in enumerate(carpetas_poses):
-        prefijo_h = dir_pose / "H" / f"P{fringe_pitch}_F"
-        prefijo_v = dir_pose / "V" / f"P{fringe_pitch}_F"
-
-        ruta_tex = buscar_imagen_patron(prefijo_h, nitext)
-        itex = cv2.imread(str(ruta_tex), cv2.IMREAD_UNCHANGED)
-        if itex.ndim == 3:
-            itex = itex[:, :, 0]
-        images[:, :, i] = itex
-
-        fx_aux, mask_h, _, _, _, gmx = unwrap_phase_gray_code(
-            prefijo_v, fringe_pitch, n_step, n_bits, med_filt_size=5, gamma_th=gamma_th
-        )
-        fy_aux, mask_v, _, _, _, gmy = unwrap_phase_gray_code(
-            prefijo_h, fringe_pitch, n_step, n_bits, med_filt_size=5, gamma_th=gamma_th
-        )
-
-        fx[:, :, i] = fx_aux
-        fy[:, :, i] = fy_aux
-        qfx[:, :, i] = gmx
-        qfy[:, :, i] = gmy
-
-        # Máscara automática igual a RecoveryPhases_objects.m (línea 70):
-        # MaskC(:,:,i) = mask_v .* mask_h .* (Itex > 25)
-        m_pose = (mask_v > 0) & (mask_h > 0) & (itex > umbral_intensidad)
-        # Eliminar bordes de 15 px para evitar artefactos del filtro de mediana
-        m_pose[:15, :] = False
-        m_pose[-15:, :] = False
-        m_pose[:, :15] = False
-        m_pose[:, -15:] = False
-        mask_c[:, :, i] = m_pose.astype(np.uint8)
-
-        print(
-            f"  [{dir_pose.name}] Píxeles válidos en máscara: "
-            f"{int(np.count_nonzero(m_pose))} ({100.0 * np.mean(m_pose):.1f}%)"
-        )
-
-    nombre_cat = directorio_categoria.name
-    ruta_phases = directorio_categoria / f"{nombre_cat}_PhasesData.npz"
-    np.savez_compressed(
-        ruta_phases,
-        Fx=fx,
-        Fy=fy,
-        qFx=qfx,
-        qFy=qfy,
-        images=images,
-        MaskC=mask_c,
-    )
-    print(f"[OK] Fases guardadas en: '{ruta_phases}'")
-
-    return {
-        "Fx": fx,
-        "Fy": fy,
-        "qFx": qfx,
-        "qFy": qfy,
-        "images": images,
-        "MaskC": mask_c,
-    }
-
-
-# ==============================================================================
-# 3. AJUSTE DE PLANOS Y EXPORTACIÓN A NUBE DE PUNTOS PLY (Plane_fitting.m / XYZtoPC.m)
+# 2. AJUSTE DE PLANOS, FILTRADO Y EXPORTACIÓN (Plane_fitting.m / XYZtoPC.m)
 # ==============================================================================
 
 
 def plane_fitting(
-    xx: np.ndarray, yy: np.ndarray, zz: np.ndarray, mask: np.ndarray | None = None
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Ajusta un plano Z = A*X + B*Y + C por mínimos cuadrados a cada pose (`Plane_fitting.m`).
+    x: np.ndarray,
+    y: np.ndarray,
+    z: np.ndarray,
+    mask: np.ndarray,
+    umbral_mm: float = 3.0,
+    iteraciones: int = 300,
+    semilla: int = 0,
+) -> tuple[np.ndarray, float, np.ndarray]:
+    """Ajusta el plano dominante Z = A X + B Y + C a una pose (`Plane_fitting.m`).
 
-    Retorna:
-    - e: Mapa de distancia perpendicular al plano ideal en mm `(H, W, P)`.
-    - erms: Vector con el error RMS de planicidad por pose en mm `(P,)`.
-    - ze: Plano Z evaluado `(H, W, P)`.
-    - tts: Coeficientes `[A, B, C]` de cada plano `(P, 3)`.
+    Se usa RANSAC para que otras superficies de la escena (p. ej. la placa de soporte) no sesguen el
+    ajuste, y luego mínimos cuadrados sobre los inliers. Retorna el mapa de distancia perpendicular
+    al plano (mm, NaN fuera del plano dominante), el error RMS (mm) y los coeficientes [A, B, C].
     """
-    alto, ancho, n_poses = xx.shape
-    e_map = np.full_like(xx, np.nan, dtype=np.float64)
-    ze_map = np.full_like(xx, np.nan, dtype=np.float64)
-    tts = np.zeros((n_poses, 3), dtype=np.float64)
-    erms = np.zeros(n_poses, dtype=np.float64)
+    valido = (mask > 0) & np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
+    pts = np.column_stack([x[valido], y[valido], z[valido]])
+    rng = np.random.default_rng(semilla)
+    muestra = pts[rng.choice(len(pts), size=min(len(pts), 20000), replace=False)]
 
-    for i in range(n_poses):
-        x = xx[:, :, i]
-        y = yy[:, :, i]
-        z = zz[:, :, i]
+    mejor, mejor_n = None, -1
+    for _ in range(iteraciones):
+        p0, p1, p2 = muestra[rng.choice(len(muestra), 3, replace=False)]
+        normal = np.cross(p1 - p0, p2 - p0)
+        norma = np.linalg.norm(normal)
+        if norma < 1e-9:
+            continue
+        normal /= norma
+        n_in = np.count_nonzero(np.abs((muestra - p0) @ normal) < umbral_mm)
+        if n_in > mejor_n:
+            mejor, mejor_n = (normal, p0), n_in
 
-        valido = np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
-        if mask is not None:
-            valido &= mask[:, :, i] > 0
-
-        # Recorte de valores atípicos extremos (percentil 1..99 en Z) para ajuste robusto
-        if np.count_nonzero(valido) > 100:
-            z_vals = z[valido]
-            z_med = np.median(z_vals)
-            mad = np.median(np.abs(z_vals - z_med))
-            if mad > 1e-6:
-                valido &= np.abs(z - z_med) < 4.0 * 1.4826 * mad
-
-        a_mat = np.column_stack([x[valido], y[valido], np.ones(np.count_nonzero(valido))])
-        b_vec = z[valido]
-        tt, _, _, _ = np.linalg.lstsq(a_mat, b_vec, rcond=None)
-        tts[i, :] = tt
-
-        ze = tt[0] * x + tt[1] * y + tt[2]
-        ze_map[:, :, i] = ze
-
-        # Distancia perpendicular punto-plano: (A*x + B*y - z + C) / sqrt(A^2 + B^2 + 1)
-        dist_perp = (tt[0] * x + tt[1] * y - z + tt[2]) / np.sqrt(
-            tt[0] ** 2 + tt[1] ** 2 + 1.0
-        )
-        e_pose = np.where(valido, dist_perp, np.nan)
-        e_map[:, :, i] = e_pose
-
-        err_vals = e_pose[valido]
-        erms[i] = float(np.sqrt(np.mean((err_vals - np.mean(err_vals)) ** 2)))
-
-    return e_map, erms, ze_map, tts
+    normal, p0 = mejor
+    en_plano = valido.copy()
+    en_plano[valido] = np.abs((pts - p0) @ normal) < umbral_mm
+    a_mat = np.column_stack([x[en_plano], y[en_plano], np.ones(np.count_nonzero(en_plano))])
+    tt, *_ = np.linalg.lstsq(a_mat, z[en_plano], rcond=None)
+    dist = (tt[0] * x + tt[1] * y - z + tt[2]) / np.sqrt(tt[0] ** 2 + tt[1] ** 2 + 1.0)
+    en_plano = valido & (np.abs(dist) < umbral_mm)
+    e_map = np.where(en_plano, dist, np.nan)
+    err = e_map[en_plano]
+    return e_map, float(np.sqrt(np.mean((err - err.mean()) ** 2))), tt
 
 
-def _filtrar_outliers_3d(
-    x: np.ndarray, y: np.ndarray, z: np.ndarray, mask: np.ndarray
+def filtrar_outliers_3d(
+    z: np.ndarray, mask: np.ndarray, salto_max: float, z_min: float, z_max: float
 ) -> np.ndarray:
-    """Filtra saltos abruptos locales en Z (equivalente rápido en rejilla 2D a `pcdenoise`)."""
-    mask_out = (mask > 0) & np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
-    if np.count_nonzero(mask_out) == 0:
-        return mask_out
-
-    z_clean = np.where(mask_out, z, np.nanmedian(z[mask_out])).astype(np.float32)
-    z_med_local = cv2.medianBlur(z_clean, 5).astype(np.float64)
-    # Descartar píxeles cuyo salto local respecto a su vecindad 5x5 supere 5 mm
-    salto_local = np.abs(z - z_med_local) < 5.0
-    # Además acotar al rango físico razonable frente a la cámara (100 mm a 1500 mm)
-    rango_z = (z > 100.0) & (z < 1500.0)
-    return mask_out & salto_local & rango_z
+    """Descarta saltos locales en Z respecto a la mediana 5x5 y puntos fuera del rango físico (`pcdenoise`)."""
+    valido = (mask > 0) & np.isfinite(z)
+    if not np.any(valido):
+        return valido
+    z_rel = np.where(valido, z, np.nanmedian(z[valido])).astype(np.float32)
+    z_med = cv2.medianBlur(z_rel, 5).astype(np.float64)
+    return valido & (np.abs(z - z_med) < salto_max) & (z > z_min) & (z < z_max)
 
 
-def escribir_ply_binario(
-    ruta_ply: Path, puntos_xyz: np.ndarray, colores_rgb: np.ndarray
-) -> None:
+def escribir_ply_binario(ruta_ply: Path, puntos_xyz: np.ndarray, colores_rgb: np.ndarray) -> None:
     """Escribe una nube de puntos con color en formato PLY binario little-endian (`pcwrite`)."""
     n_pts = puntos_xyz.shape[0]
     encabezado = (
-        "ply\n"
-        "format binary_little_endian 1.0\n"
+        "ply\nformat binary_little_endian 1.0\n"
         f"element vertex {n_pts}\n"
-        "property float x\n"
-        "property float y\n"
-        "property float z\n"
-        "property uchar red\n"
-        "property uchar green\n"
-        "property uchar blue\n"
+        "property float x\nproperty float y\nproperty float z\n"
+        "property uchar red\nproperty uchar green\nproperty uchar blue\n"
         "end_header\n"
     ).encode("ascii")
-
-    dtype_vertice = np.dtype(
-        [
-            ("x", "<f4"),
-            ("y", "<f4"),
-            ("z", "<f4"),
-            ("r", "u1"),
-            ("g", "u1"),
-            ("b", "u1"),
-        ]
+    datos = np.empty(
+        n_pts, dtype=[("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("r", "u1"), ("g", "u1"), ("b", "u1")]
     )
-    datos = np.empty(n_pts, dtype=dtype_vertice)
-    datos["x"] = puntos_xyz[:, 0].astype(np.float32)
-    datos["y"] = puntos_xyz[:, 1].astype(np.float32)
-    datos["z"] = puntos_xyz[:, 2].astype(np.float32)
-    datos["r"] = colores_rgb[:, 0].astype(np.uint8)
-    datos["g"] = colores_rgb[:, 1].astype(np.uint8)
-    datos["b"] = colores_rgb[:, 2].astype(np.uint8)
-
+    datos["x"], datos["y"], datos["z"] = puntos_xyz[:, 0], puntos_xyz[:, 1], puntos_xyz[:, 2]
+    datos["r"], datos["g"], datos["b"] = colores_rgb[:, 0], colores_rgb[:, 1], colores_rgb[:, 2]
     with ruta_ply.open("wb") as f:
         f.write(encabezado)
         f.write(datos.tobytes())
 
 
-def xyz_to_pc_and_save_ply(
-    xs: np.ndarray,
-    ys: np.ndarray,
-    zs: np.ndarray,
-    images: np.ndarray,
-    mask: np.ndarray,
-    directorio_salida: Path,
-    prefijo_ply: str,
-) -> tuple[list[Path], np.ndarray]:
-    """Convierte las matrices `(Xs, Ys, Zs)` en nubes de puntos filtradas y guarda `.ply` (`XYZtoPC.m`)."""
-    n_poses = xs.shape[2]
-    new_mask = np.zeros_like(mask, dtype=np.uint8)
-    rutas_ply: list[Path] = []
-
-    for i in range(n_poses):
-        indi = _filtrar_outliers_3d(
-            xs[:, :, i], ys[:, :, i], zs[:, :, i], mask[:, :, i]
-        )
-        new_mask[:, :, i] = indi.astype(np.uint8)
-
-        pts = np.column_stack(
-            [xs[:, :, i][indi], ys[:, :, i][indi], zs[:, :, i][indi]]
-        )
-        intensidad = images[:, :, i][indi].astype(np.uint8)
-        colores = np.column_stack([intensidad, intensidad, intensidad])
-
-        ruta_ply = directorio_salida / f"{prefijo_ply}_Stereo_pose_{i:02d}.ply"
-        escribir_ply_binario(ruta_ply, pts, colores)
-        rutas_ply.append(ruta_ply)
-        print(
-            f"  [PLY] '{ruta_ply.name}' guardado con {len(pts):,} puntos 3D."
-        )
-
-    return rutas_ply, new_mask
-
-
-def _guardar_visualizacion_reconstruccion(
-    directorio_salida: Path,
-    nombre_cat: str,
-    xs: np.ndarray,
-    ys: np.ndarray,
-    zs: np.ndarray,
-    images: np.ndarray,
-    mask: np.ndarray,
-    e_map: np.ndarray | None = None,
-    erms: np.ndarray | None = None,
+def _guardar_figura(
+    ruta: Path, titulo: str, itex: np.ndarray, z: np.ndarray, mask: np.ndarray,
+    e_map: np.ndarray | None = None, erms: float | None = None,
 ) -> None:
-    """Genera un panel visual con imagen de textura, mapa de profundidad Z y mapa de error usando OpenCV."""
-    indi = (mask[:, :, 0] > 0) & np.isfinite(zs[:, :, 0])
-    tex_bgr = cv2.cvtColor(images[:, :, 0], cv2.COLOR_GRAY2BGR)
-    cv2.putText(
-        tex_bgr,
-        f"{nombre_cat} (pose_00): Textura",
-        (25, 45),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        1.1,
-        (0, 255, 255),
-        2,
-    )
+    tex = cv2.cvtColor(itex, cv2.COLOR_GRAY2BGR)
+    cv2.putText(tex, f"{titulo}: textura", (25, 45), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (0, 255, 255), 2)
+    vmin, vmax = np.nanpercentile(z[mask], [2, 98]) if np.any(mask) else (0.0, 1.0)
+    z_bgr = normalizar_mapa_color(z, mask.astype(np.uint8), float(vmin), float(vmax), cv2.COLORMAP_VIRIDIS)
+    cv2.putText(z_bgr, f"Z [{vmin:.1f}, {vmax:.1f}] mm", (25, 45), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 255, 255), 2)
+    paneles = [tex, z_bgr]
+    if e_map is not None:
+        lim = max(3.0 * (erms or 0.2), 0.05)
+        e_bgr = normalizar_mapa_color(e_map, None, -lim, lim, cv2.COLORMAP_TURBO)
+        cv2.putText(e_bgr, f"Error plano RMS = {erms:.4f} mm [+-{lim:.2f}]", (25, 45),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+        paneles.append(e_bgr)
+    cv2.imwrite(str(ruta), cv2.resize(np.hstack(paneles), (0, 0), fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA))
 
-    if np.any(indi):
-        vmin_z, vmax_z = np.nanpercentile(zs[:, :, 0][indi], [2, 98])
-    else:
-        vmin_z, vmax_z = 300.0, 900.0
 
-    z_bgr = _normalizar_mapa_color(
-        zs[:, :, 0],
-        indi.astype(np.uint8),
-        vmin=float(vmin_z),
-        vmax=float(vmax_z),
-        colormap=cv2.COLORMAP_VIRIDIS,
-    )
-    cv2.putText(
-        z_bgr,
-        f"Profundidad Z [{vmin_z:.1f}, {vmax_z:.1f}] mm",
-        (25, 45),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        1.1,
-        (255, 255, 255),
-        2,
-    )
+# ==============================================================================
+# 3. ETAPA COMPLETA
+# ==============================================================================
 
-    if e_map is not None and erms is not None:
-        err_bgr = _normalizar_mapa_color(
-            e_map[:, :, 0],
-            indi.astype(np.uint8),
-            vmin=-0.6,
-            vmax=0.6,
-            colormap=cv2.COLORMAP_TURBO,
-        )
-        cv2.putText(
-            err_bgr,
-            f"Error Plano RMS = {erms[0]:.4f} mm [-0.6, +0.6 mm]",
-            (25, 45),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1.0,
-            (255, 255, 255),
-            2,
-        )
-        panel = np.hstack([tex_bgr, z_bgr, err_bgr])
-    else:
-        panel = np.hstack([tex_bgr, z_bgr])
 
-    panel_redim = cv2.resize(panel, (0, 0), fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
-    ruta_fig = directorio_salida / f"reconstruccion_{nombre_cat}_pose00.png"
-    cv2.imwrite(str(ruta_fig), panel_redim)
+def _id_reconstruccion(ruta_calibracion: Path, fd: str, z_min: float, z_max: float, salto_max: float) -> str:
+    """Identifica todo lo que, además de la fase de la pose, determina su reconstrucción."""
+    st = ruta_calibracion.resolve().stat()
+    return f"{ruta_calibracion.resolve()}|{st.st_mtime_ns}|{fd}|{z_min}|{z_max}|{salto_max}"
+
+
+def cargar_reconstruccion_pose(ruta: Path) -> dict[str, np.ndarray]:
+    """Lee `<cat>_pose_XX.npz`: X, Y, Z (mm, float32, NaN fuera), Mask, y E (error al plano) si existe."""
+    with np.load(ruta) as datos:
+        return {k: datos[k] for k in datos.files}
 
 
 def procesar_reconstruccion(
-    directorio_base: Path,
-    ruta_calibracion: Path,
+    dir_fases: Path = cfg.DIR_RESULTADOS / "fases",
+    ruta_calibracion: Path = cfg.DIR_RESULTADOS / "calibracion" / "Estereo_TSC_0_2.npz",
+    dir_salida: Path = cfg.DIR_RESULTADOS / "reconstruccion",
     categorias: Sequence[str] = ("objeto", "plano"),
-    fringe_pitch: int = 18,
-    n_step: int = 18,
-    n_bits: int = 7,
-    fd: str = "Fy",
-    gamma_th: float = 0.15,
-    umbral_intensidad: int = 25,
-) -> None:
-    """Ejecuta la extracción de fase y reconstrucción 3D para las categorías indicadas."""
+    fd: str = cfg.FASE_TRIANGULACION,
+    z_min: float = cfg.Z_MIN_MM,
+    z_max: float = cfg.Z_MAX_MM,
+    salto_max: float = cfg.SALTO_MAX_MM,
+    rehacer: bool = False,
+) -> dict[str, list[Path]]:
+    """Reconstruye todas las poses de las categorías indicadas.
+
+    Por pose escribe `<cat>_pose_XX.ply` (nube), `<cat>_pose_XX.npz` (mapas X, Y, Z, Mask) y una
+    figura; por categoría, `<cat>_resumen.json` con las estadísticas de cada pose.
+
+    Caché: una pose se omite si su `.npz` es más reciente que su fase absoluta y fue calculado con
+    la misma calibración (ruta y fecha), el mismo modo de triangulación y los mismos filtros.
+    Así, al medir un objeto nuevo solo se triangula ese objeto. `rehacer=True` lo ignora.
+    """
     if not ruta_calibracion.exists():
         raise FileNotFoundError(
-            f"No existe el archivo de calibración '{ruta_calibracion}'. "
-            f"Ejecuta primero calibracion_estereo.py."
+            f"No existe la calibración '{ruta_calibracion}'. Ejecuta antes la etapa 'calibracion'."
         )
-
     stereo_params = dict(np.load(ruta_calibracion))
+    fd_usada = elegir_fase(fd, stereo_params)
+    ident = _id_reconstruccion(ruta_calibracion, fd_usada, z_min, z_max, salto_max)
+    print(f"[INFO] Calibración: '{ruta_calibracion}' | triangulación con: {fd_usada}"
+          f"{' (auto)' if fd.lower() == 'auto' else ''}")
+    for clave in ("cobertura_up", "cobertura_vp"):
+        if clave in stereo_params:
+            lo, hi = np.asarray(stereo_params[clave]).ravel()[:2]
+            print(f"[INFO] Rango calibrado de {clave[-2:]}: [{lo:.0f}, {hi:.0f}] px del proyector")
 
+    salidas: dict[str, list[Path]] = {}
     for categoria in categorias:
-        dir_cat = directorio_base / categoria
-        if not dir_cat.is_dir():
-            print(f"[AVISO] No existe '{dir_cat}', se omite.")
+        rutas_fase = sorted((dir_fases / categoria).glob("pose_??.npz"))
+        if not rutas_fase:
+            print(f"[AVISO] No hay fases absolutas en '{dir_fases / categoria}'. Ejecuta antes 'fase_absoluta'.")
             continue
+        dir_cat = dir_salida / categoria
+        dir_cat.mkdir(parents=True, exist_ok=True)
+        ruta_resumen = dir_cat / f"{categoria}_resumen.json"
+        resumen = json.loads(ruta_resumen.read_text(encoding="utf-8")) if ruta_resumen.exists() else {}
+        print(f"\n================ RECONSTRUCCIÓN 3D: '{categoria.upper()}' ({len(rutas_fase)} poses) ================")
 
-        print(f"\n================ RECONSTRUCCIÓN 3D: '{categoria.upper()}' ================")
-        datos_fases = recuperar_fases_directorio(
-            directorio_categoria=dir_cat,
-            fringe_pitch=fringe_pitch,
-            n_step=n_step,
-            n_bits=n_bits,
-            gamma_th=gamma_th,
-            umbral_intensidad=umbral_intensidad,
-        )
+        for ruta_fase in rutas_fase:
+            nombre = ruta_fase.stem
+            ruta_ply = dir_cat / f"{categoria}_{nombre}.ply"
+            ruta_xyz = dir_cat / f"{categoria}_{nombre}.npz"
+            salidas.setdefault(categoria, []).append(ruta_ply)
+            previo = resumen.get(nombre, {})
+            if (
+                not rehacer and previo.get("id") == ident and ruta_ply.exists() and ruta_xyz.exists()
+                and ruta_xyz.stat().st_mtime > ruta_fase.stat().st_mtime
+            ):
+                print(f"  [{nombre}] sin cambios, se reutiliza '{ruta_ply.name}'"
+                      + (f" | error RMS plano = {previo['erms_mm']:.4f} mm" if previo.get("erms_mm") else ""))
+                continue
 
-        fx = datos_fases["Fx"]
-        fy = datos_fases["Fy"]
-        qfx = datos_fases["qFx"]
-        qfy = datos_fases["qFy"]
-        images = datos_fases["images"]
-        mask_c = datos_fases["MaskC"]
-
-        # Refinar máscara por calidad de fase en la dirección seleccionada (como en R3D_ComplexShape.m)
-        qf_sel = qfy if fd.lower() == "fy" else qfx
-        indi_mask = (mask_c > 0) & (qf_sel > gamma_th) & (images > umbral_intensidad)
-
-        xs, ys, zs, t_rec = stereo_reconstruction(
-            fx=fx,
-            fy=fy,
-            mask=indi_mask,
-            fringe_pitch=fringe_pitch,
-            stereo_params=stereo_params,
-            fd=fd,
-        )
-        print(f"[OK] Triangulación estéreo ({fd}) completada en {t_rec:.3f} s.")
-
-        rutas_ply, new_mask = xyz_to_pc_and_save_ply(
-            xs=xs,
-            ys=ys,
-            zs=zs,
-            images=images,
-            mask=indi_mask,
-            directorio_salida=dir_cat,
-            prefijo_ply=categoria,
-        )
-
-        e_map = None
-        erms = None
-        if categoria.lower() == "plano":
-            e_map, erms, ze_map, tts = plane_fitting(xs, ys, zs, new_mask)
-            print("\n--- Evaluación de Planicidad (Plane_fitting) ---")
-            for idx_p, err_val in enumerate(erms):
-                z_mean = float(np.nanmean(zs[:, :, idx_p][new_mask[:, :, idx_p] > 0]))
-                print(
-                    f"  pose_{idx_p:02d}: Z_medio = {z_mean:6.2f} mm | Error RMS Plano = {err_val:.4f} mm"
-                )
-            print(f"  -> Error RMS Promedio en Planos: {float(np.mean(erms)):.4f} mm")
-
-            ruta_r3d = dir_cat / f"{categoria}_R3D.npz"
-            np.savez_compressed(
-                ruta_r3d,
-                Xs=xs,
-                Ys=ys,
-                Zs=zs,
-                Mask=new_mask,
-                e_s=e_map,
-                erms_s=erms,
-                Ze=ze_map,
-                TTs=tts,
+            t0 = time.perf_counter()
+            d = fase.cargar_fases_pose(ruta_fase)
+            x, y, z, m = triangular(
+                d["up"], d["vp"], d["MaskX"], d["MaskY"], stereo_params, fd_usada,
+                peso_x=d.get("BX"), peso_y=d.get("BY"),
             )
-        else:
-            for idx_p in range(xs.shape[2]):
-                m_p = new_mask[:, :, idx_p] > 0
-                if np.any(m_p):
-                    print(
-                        f"  pose_{idx_p:02d}: X=[{np.nanmin(xs[:, :, idx_p][m_p]):.1f}, {np.nanmax(xs[:, :, idx_p][m_p]):.1f}] mm | "
-                        f"Y=[{np.nanmin(ys[:, :, idx_p][m_p]):.1f}, {np.nanmax(ys[:, :, idx_p][m_p]):.1f}] mm | "
-                        f"Z=[{np.nanmin(zs[:, :, idx_p][m_p]):.1f}, {np.nanmax(zs[:, :, idx_p][m_p]):.1f}] mm"
-                    )
-            ruta_r3d = dir_cat / f"{categoria}_R3D.npz"
-            np.savez_compressed(
-                ruta_r3d,
-                Xs=xs,
-                Ys=ys,
-                Zs=zs,
-                Mask=new_mask,
-            )
+            m = filtrar_outliers_3d(z, m, salto_max, z_min, z_max)
+            itex = d["Itex"]
+            fuera = fuera_de_cobertura(d["up"], d["vp"], m, stereo_params, fd_usada)
 
-        _guardar_visualizacion_reconstruccion(
-            directorio_salida=dir_cat,
-            nombre_cat=categoria,
-            xs=xs,
-            ys=ys,
-            zs=zs,
-            images=images,
-            mask=new_mask,
-            e_map=e_map,
-            erms=erms,
-        )
-        print(f"[OK] Resultados 3D guardados en '{ruta_r3d}'")
+            pts = np.column_stack([x[m], y[m], z[m]])
+            gris = itex[m]
+            escribir_ply_binario(ruta_ply, pts, np.column_stack([gris, gris, gris]))
+
+            e_map, erms = None, None
+            texto = ""
+            info = {"id": ident, "puntos": int(len(pts)), "fuera_de_cobertura": round(fuera, 4)}
+            if categoria == "plano" and np.count_nonzero(m) > 100:
+                e_map, erms, coef = plane_fitting(x, y, z, m)
+                cobertura = 100.0 * np.count_nonzero(np.isfinite(e_map)) / np.count_nonzero(m)
+                texto = f" | error RMS plano = {erms:.4f} mm ({cobertura:.0f}% de los puntos)"
+                info.update(erms_mm=erms, plano_ABC=[float(c) for c in coef], fraccion_en_plano=cobertura / 100)
+            if np.any(m):
+                z1, z99 = np.percentile(z[m], [1, 99])
+                texto = f" | Z=[{z1:.1f}, {z99:.1f}] mm" + texto
+                info.update(z_p1_mm=float(z1), z_p99_mm=float(z99))
+            print(
+                f"  [{nombre}] {len(pts):,} puntos ({time.perf_counter() - t0:.1f} s){texto} -> '{ruta_ply.name}'"
+            )
+            if fuera > 0.05:
+                print(f"      [AVISO] {100 * fuera:.0f}% de los puntos usan zonas del proyector fuera del "
+                      f"rango calibrado: ahí el error crece. Captura poses del tablero que cubran esa zona.")
+            _guardar_figura(dir_cat / f"reconstruccion_{categoria}_{nombre}.png", f"{categoria} {nombre}",
+                            itex, z, m, e_map, erms)
+            extra = {"E": e_map.astype(np.float32)} if e_map is not None else {}
+            np.savez_compressed(
+                ruta_xyz, X=x.astype(np.float32), Y=y.astype(np.float32), Z=z.astype(np.float32),
+                Mask=m, fase=fd_usada, **extra,
+            )
+            resumen[nombre] = info
+            ruta_resumen.write_text(json.dumps(resumen, indent=2), encoding="utf-8")
+
+        # Se olvidan poses que ya no existen (p. ej. si se reorganizó desde cero)
+        vigentes = {r.stem for r in rutas_fase}
+        resumen = {k: v for k, v in resumen.items() if k in vigentes}
+        ruta_resumen.write_text(json.dumps(resumen, indent=2), encoding="utf-8")
+        errores = [v["erms_mm"] for v in resumen.values() if v.get("erms_mm") is not None]
+        if errores:
+            print(f"  -> Error RMS promedio en planos: {float(np.mean(errores)):.4f} mm")
+        print(f"[OK] Resultados 3D de '{categoria}' en '{dir_cat}'")
+    return salidas
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Extracción de fase y Reconstrucción 3D Estéreo (adaptado de MATLAB)."
-    )
-    parser.add_argument(
-        "--directorio-base",
-        type=Path,
-        default=Path("capturas_ordenadas"),
-        help="Carpeta raíz con las capturas organizadas (por defecto: capturas_ordenadas)",
-    )
-    parser.add_argument(
-        "--calibracion",
-        type=Path,
-        default=Path("capturas_ordenadas/patron/Estereo_TSC_0_2.npz"),
-        help="Ruta al archivo de calibración estéreo .npz",
-    )
-    parser.add_argument(
-        "--categorias",
-        nargs="+",
-        default=["objeto", "plano"],
-        help="Categorías a reconstruir (por defecto: objeto plano)",
-    )
-    parser.add_argument(
-        "--fase",
-        type=str,
-        default="Fy",
-        choices=["Fy", "Fx"],
-        help="Dirección de fase para la triangulación (por defecto: Fy, igual que en MATLAB)",
-    )
-    parser.add_argument(
-        "--pitch",
-        type=int,
-        default=18,
-        help="Período de las franjas en píxeles (por defecto: 18)",
-    )
-    parser.add_argument(
-        "--nstep",
-        type=int,
-        default=18,
-        help="Número de pasos de corrimiento de fase (por defecto: 18)",
-    )
-    parser.add_argument(
-        "--nbits",
-        type=int,
-        default=7,
-        help="Número de bits de código Gray (por defecto: 7)",
-    )
-    parser.add_argument(
-        "--gamma-th",
-        type=float,
-        default=0.05,
-        help="Umbral de modulación gamma (por defecto: 0.05 para incluir objetos oscuros)",
-    )
+    parser = argparse.ArgumentParser(description="Reconstrucción 3D estéreo cámara-proyector.")
+    parser.add_argument("--fases", type=Path, default=cfg.DIR_RESULTADOS / "fases")
+    parser.add_argument("--calibracion", type=Path,
+                        default=cfg.DIR_RESULTADOS / "calibracion" / "Estereo_TSC_0_2.npz",
+                        help="Archivo .npz de calibración estéreo")
+    parser.add_argument("--salida", type=Path, default=cfg.DIR_RESULTADOS / "reconstruccion")
+    parser.add_argument("--categorias", nargs="+", default=["objeto", "plano"])
+    parser.add_argument("--fase", default=cfg.FASE_TRIANGULACION, choices=["auto", "ambas", "Fx", "Fy"],
+                        help="Fase usada para triangular (por defecto: %(default)s)")
+    parser.add_argument("--rehacer", action="store_true", help="Ignora la caché y reconstruye todo")
     args = parser.parse_args()
-
-    procesar_reconstruccion(
-        directorio_base=args.directorio_base,
-        ruta_calibracion=args.calibracion,
-        categorias=args.categorias,
-        fringe_pitch=args.pitch,
-        n_step=args.nstep,
-        n_bits=args.nbits,
-        fd=args.fase,
-        gamma_th=args.gamma_th,
-    )
+    procesar_reconstruccion(args.fases, args.calibracion, args.salida, args.categorias, args.fase,
+                            rehacer=args.rehacer)
 
 
 if __name__ == "__main__":

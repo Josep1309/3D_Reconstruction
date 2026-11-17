@@ -1,16 +1,19 @@
+import json
 from pathlib import Path
 from collections.abc import Mapping
 
 import cv2
 import numpy as np
 
+import configuracion as cfg
 from patterns import generar_patrones_binarios
 
 
-ANCHO = 912
-ALTO = 1140
-PERIODO = 18
-DIRECTORIO_SALIDA = Path("patterns/secuencia_completa_bmp")
+ANCHO = cfg.PROYECTOR_ANCHO
+ALTO = cfg.PROYECTOR_ALTO
+PERIODO = cfg.PERIODO
+BITS_GRAY = cfg.N_BITS_GRAY
+DIRECTORIO_SALIDA = cfg.DIR_PATRONES
 
 
 def crear_patrones_uniformes(ancho: int, alto: int) -> list[tuple[str, np.ndarray]]:
@@ -100,7 +103,7 @@ def crear_secuencia_completa(
         )
 
         patrones_gray = crear_patrones_gray(
-            ancho, alto, periodo, orientacion, cantidad_bits=6
+            ancho, alto, periodo, orientacion, cantidad_bits=BITS_GRAY
         )
         secuencia.extend(
             (
@@ -132,12 +135,27 @@ def crear_secuencia_completa(
 def guardar_secuencia(
     secuencia: list[tuple[Path, str, np.ndarray, bool, bool]],
 ) -> None:
-    for indice, (directorio, _, imagen, _, _) in enumerate(secuencia):
+    """Guarda `f_XX.bmp` y `secuencia.json` con el contenido de cada índice."""
+    descripcion = []
+    for indice, (directorio, nombre, imagen, _, _) in enumerate(secuencia):
         ruta = directorio / f"f_{indice:02d}.bmp"
         directorio.mkdir(parents=True, exist_ok=True)
         if not cv2.imwrite(str(ruta), imagen):
             raise OSError(f"No se pudo guardar el patrón: {ruta}")
+        descripcion.append({"archivo": ruta.name, "tipo": nombre})
         print(f"Guardado: {ruta}")
+    if secuencia:
+        (secuencia[0][0] / "secuencia.json").write_text(
+            json.dumps(
+                {
+                    "ancho": ANCHO, "alto": ALTO, "periodo": PERIODO, "bits_gray": BITS_GRAY,
+                    "nota": "Gray en orden MSB -> LSB dentro de cada orientación",
+                    "patrones": descripcion,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
 
 
 if __name__ == "__main__":

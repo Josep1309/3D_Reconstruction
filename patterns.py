@@ -49,10 +49,13 @@ def generar_patrones_binarios(
 
 # --- Generación y guardado ---
 if __name__ == "__main__":
+    from pathlib import Path
+
     PERIODO = 18        # Paso de 18 píxeles
     NUM_PASOS = 6       # 6-step phase shifting (desplazamiento de 3 px por paso)
-    ANCHO = 1140        # Resolución de tu proyector
-    ALTO = 912         # Resolución de tu proyector
+    ANCHO = 912         # Resolución del LightCrafter 4500 (ancho x alto = 912 x 1140)
+    ALTO = 1140
+    Path("patterns").mkdir(exist_ok=True)
 
     imagenes = generar_patrones_binarios(
         width=ANCHO, 
