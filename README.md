@@ -13,8 +13,18 @@ funciones principales, diagnóstico y correspondencia con el MATLAB.
 
 ## Inicio rápido
 
+**Interfaz web** (control de todo el proceso, vista en vivo, fases y nube de puntos 3D):
+
 ```bash
 cd ~/Documents/Tesis
+.env/bin/python interfaz/servidor.py      # abre http://127.0.0.1:8000
+```
+
+Tiene un *modo demo* con cámara simulada para probarla sin el montaje (§19 del manual).
+
+**Por script:**
+
+```bash
 .env/bin/python pipeline.py
 ```
 

@@ -15,6 +15,10 @@ de `Matlab_Codes/Codes/`, que son solo referencia y no se ejecutan. El manual co
 .env/bin/python reconstruccion_3d.py --categorias objeto --fase Fy
 ```
 
+- Interfaz web: `.env/bin/python interfaz/servidor.py [--puerto N --sin-navegador]`. Para
+  probarla sin hardware ni tocar datos reales, usa
+  `TESIS_DIR_DATOS=<copia> … --sin-navegador` y el modo demo (`"simular": "objeto/<carpeta>"` en
+  `POST /api/ejecutar`).
 - Python 3.10 en `.env/`: numpy 1.26, opencv 5.0, matplotlib y spinnaker-python (PySpin, solo
   para capturar).
 - No hay tests automáticos. La verificación se hace corriendo el pipeline sobre las capturas
@@ -54,6 +58,17 @@ Las etapas corren en un orden fijo desde `pipeline.py` (`ETAPAS`):
 
   Tras cambiar umbrales, usa `REHACER = True` en `pipeline.py`.
 - Las poses se procesan en hilos (`fase._en_paralelo`, máximo 4; ~200 MB por pose).
+
+- `interfaz/`:
+  - `servidor.py`: HTTP con la librería estándar, SSE, `vigilar()` sobre los archivos de
+    resultados, imágenes generadas desde los `.npz`;
+  - `ejecutor.py`: corre `pipeline.main()` en un subproceso y aplica la configuración JSON;
+  - `estatico/`: HTML, CSS y JS sin dependencias, con un visor WebGL propio en `nube.js`;
+  - textos de la interfaz en español e inglés en `estatico/i18n.js`. Todo texto visible nuevo va
+    allí, en los dos idiomas: `data-i18n` en el HTML y `t("clave")` en el JS.
+
+  No agregues dependencias de CDN: el equipo del laboratorio puede no tener internet.
+- `configuracion.DATOS` sale de `TESIS_DIR_DATOS` (por defecto, la raíz del proyecto).
 
 ## Convenciones y decisiones no obvias
 

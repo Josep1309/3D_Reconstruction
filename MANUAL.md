@@ -28,6 +28,7 @@ proyecto pueda operar el montaje, entender los resultados y modificar el código
 16. [Diagnóstico de problemas](#16-diagnóstico-de-problemas)
 17. [Correspondencia con el código MATLAB y diferencias](#17-correspondencia-con-el-código-matlab-y-diferencias)
 18. [Referencia de archivos de salida](#18-referencia-de-archivos-de-salida)
+19. [Interfaz web](#19-interfaz-web)
 
 ---
 
@@ -57,6 +58,12 @@ después se pueden medir tantos objetos como se quiera reutilizando la calibraci
 ---
 
 ## 2. Uso rápido
+
+Hay dos formas de usar el sistema:
+
+- **Interfaz web** (recomendada para operar el montaje):
+  `.env/bin/python interfaz/servidor.py`. Ver §19.
+- **Script**: `pipeline.py`, descrito a continuación.
 
 Todo se controla desde `pipeline.py`, que **no recibe argumentos**: se editan las variables de
 la sección `CONFIGURACIÓN DEL PIPELINE` y se ejecuta:
@@ -915,3 +922,133 @@ Z = d["Z"]                   # mapa de profundidad (mm), NaN donde no hay medida
 ```
 
 En MATLAB, los `.ply` se leen con `pcread`.
+
+---
+
+## 19. Interfaz web
+
+Una aplicación web **local** para controlar todo el proceso y ver cada paso mientras ocurre.
+Corre en el mismo computador que la cámara y el proyector, y se usa desde el navegador.
+
+```bash
+cd ~/Documents/Tesis
+.env/bin/python interfaz/servidor.py          # abre http://127.0.0.1:8000
+```
+
+Opciones:
+
+- `--puerto 8080`: otro puerto.
+- `--sin-navegador`: no abre el navegador automáticamente.
+- `--host 0.0.0.0`: accesible desde otro equipo de la red. **No tiene contraseña:** cualquiera en
+  la red podría lanzar capturas. Úsalo solo en una red de confianza.
+
+No necesita instalar nada: usa la librería estándar de Python más NumPy y OpenCV, y el visor 3D
+está escrito en WebGL puro, así que funciona sin internet.
+
+### 19.1 Panel de control (izquierda)
+
+- **Medir.** Elige la categoría, el número de poses y los ciclos, y pulsa **Capturar y
+  reconstruir**. Corre `captura → organizar → fase relativa → fase absoluta → reconstrucción`:
+  - con *Objeto* o *Plano*, usa la calibración guardada y solo reconstruye esa categoría;
+  - con *Patrón (calibrar)*, además recalibra y reconstruye de nuevo planos y objetos, porque
+    cambió la calibración.
+- **Pausa antes de cada pose.** Cuando la captura espera, aparece un aviso con **Continuar ⏎** y
+  **Terminar (q)**. Equivalen al Enter y la `q` de la terminal; la tecla Enter también funciona.
+- **Modo demo (cámara simulada).** Reproduce una captura existente en lugar de usar la cámara,
+  para probar o enseñar la interfaz sin el montaje (clase `CamaraSimulada` de
+  `capturar_patrones.py`). Las capturas simuladas se guardan en `capturas/<cat>/<fecha>_simulada`;
+  **bórralas** al terminar, o se procesarán como poses reales.
+- **Proceso por etapas.** El equivalente a `ETAPAS` de `pipeline.py`. Muestra las 8 etapas
+  **numeradas en su orden de ejecución**, cada una con una descripción breve y una etiqueta:
+  *hardware* si necesita el montaje, *opcional* para la calibración, *ocasional* para la
+  generación de patrones. Debajo están las opciones: categorías, triangulación, calibración usada
+  y *Recalcular todo* (`REHACER`). Durante la ejecución se resalta la etapa en curso.
+- **Detener proceso.** Termina el subproceso del pipeline.
+- **Poses.** Todas las poses por categoría. Los cuatro puntos indican, en orden:
+  organizada · fase envuelta · fase desenvuelta · reconstruida. Un clic la abre.
+- **Calibración.** Resumen de la calibración en uso: fecha, errores RMS, línea base y cobertura
+  del proyector.
+
+### 19.2 Visualización (derecha)
+
+Cinco pasos, que siguen solos al proceso en curso cuando **Seguir la última** está activo:
+
+1. **Captura.** Mientras se captura, **vista en vivo** de la cámara (~6 imágenes/s) con el
+   avance de los 50 patrones. Después: franjas V y H, primer bit Gray y textura.
+2. **Fase envuelta.** φ de X e Y en [−π, π] y la modulación γ de cada una.
+3. **Fase desenvuelta.** Fx y Fy, el orden de franja k del código Gray y el mapa de píxeles
+   válidos.
+4. **Profundidad.** Mapa Z y, en los planos, el error respecto al plano ajustado.
+5. **Nube de puntos.** Visor 3D interactivo con hasta 400 000 puntos, coloreados por profundidad
+   o por textura:
+   - arrastrar = girar;
+   - clic derecho o Shift + arrastrar = desplazar;
+   - rueda = acercar;
+   - doble clic = vista inicial.
+
+**Idioma.** El selector **ES | EN** de la barra superior cambia toda la interfaz entre español e
+inglés al instante, sin perder lo que estás viendo. La elección se recuerda en el navegador; por
+defecto está en español. El **registro del proceso** sigue en español porque es la salida directa
+de los scripts de Python. Los textos de ambos idiomas están en `interfaz/estatico/i18n.js`: para
+cambiar un texto o agregar otro idioma, se edita ese archivo.
+
+**Ayudas.** Cada opción tiene un botón **?**. Muestra su descripción al pasar el mouse, al
+enfocarlo con el teclado o al tocarlo en pantallas táctiles.
+
+Un clic en cualquier imagen la amplía y `Esc` la cierra. Arriba se muestran el número de puntos,
+el rango de Z y, en los planos, el error de planitud. Abajo está el **registro** completo del
+proceso.
+
+Enlace directo a una pose y un paso: `http://127.0.0.1:8000/#paso=desenvuelta&cat=plano&pose=pose_03`
+(pasos: `captura`, `envuelta`, `desenvuelta`, `profundidad`, `nube`).
+
+### 19.3 Cómo funciona
+
+```
+navegador ──HTTP/SSE──► interfaz/servidor.py ──subproceso──► interfaz/ejecutor.py ──► pipeline.main()
+                              │  vigila resultados/ y avisa de cada pose nueva
+                              └─ genera las imágenes de cada paso desde los .npz
+```
+
+- **`servidor.py`** (`ThreadingHTTPServer`):
+  - sirve la página y la API;
+  - lanza el pipeline en un **subproceso** (`Ejecucion`), para poder detenerlo y escribir en su
+    entrada estándar las respuestas a las pausas;
+  - lee su salida y la reenvía al navegador por **Server-Sent Events** (`/api/eventos`): registro,
+    etapa en curso, avance de la captura;
+  - con un hilo (`vigilar`) revisa cada 0.7 s qué poses tienen resultados nuevos y emite un evento
+    `cambio`. Solo avisa cuando el archivo dejó de cambiar, para no leerlo a medio escribir;
+  - genera las imágenes de cada paso al vuelo (`generar_imagen`) con mapas de color de OpenCV, y
+    la nube en binario (`generar_nube`).
+- **`ejecutor.py`**:
+  - aplica la configuración recibida sobre las variables de `pipeline.py`;
+  - desactiva la visualización de matplotlib;
+  - conecta la vista en vivo (`VistaEnVivo`): la captura solo guarda una referencia al último
+    frame, y un hilo aparte lo escribe como JPEG cada 0.15 s, así que la adquisición no se
+    retrasa ni se pierden triggers;
+  - con el modo demo, sustituye la cámara por `CamaraSimulada`.
+- **`estatico/`**: `index.html`, `estilo.css` (modo claro/oscuro automático), `i18n.js` (textos en
+  español e inglés), `app.js` (lógica) y `nube.js` (visor WebGL).
+
+API, por si se quiere automatizar algo:
+
+| Ruta | Uso |
+|---|---|
+| `GET /api/config` | Valores por defecto de `pipeline.py` y `configuracion.py` |
+| `GET /api/estado` | Ejecución, calibración y poses con sus resultados |
+| `POST /api/ejecutar` | Lanza el pipeline. Cuerpo: `{etapas, categorias, captura, rehacer, fase, calibracion, simular}` |
+| `POST /api/detener` | Detiene el proceso |
+| `POST /api/entrada` | `{"texto": ""}` = Enter, `{"texto": "q"}` = terminar |
+| `GET /api/eventos` | Flujo SSE: `log`, `estado`, `vivo`, `cambio` |
+| `GET /api/imagen?cat=&pose=&tipo=` | Imagen de un paso. `tipo`: `franja_V`, `franja_H`, `gray_V`, `textura`, `phiX`, `phiY`, `qX`, `qY`, `Fx`, `Fy`, `kX`, `kY`, `mascara`, `Z`, `error` |
+| `GET /api/nube?cat=&pose=&max=` | Nube binaria: `uint32 N`, `float32 xyz·N`, `uint8 gris·N` |
+| `GET /api/vivo.jpg` | Último frame de la cámara |
+
+**Probar con otra copia de los datos.** La variable de entorno `TESIS_DIR_DATOS` hace que todo
+(pipeline e interfaz) use `capturas/`, `capturas_ordenadas/` y `resultados/` de otra carpeta. Es
+útil para ensayar sin tocar las capturas reales:
+
+```bash
+TESIS_DIR_DATOS=~/pruebas_tesis .env/bin/python interfaz/servidor.py
+```
+

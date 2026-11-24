@@ -19,10 +19,14 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from typing import Callable
+
 import cv2
 import numpy as np
 
 import configuracion as cfg
+
+AlFrame = Callable[[int, np.ndarray], None]
 
 
 class CamaraFLIR:
@@ -124,8 +128,12 @@ class CamaraFLIR:
         cam.TriggerMode.SetValue(ps.TriggerMode_On)
         print(f"[OK] Cámara lista | exposición {cam.ExposureTime.GetValue():.0f} us | trigger Line0")
 
-    def capturar(self, cantidad: int) -> list[np.ndarray]:
-        """Captura `cantidad` frames consecutivos a partir del siguiente pulso de trigger."""
+    def capturar(self, cantidad: int, al_frame: AlFrame | None = None) -> list[np.ndarray]:
+        """Captura `cantidad` frames consecutivos a partir del siguiente pulso de trigger.
+
+        `al_frame(indice, frame)` se llama con cada frame recibido (p. ej. para la vista en vivo de
+        la interfaz web). Debe ser instantáneo: si tarda, se pierden triggers.
+        """
         cam = self.camera
         frames: list[np.ndarray] = []
         tiempos: list[float] = []
@@ -144,16 +152,59 @@ class CamaraFLIR:
                         raise RuntimeError(f"Frame {indice} incompleto: {image.GetImageStatus()}")
                     frames.append(np.array(image.GetNDArray(), copy=True))
                     tiempos.append(time.perf_counter())
+                    if al_frame is not None:
+                        al_frame(indice, frames[-1])
                 finally:
                     image.Release()
         finally:
             cam.EndAcquisition()
 
-        if len(tiempos) > 2:
-            dt = np.diff(tiempos) * 1000.0
-            print(f"    Δt entre frames: mediana {np.median(dt):.1f} ms, máx {dt.max():.1f} ms")
-            if dt.max() > 1.5 * np.median(dt):
-                print("    [AVISO] posible pulso perdido; el organizador lo detectará y separará los ciclos.")
+        _reportar_tiempos(tiempos)
+        return frames
+
+
+def _reportar_tiempos(tiempos: list[float]) -> None:
+    if len(tiempos) > 2:
+        dt = np.diff(tiempos) * 1000.0
+        print(f"    Δt entre frames: mediana {np.median(dt):.1f} ms, máx {dt.max():.1f} ms")
+        if dt.max() > 1.5 * np.median(dt):
+            print("    [AVISO] posible pulso perdido; el organizador lo detectará y separará los ciclos.")
+
+
+class CamaraSimulada:
+    """Sustituto de `CamaraFLIR` para probar sin hardware (modo demo de la interfaz web).
+
+    Reproduce en bucle los frames de una captura existente (una carpeta de `capturas/`), a la
+    cadencia del Arduino y empezando en un patrón al azar, igual que la cámara real.
+    """
+
+    def __init__(self, carpeta: Path, periodo_s: float = 0.05) -> None:
+        import organizar_capturas as oc
+
+        fuentes = oc.descubrir_fuentes([Path(carpeta)])
+        if not fuentes:
+            raise FileNotFoundError(f"No hay imágenes ni videos para simular en '{carpeta}'")
+        self.frames = oc.cargar_frames(fuentes[0])
+        self.periodo_s = periodo_s
+        self.inicio = int(np.random.default_rng().integers(len(self.frames)))
+        print(f"[OK] Cámara SIMULADA con {len(self.frames)} frames de '{carpeta}'")
+
+    def __enter__(self) -> CamaraSimulada:
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        return None
+
+    def capturar(self, cantidad: int, al_frame: AlFrame | None = None) -> list[np.ndarray]:
+        frames, tiempos = [], []
+        for indice in range(cantidad):
+            time.sleep(self.periodo_s)
+            frames.append(self.frames[(self.inicio + indice) % len(self.frames)].copy())
+            tiempos.append(time.perf_counter())
+            if al_frame is not None:
+                al_frame(indice, frames[-1])
+        self.inicio = (self.inicio + cantidad) % len(self.frames)
+        _reportar_tiempos(tiempos)
         return frames
 
 
@@ -171,9 +222,11 @@ def escribir_video(frames: list[np.ndarray], ruta: Path, fps: float = 20.0) -> b
     return True
 
 
-def guardar_captura(frames: list[np.ndarray], salida: Path, categoria: str, video: bool = cfg.GUARDAR_VIDEO) -> Path:
-    """Guarda los frames en `<salida>/<categoria>/<fecha>/` y devuelve la carpeta."""
-    carpeta = salida / categoria / datetime.now().strftime("%Y%m%d_%H%M%S")
+def guardar_captura(
+    frames: list[np.ndarray], salida: Path, categoria: str, video: bool = cfg.GUARDAR_VIDEO, sufijo: str = ""
+) -> Path:
+    """Guarda los frames en `<salida>/<categoria>/<fecha><sufijo>/` y devuelve la carpeta."""
+    carpeta = salida / categoria / (datetime.now().strftime("%Y%m%d_%H%M%S") + sufijo)
     while carpeta.exists():  # dos capturas en el mismo segundo
         carpeta = carpeta.with_name(carpeta.name + "_b")
     carpeta.mkdir(parents=True)
@@ -192,11 +245,18 @@ def capturar_poses(
     ciclos: int = cfg.CICLOS_POR_CAPTURA,
     salida: Path = cfg.DIR_CAPTURAS,
     esperar_enter: bool = True,
+    camara: object | None = None,
+    al_frame: AlFrame | None = None,
+    sufijo: str = "",
 ) -> list[Path]:
-    """Captura `poses` secuencias de la categoría indicada, pidiendo confirmación entre poses."""
+    """Captura `poses` secuencias de la categoría indicada, pidiendo confirmación entre poses.
+
+    `camara`: objeto con `__enter__` y `capturar` (por defecto `CamaraFLIR()`; `CamaraSimulada`
+    para el modo demo). `sufijo` se añade al nombre de la carpeta (p. ej. "_simulada").
+    """
     cantidad = cfg.IMAGENES_POR_CICLO * max(ciclos, 1)
     carpetas: list[Path] = []
-    with CamaraFLIR() as camara:
+    with (camara if camara is not None else CamaraFLIR()) as camara:
         for pose in range(poses):
             if esperar_enter:
                 resp = input(
@@ -204,9 +264,9 @@ def capturar_poses(
                 ).strip().lower()
                 if resp == "q":
                     break
-            print(f"    Capturando {cantidad} frames...")
-            frames = camara.capturar(cantidad)
-            carpeta = guardar_captura(frames, salida, categoria)
+            print(f"    Capturando {cantidad} frames...", flush=True)
+            frames = camara.capturar(cantidad, al_frame)
+            carpeta = guardar_captura(frames, salida, categoria, sufijo=sufijo)
             carpetas.append(carpeta)
             print(f"    [OK] {len(frames)} frames en '{carpeta}'")
     return carpetas

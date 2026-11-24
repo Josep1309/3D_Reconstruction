@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reconstrucción 3D por franjas</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1 2h2v12H1zM5 2h2v12H5zM9 2h2v12H9zM13 2h2v12h-2z' fill='%23f28c28'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/estatico/estilo.css">
+  <script src="/estatico/i18n.js"></script>
+</head>
+<body>
+<header class="barra">
+  <div class="marca">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 2h2v12H1zM5 2h2v12H5zM9 2h2v12H9zM13 2h2v12h-2z"/></svg>
+    <div>
+      <h1 data-i18n="titulo">Reconstrucción 3D por franjas</h1>
+      <p data-i18n="subtitulo">Phase shifting · código Gray · triangulación cámara–proyector</p>
+    </div>
+  </div>
+  <div class="estado-global">
+    <span id="chip-calib" class="chip" data-i18n-title="chip_calib_title" title="Calibración en uso">—</span>
+    <span id="chip-estado" class="chip chip-inactivo"><i></i><b>Inactivo</b></span>
+    <div class="segmentado idioma" role="group" data-i18n-aria="idioma" aria-label="Idioma">
+      <button type="button" data-idioma="es" lang="es" title="Español">ES</button>
+      <button type="button" data-idioma="en" lang="en" title="English">EN</button>
+    </div>
+  </div>
+</header>
+
+<div class="disposicion">
+  <!-- ===================== PANEL DE CONTROL ===================== -->
+  <aside class="control">
+    <section class="tarjeta">
+      <h2 data-i18n="medir">Medir</h2>
+      <div class="campos">
+        <div class="campo ancho">
+          <span class="etiqueta"><label for="m-categoria" data-i18n="categoria">Categoría</label>
+            <button type="button" class="ayuda" data-i18n-ayuda="ayuda_categoria" data-i18n-etiqueta="categoria">?</button></span>
+          <select id="m-categoria">
+            <option value="objeto" data-i18n="cat_objeto">Objeto</option>
+            <option value="plano" data-i18n="cat_plano">Plano de referencia</option>
+            <option value="patron" data-i18n="cat_patron">Patrón (calibrar)</option>
+          </select>
+        </div>
+        <div class="campo">
+          <span class="etiqueta"><label for="m-poses" data-i18n="poses">Poses</label>
+            <button type="button" class="ayuda" data-i18n-ayuda="ayuda_poses" data-i18n-etiqueta="poses">?</button></span>
+          <input id="m-poses" type="number" min="1" max="50" value="1">
+        </div>
+        <div class="campo">
+          <span class="etiqueta"><label for="m-ciclos" data-i18n="ciclos">Ciclos</label>
+            <button type="button" class="ayuda" data-i18n-ayuda="ayuda_ciclos" data-i18n-etiqueta="ciclos">?</button></span>
+          <input id="m-ciclos" type="number" min="1" max="8" value="1">
+        </div>
+      </div>
+      <div class="fila-casilla">
+        <label class="casilla"><input id="m-pausa" type="checkbox" checked> <span data-i18n="pausa">Pausa antes de cada pose</span></label>
+        <button type="button" class="ayuda" data-i18n-ayuda="ayuda_pausa" data-i18n-etiqueta="pausa">?</button>
+      </div>
+      <div class="fila-casilla">
+        <label class="casilla"><input id="m-demo" type="checkbox"> <span data-i18n="demo">Modo demo (cámara simulada)</span></label>
+        <button type="button" class="ayuda" data-i18n-ayuda="ayuda_demo" data-i18n-etiqueta="demo">?</button>
+      </div>
+      <select id="m-fuente" class="oculto" data-i18n-aria="fuente_aria"></select>
+      <p id="m-nota" class="nota"></p>
+      <button id="b-medir" class="primario" data-i18n="b_medir">Capturar y reconstruir</button>
+    </section>
+
+    <section id="pausa" class="tarjeta pausa oculto" role="alert">
+      <p><b data-i18n="pausa_titulo">La captura está en pausa.</b><br><span data-i18n="pausa_texto">Prepara la pose y continúa.</span></p>
+      <div class="botones">
+        <button id="b-continuar" class="primario" data-i18n="continuar">Continuar ⏎</button>
+        <button id="b-terminar" data-i18n="terminar">Terminar (q)</button>
+      </div>
+    </section>
+
+    <details class="tarjeta" id="avanzado">
+      <summary><h2 data-i18n="proceso">Proceso por etapas</h2></summary>
+      <p class="nota" data-i18n="proceso_nota">Las etapas siempre se ejecutan en este orden. Marca las que quieras correr.</p>
+      <ol id="etapas" class="secuencia"></ol>
+      <h3 class="subtitulo" data-i18n="opciones">Opciones</h3>
+      <div class="campos">
+        <div class="campo ancho">
+          <span class="etiqueta"><span data-i18n="cats_procesar">Categorías a procesar</span>
+            <button type="button" class="ayuda" data-i18n-ayuda="ayuda_cats" data-i18n-etiqueta="cats_procesar">?</button></span>
+          <span class="grupo">
+            <label class="casilla"><input type="checkbox" name="cat" value="plano" checked> <span data-i18n="cat_nombre_plano">plano</span></label>
+            <label class="casilla"><input type="checkbox" name="cat" value="objeto" checked> <span data-i18n="cat_nombre_objeto">objeto</span></label>
+          </span>
+        </div>
+        <div class="campo">
+          <span class="etiqueta"><label for="a-fase" data-i18n="triangulacion">Triangulación</label>
+            <button type="button" class="ayuda" data-i18n-ayuda="ayuda_triangulacion" data-i18n-etiqueta="triangulacion">?</button></span>
+          <select id="a-fase">
+            <option value="auto" data-i18n="fase_auto">auto (línea base)</option>
+            <option value="Fy">Fy</option><option value="Fx">Fx</option>
+            <option value="ambas" data-i18n="fase_ambas">ambas</option>
+          </select>
+        </div>
+        <div class="campo">
+          <span class="etiqueta"><label for="a-calib" data-i18n="calibracion">Calibración</label>
+            <button type="button" class="ayuda" data-i18n-ayuda="ayuda_calibracion" data-i18n-etiqueta="calibracion">?</button></span>
+          <select id="a-calib">
+            <option value="independiente" data-i18n="calib_indep">independiente</option>
+            <option value="conjunta" data-i18n="calib_conj">conjunta (_J)</option>
+          </select>
+        </div>
+      </div>
+      <div class="fila-casilla">
+        <label class="casilla"><input id="a-rehacer" type="checkbox"> <span data-i18n="rehacer">Recalcular todo</span></label>
+        <button type="button" class="ayuda" data-i18n-ayuda="ayuda_rehacer" data-i18n-etiqueta="rehacer">?</button>
+      </div>
+      <button id="b-ejecutar" data-i18n="b_ejecutar">Ejecutar etapas seleccionadas</button>
+    </details>
+
+    <button id="b-detener" class="peligro oculto" data-i18n="b_detener">Detener proceso</button>
+
+    <section class="tarjeta">
+      <h2 data-i18n="poses_titulo">Poses</h2>
+      <div id="lista-poses" class="lista-poses"><p class="nota" data-i18n="cargando">Cargando…</p></div>
+    </section>
+
+    <details class="tarjeta">
+      <summary><h2 data-i18n="calib_titulo">Calibración</h2></summary>
+      <dl id="calib-detalle" class="detalle"></dl>
+    </details>
+  </aside>
+
+  <!-- ===================== VISUALIZACIÓN ===================== -->
+  <main class="vista">
+    <div class="cabecera-pose">
+      <div class="selector">
+        <select id="v-categoria" data-i18n-aria="categoria"></select>
+        <select id="v-pose" data-i18n-aria="poses"></select>
+        <label class="casilla"><input id="v-seguir" type="checkbox" checked> <span data-i18n="seguir">Seguir la última</span></label>
+      </div>
+      <div id="metricas" class="metricas"></div>
+    </div>
+
+    <nav class="pasos" id="pasos" role="tablist">
+      <button role="tab" data-paso="captura"><span>1</span><b data-i18n="paso_captura">Captura</b></button>
+      <button role="tab" data-paso="envuelta"><span>2</span><b data-i18n="paso_envuelta">Fase envuelta</b></button>
+      <button role="tab" data-paso="desenvuelta"><span>3</span><b data-i18n="paso_desenvuelta">Fase desenvuelta</b></button>
+      <button role="tab" data-paso="profundidad"><span>4</span><b data-i18n="paso_profundidad">Profundidad</b></button>
+      <button role="tab" data-paso="nube"><span>5</span><b data-i18n="paso_nube">Nube de puntos</b></button>
+    </nav>
+
+    <section class="panel" data-panel="captura">
+      <div class="vivo oculto" id="vivo">
+        <img id="vivo-img" data-i18n-alt="vivo_alt" alt="Vista en vivo de la cámara">
+        <div class="vivo-barra"><span id="vivo-texto">Esperando frames…</span><progress id="vivo-progreso" max="50" value="0"></progress></div>
+      </div>
+      <div class="rejilla">
+        <figure data-tipo="franja_V"><figcaption><span data-i18n="fig_franja_V">Franjas verticales (paso 0)</span></figcaption></figure>
+        <figure data-tipo="franja_H"><figcaption><span data-i18n="fig_franja_H">Franjas horizontales (paso 0)</span></figcaption></figure>
+        <figure data-tipo="gray_V"><figcaption><span data-i18n="fig_gray_V">Código Gray V (primer bit)</span></figcaption></figure>
+        <figure data-tipo="textura"><figcaption><span data-i18n="fig_textura_blanco">Textura (patrón blanco)</span></figcaption></figure>
+      </div>
+    </section>
+
+    <section class="panel" data-panel="envuelta">
+      <p class="explica" data-i18n="explica_envuelta">Fase relativa φ = −atan2(S, C) de los 18 corrimientos, en [−π, π], y la modulación γ = B/A (contraste de las franjas: calidad de cada píxel).</p>
+      <div class="rejilla">
+        <figure data-tipo="phiX"><figcaption><span data-i18n="fig_phiX">Fase envuelta X (franjas V)</span></figcaption></figure>
+        <figure data-tipo="phiY"><figcaption><span data-i18n="fig_phiY">Fase envuelta Y (franjas H)</span></figcaption></figure>
+        <figure data-tipo="qX"><figcaption><span data-i18n="fig_qX">Modulación γ X</span></figcaption></figure>
+        <figure data-tipo="qY"><figcaption><span data-i18n="fig_qY">Modulación γ Y</span></figcaption></figure>
+      </div>
+    </section>
+
+    <section class="panel" data-panel="desenvuelta">
+      <p class="explica" data-i18n="explica_desenvuelta">Fase absoluta Φ = φ + 2πk, con el orden de franja k del código Gray. Es proporcional a la columna (Fx) y a la fila (Fy) del proyector que ilumina cada píxel.</p>
+      <div class="rejilla">
+        <figure data-tipo="Fx"><figcaption><span data-i18n="fig_Fx">Fase desenvuelta Fx</span></figcaption></figure>
+        <figure data-tipo="Fy"><figcaption><span data-i18n="fig_Fy">Fase desenvuelta Fy</span></figcaption></figure>
+        <figure data-tipo="kX"><figcaption><span data-i18n="fig_kX">Orden de franja k (Gray V)</span></figcaption></figure>
+        <figure data-tipo="mascara"><figcaption><span data-i18n="fig_mascara">Píxeles válidos</span></figcaption></figure>
+      </div>
+    </section>
+
+    <section class="panel" data-panel="profundidad">
+      <div class="rejilla dos">
+        <figure data-tipo="Z"><figcaption><span data-i18n="fig_Z">Profundidad Z</span></figcaption></figure>
+        <figure data-tipo="error" data-solo="plano"><figcaption><span data-i18n="fig_error">Error respecto al plano ajustado</span></figcaption></figure>
+        <figure data-tipo="textura"><figcaption><span data-i18n="fig_textura">Textura</span></figcaption></figure>
+      </div>
+    </section>
+
+    <section class="panel" data-panel="nube">
+      <div class="visor">
+        <canvas id="lienzo" data-i18n-aria="lienzo" aria-label="Nube de puntos 3D"></canvas>
+        <div class="visor-herramientas">
+          <div class="segmentado color" role="group" data-i18n-aria="color" aria-label="Color">
+            <button data-color="profundidad" class="activo" data-i18n="col_prof">Profundidad</button>
+            <button data-color="textura" data-i18n="col_tex">Textura</button>
+          </div>
+          <label><span data-i18n="tamano">Tamaño</span> <input id="n-tam" type="range" min="1" max="6" step="0.5" value="2"></label>
+          <button id="n-reiniciar" data-i18n="vista_inicial" data-i18n-title="vista_title">Vista inicial</button>
+        </div>
+        <p id="n-info" class="visor-info">arrastra para girar · clic derecho o Shift para desplazar · rueda para acercar</p>
+        <p id="n-vacio" class="visor-vacio oculto">Esta pose aún no tiene reconstrucción 3D.</p>
+      </div>
+    </section>
+
+    <details class="registro" id="registro" open>
+      <summary data-i18n="registro">Registro del proceso</summary>
+      <pre id="log" aria-live="polite"></pre>
+    </details>
+  </main>
+</div>
+
+<div id="burbuja" class="burbuja" role="tooltip" hidden></div>
+<script src="/estatico/nube.js"></script>
+<script src="/estatico/app.js"></script>
+</body>
+</html>

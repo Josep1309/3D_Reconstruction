@@ -6,16 +6,20 @@ Los argumentos de línea de comandos de cada script tienen prioridad sobre estos
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 # ==============================================================================
 # --- DIRECTORIOS ---
 # ==============================================================================
 RAIZ = Path(__file__).resolve().parent
+# Carpeta base de los datos. Por defecto la del proyecto; la variable de entorno TESIS_DIR_DATOS
+# permite trabajar con otra copia (p. ej. para probar sin tocar las capturas reales).
+DATOS = Path(os.environ.get("TESIS_DIR_DATOS", RAIZ)).expanduser().resolve()
 DIR_PATRONES = RAIZ / "patterns" / "secuencia_completa_bmp"   # .bmp que se cargan al LightCrafter
-DIR_CAPTURAS = RAIZ / "capturas"                  # capturas crudas (cualquier nombre / formato)
-DIR_ORDENADAS = RAIZ / "capturas_ordenadas"       # <categoria>/pose_XX/{H,V}/P18_FYY.tiff
-DIR_RESULTADOS = RAIZ / "resultados"              # fases, calibración y reconstrucción
+DIR_CAPTURAS = DATOS / "capturas"                 # capturas crudas (cualquier nombre / formato)
+DIR_ORDENADAS = DATOS / "capturas_ordenadas"      # <categoria>/pose_XX/{H,V}/P18_FYY.tiff
+DIR_RESULTADOS = DATOS / "resultados"             # fases, calibración y reconstrucción
 
 # Categorías de captura: patrón de círculos, plano de referencia y objeto
 CATEGORIAS = ("patron", "plano", "objeto")

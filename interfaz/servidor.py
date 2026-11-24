@@ -1,0 +1,610 @@
+"""Interfaz web local para controlar y visualizar el sistema de proyección de franjas.
+
+Ejecuta:
+    .env/bin/python interfaz/servidor.py            # abre http://127.0.0.1:8000 en el navegador
+    .env/bin/python interfaz/servidor.py --puerto 8080 --sin-navegador
+    .env/bin/python interfaz/servidor.py --host 0.0.0.0   # accesible desde otra PC de la red (¡sin clave!)
+
+Solo usa la librería estándar de Python más NumPy/OpenCV del proyecto. El pipeline corre en un
+subproceso (`ejecutor.py`) para poder detenerlo y para responder a las pausas de la captura desde
+la web. El navegador recibe en tiempo real (Server-Sent Events) el registro, la etapa en curso, la
+vista en vivo de la cámara y cada resultado nuevo (pose organizada, fase relativa, fase absoluta,
+reconstrucción), que se detectan vigilando las carpetas de resultados.
+
+API (todas las respuestas JSON salvo imágenes y nube):
+    GET  /api/config                       valores por defecto de pipeline.py / configuracion.py
+    GET  /api/estado                       ejecución, calibración y poses disponibles
+    POST /api/ejecutar   {config}          lanza el pipeline
+    POST /api/detener                      termina el subproceso
+    POST /api/entrada    {"texto": "..."}  responde a una pausa (Enter, q)
+    GET  /api/eventos                      flujo SSE
+    GET  /api/imagen?cat=&pose=&tipo=&ancho=   PNG de un paso (cabecera X-Rango con la escala)
+    GET  /api/nube?cat=&pose=&max=         nube binaria: uint32 N | float32 xyz*N | uint8 gris*N
+    GET  /api/vivo.jpg                     último frame de la cámara durante la captura
+"""
+
+from __future__ import annotations
+
+import argparse
+import codecs
+import json
+import os
+import queue
+import re
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import webbrowser
+from functools import lru_cache
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, quote, urlparse
+
+RAIZ = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(RAIZ))
+
+import cv2  # noqa: E402
+import numpy as np  # noqa: E402
+
+import configuracion as cfg  # noqa: E402
+
+DIR_ESTATICO = Path(__file__).resolve().parent / "estatico"
+DIR_FASES = cfg.DIR_RESULTADOS / "fases"
+DIR_RECONSTRUCCION = cfg.DIR_RESULTADOS / "reconstruccion"
+DIR_CALIBRACION = cfg.DIR_RESULTADOS / "calibracion"
+ARCHIVO_VIVO = cfg.DIR_RESULTADOS / ".vivo" / "frame.jpg"
+RE_POSE = re.compile(r"^pose_\d+$")
+PROMPTS = ("presiona Enter", "(q = terminar)", "¿Es plano (p), objeto (o)")
+
+
+# ==============================================================================
+# Difusión de eventos (SSE)
+# ==============================================================================
+
+
+class Difusor:
+    def __init__(self) -> None:
+        self.clientes: list[queue.Queue] = []
+        self.lock = threading.Lock()
+        self.historial: list[str] = []  # registro reciente para quien se conecta tarde
+
+    def suscribir(self) -> queue.Queue:
+        q: queue.Queue = queue.Queue(maxsize=2000)
+        with self.lock:
+            self.clientes.append(q)
+            for texto in self.historial[-400:]:
+                q.put(("log", {"texto": texto}))
+        return q
+
+    def desuscribir(self, q: queue.Queue) -> None:
+        with self.lock:
+            if q in self.clientes:
+                self.clientes.remove(q)
+
+    def emitir(self, evento: str, datos: dict) -> None:
+        if evento == "log":
+            self.historial.append(datos["texto"])
+            del self.historial[:-2000]
+        with self.lock:
+            for q in list(self.clientes):
+                try:
+                    q.put_nowait((evento, datos))
+                except queue.Full:
+                    pass
+
+
+difusor = Difusor()
+
+
+# ==============================================================================
+# Ejecución del pipeline en un subproceso
+# ==============================================================================
+
+
+class Ejecucion:
+    def __init__(self) -> None:
+        self.proc: subprocess.Popen | None = None
+        self.etapa: str | None = None
+        self.esperando = False
+        self.inicio: float | None = None
+        self.ultimo_codigo: int | None = None
+        self.lock = threading.Lock()
+
+    @property
+    def activa(self) -> bool:
+        return self.proc is not None and self.proc.poll() is None
+
+    def estado(self) -> dict:
+        return {
+            "ejecutando": self.activa, "etapa": self.etapa, "esperando": self.esperando,
+            "codigo": self.ultimo_codigo,
+            "segundos": round(time.time() - self.inicio, 1) if self.inicio and self.activa else None,
+        }
+
+    def _emitir_estado(self) -> None:
+        difusor.emitir("estado", self.estado())
+
+    def lanzar(self, conf: dict) -> None:
+        with self.lock:
+            if self.activa:
+                raise RuntimeError("Ya hay un proceso en ejecución.")
+            ruta = Path(tempfile.mkstemp(prefix="pipeline_", suffix=".json")[1])
+            ruta.write_text(json.dumps(conf), encoding="utf-8")
+            env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
+            self.proc = subprocess.Popen(
+                [sys.executable, "-u", str(Path(__file__).with_name("ejecutor.py")), str(ruta)],
+                cwd=RAIZ, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            )
+            self.etapa, self.esperando, self.inicio, self.ultimo_codigo = None, False, time.time(), None
+        difusor.emitir("log", {"texto": f"\n▶ Ejecución iniciada {time.strftime('%H:%M:%S')}"})
+        self._emitir_estado()
+        threading.Thread(target=self._leer_salida, args=(self.proc, ruta), daemon=True).start()
+
+    def _linea(self, linea: str) -> None:
+        if linea.startswith("@@vivo"):
+            _, i, n = linea.split()
+            difusor.emitir("vivo", {"i": int(i), "n": int(n)})
+            return
+        m = re.match(r"# ETAPA: (\w+)", linea)
+        if m:
+            self.etapa = m.group(1)
+            self._emitir_estado()
+        if set(linea.strip()) == {"#"}:
+            return  # separadores decorativos
+        difusor.emitir("log", {"texto": linea})
+
+    def _leer_salida(self, proc: subprocess.Popen, ruta_conf: Path) -> None:
+        decodificador = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        pendiente = ""
+        fd = proc.stdout.fileno()
+        while True:
+            bloque = os.read(fd, 4096)
+            if not bloque:
+                break
+            pendiente += decodificador.decode(bloque)
+            *lineas, pendiente = pendiente.split("\n")
+            for linea in lineas:
+                self._linea(linea.rstrip("\r"))
+            # Las preguntas de input() no terminan en salto de línea
+            if pendiente and any(p in pendiente for p in PROMPTS):
+                difusor.emitir("log", {"texto": pendiente})
+                pendiente = ""
+                self.esperando = True
+                self._emitir_estado()
+        if pendiente:
+            self._linea(pendiente)
+        codigo = proc.wait()
+        ruta_conf.unlink(missing_ok=True)
+        self.ultimo_codigo, self.esperando, self.etapa = codigo, False, None
+        texto = "✔ Proceso terminado correctamente" if codigo == 0 else f"✖ Proceso terminado con código {codigo}"
+        difusor.emitir("log", {"texto": f"{texto} ({time.time() - (self.inicio or time.time()):.1f} s)"})
+        self._emitir_estado()
+
+    def entrada(self, texto: str) -> None:
+        if not self.activa or self.proc.stdin is None:
+            raise RuntimeError("No hay un proceso esperando entrada.")
+        self.proc.stdin.write((texto + "\n").encode())
+        self.proc.stdin.flush()
+        self.esperando = False
+        difusor.emitir("log", {"texto": f"  ⏎ {texto or '(Enter)'}"})
+        self._emitir_estado()
+
+    def detener(self) -> None:
+        if self.activa:
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+            difusor.emitir("log", {"texto": "■ Proceso detenido por el usuario"})
+
+
+ejecucion = Ejecucion()
+
+
+# ==============================================================================
+# Inventario de poses y vigilancia de cambios
+# ==============================================================================
+
+
+def _mtime(ruta: Path) -> float | None:
+    try:
+        return ruta.stat().st_mtime
+    except OSError:
+        return None
+
+
+def _archivos_pose(cat: str, pose: str) -> dict[str, Path]:
+    return {
+        "organizada": cfg.DIR_ORDENADAS / cat / pose / "H" / f"{cfg.PREFIJO_ORDENADAS}{cfg.IMAGENES_POR_ORIENTACION + 1:02d}.tiff",
+        "relativa": DIR_FASES / cat / f"{pose}_relativa.npz",
+        "absoluta": DIR_FASES / cat / f"{pose}.npz",
+        "reconstruida": DIR_RECONSTRUCCION / cat / f"{cat}_{pose}.npz",
+    }
+
+
+def listar_poses(cat: str) -> list[str]:
+    nombres = set()
+    for carpeta in (cfg.DIR_ORDENADAS / cat, DIR_FASES / cat):
+        if carpeta.is_dir():
+            for p in carpeta.iterdir():
+                nombre = p.name.split("_relativa")[0].removesuffix(".npz").removesuffix(".png")
+                if RE_POSE.match(nombre):
+                    nombres.add(nombre)
+    return sorted(nombres, key=lambda n: int(n[5:]))
+
+
+def inventario() -> dict:
+    datos = {}
+    for cat in cfg.CATEGORIAS:
+        resumen_ruta = DIR_RECONSTRUCCION / cat / f"{cat}_resumen.json"
+        resumen = {}
+        if resumen_ruta.exists():
+            try:
+                resumen = json.loads(resumen_ruta.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                pass
+        poses = []
+        for pose in listar_poses(cat):
+            estado = {k: _mtime(r) is not None for k, r in _archivos_pose(cat, pose).items()}
+            info = resumen.get(pose, {})
+            poses.append({"pose": pose, **estado, "puntos": info.get("puntos"), "erms_mm": info.get("erms_mm"),
+                          "z": [info.get("z_p1_mm"), info.get("z_p99_mm")]})
+        datos[cat] = poses
+    return datos
+
+
+def resumen_calibracion() -> dict | None:
+    ruta = DIR_CALIBRACION / "Estereo_TSC_0_2.json"
+    if not ruta.exists():
+        return None
+    try:
+        info = json.loads(ruta.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    claves = ("fecha", "poses", "rms_cam_px", "rms_proj_px", "rms_stereo_indep_px", "linea_base_mm",
+              "T_mm", "cobertura_up_px", "cobertura_vp_px", "center_distance_mm")
+    return {k: info.get(k) for k in claves}
+
+
+def fuentes_demo() -> list[str]:
+    """Capturas existentes que puede reproducir la cámara simulada."""
+    salida = []
+    for cat in cfg.CATEGORIAS:
+        carpeta = cfg.DIR_CAPTURAS / cat
+        if carpeta.is_dir():
+            salida += [str(p.relative_to(cfg.DIR_CAPTURAS)) for p in sorted(carpeta.iterdir())
+                       if p.is_dir() and not p.name.endswith("_simulada")]
+    return salida
+
+
+def vigilar() -> None:
+    """Emite 'cambio' cuando aparece o se actualiza un resultado de una pose.
+
+    Solo avisa cuando la fecha de modificación se mantiene en dos sondeos seguidos, para no
+    anunciar un archivo que aún se está escribiendo."""
+    visto: dict[tuple, float] = {}
+    candidato: dict[tuple, float] = {}
+    primera = True
+    while True:
+        actual = {}
+        for cat in cfg.CATEGORIAS:
+            for pose in listar_poses(cat):
+                for tipo, ruta in _archivos_pose(cat, pose).items():
+                    m = _mtime(ruta)
+                    if m is not None:
+                        actual[(cat, pose, tipo)] = m
+        for clave, m in actual.items():
+            if primera:
+                visto[clave] = m
+            elif visto.get(clave) != m:
+                if candidato.get(clave) == m:
+                    visto[clave] = m
+                    candidato.pop(clave)
+                    difusor.emitir("cambio", {"cat": clave[0], "pose": clave[1], "tipo": clave[2]})
+                else:
+                    candidato[clave] = m
+        primera = False
+        time.sleep(0.7)
+
+
+# ==============================================================================
+# Imágenes de cada paso y nube de puntos
+# ==============================================================================
+
+
+@lru_cache(maxsize=24)
+def _npz(ruta: str, _mtime_clave: float) -> dict[str, np.ndarray]:
+    with np.load(ruta) as d:
+        return {k: d[k] for k in d.files}
+
+
+_lock_npz = threading.Lock()
+
+
+def cargar_npz(ruta: Path) -> dict[str, np.ndarray]:
+    """Carga (con caché) un .npz; el candado evita que peticiones simultáneas lo lean varias veces."""
+    m = _mtime(ruta)
+    if m is None:
+        raise FileNotFoundError(str(ruta))
+    with _lock_npz:
+        return _npz(str(ruta), m)
+
+
+def _leer_ordenada(cat: str, pose: str, orient: str, indice: int) -> np.ndarray:
+    import fase
+
+    return fase.leer_gris(fase.buscar_imagen_patron(cfg.DIR_ORDENADAS / cat / pose / orient / cfg.PREFIJO_ORDENADAS, indice))
+
+
+FONDO = np.array([38, 34, 32], dtype=np.uint8)  # BGR de los píxeles sin dato
+
+
+def _color(mapa: np.ndarray, mascara: np.ndarray | None, colormap: int,
+           rango: tuple[float, float] | None = None, percentiles=(1, 99)) -> tuple[np.ndarray, tuple[float, float]]:
+    mapa = mapa.astype(np.float64)
+    valido = np.isfinite(mapa) if mascara is None else (mascara.astype(bool) & np.isfinite(mapa))
+    if not np.any(valido):
+        return np.broadcast_to(FONDO, (*mapa.shape, 3)).copy(), (0.0, 0.0)
+    if rango is None:
+        lo, hi = np.percentile(mapa[valido], percentiles)
+    else:
+        lo, hi = rango
+    norm = np.clip((np.where(valido, mapa, lo) - lo) / max(hi - lo, 1e-12) * 255, 0, 255).astype(np.uint8)
+    img = cv2.applyColorMap(norm, colormap)
+    img[~valido] = FONDO
+    return img, (float(lo), float(hi))
+
+
+def generar_imagen(cat: str, pose: str, tipo: str) -> tuple[np.ndarray, str]:
+    """Devuelve (imagen BGR o gris, texto de escala) para un paso del proceso."""
+    archivos = _archivos_pose(cat, pose)
+    n, b = cfg.N_PASOS, cfg.N_BITS_GRAY
+    if tipo in ("franja_V", "franja_H"):
+        return _leer_ordenada(cat, pose, tipo[-1], 0), "intensidad"
+    if tipo == "gray_V":
+        return _leer_ordenada(cat, pose, "V", n), "bit Gray"
+    if tipo == "textura":
+        if archivos["absoluta"].exists():
+            return cargar_npz(archivos["absoluta"])["Itex"], "intensidad"
+        return _leer_ordenada(cat, pose, "H", n + b + 1), "intensidad"
+    if tipo in ("phiX", "phiY", "qX", "qY"):
+        rel = cargar_npz(archivos["relativa"])
+        if tipo.startswith("phi"):
+            img, r = _color(rel[tipo], None, cv2.COLORMAP_TWILIGHT_SHIFTED, (-np.pi, np.pi))
+            return img, "−π … π rad"
+        img, r = _color(rel[tipo], None, cv2.COLORMAP_VIRIDIS, (0.0, 1.0))
+        return img, "γ 0 … 1"
+    if tipo in ("Fx", "Fy", "kX", "kY", "mascara"):
+        absl = cargar_npz(archivos["absoluta"])
+        if tipo == "mascara":
+            nivel = absl["MaskX"].astype(np.uint8) + 2 * absl["MaskY"].astype(np.uint8)
+            paleta = np.array([FONDO, [70, 130, 230], [80, 200, 120], [240, 240, 240]], dtype=np.uint8)
+            return paleta[nivel], "gris: nada · azul: solo X · verde: solo Y · blanco: ambas"
+        mascara = absl["MaskX"] if tipo in ("Fx", "kX") else absl["MaskY"]
+        if tipo.startswith("k"):
+            img, r = _color(absl[tipo], mascara, cv2.COLORMAP_JET, percentiles=(0, 100))
+            return img, f"orden {r[0]:.0f} … {r[1]:.0f}"
+        img, r = _color(absl[tipo], mascara, cv2.COLORMAP_TURBO, percentiles=(0.5, 99.5))
+        return img, f"{r[0]:.0f} … {r[1]:.0f} rad"
+    if tipo in ("Z", "error"):
+        xyz = cargar_npz(archivos["reconstruida"])
+        if tipo == "Z":
+            img, r = _color(xyz["Z"], xyz["Mask"], cv2.COLORMAP_VIRIDIS)
+            return img, f"Z {r[0]:.1f} … {r[1]:.1f} mm"
+        if "E" not in xyz:
+            raise FileNotFoundError("sin mapa de error (solo categoría plano)")
+        e = xyz["E"]
+        lim = float(np.nanpercentile(np.abs(e), 98)) if np.any(np.isfinite(e)) else 1.0
+        img, r = _color(e, None, cv2.COLORMAP_TURBO, (-lim, lim))
+        return img, f"error ±{lim:.2f} mm"
+    raise ValueError(f"tipo de imagen desconocido: {tipo}")
+
+
+def generar_nube(cat: str, pose: str, maximo: int) -> bytes:
+    archivos = _archivos_pose(cat, pose)
+    xyz = cargar_npz(archivos["reconstruida"])
+    m = xyz["Mask"].astype(bool) & np.isfinite(xyz["Z"])
+    idx = np.flatnonzero(m)
+    if len(idx) > maximo:
+        idx = np.sort(np.random.default_rng(0).choice(idx, maximo, replace=False))
+    pts = np.column_stack([xyz[k].ravel()[idx] for k in ("X", "Y", "Z")]).astype("<f4")
+    if archivos["absoluta"].exists():
+        gris = cargar_npz(archivos["absoluta"])["Itex"].ravel()[idx].astype(np.uint8)
+    else:
+        gris = np.full(len(idx), 200, np.uint8)
+    return np.uint32(len(idx)).tobytes() + pts.tobytes() + gris.tobytes()
+
+
+# ==============================================================================
+# Servidor HTTP
+# ==============================================================================
+
+
+def configuracion_por_defecto() -> dict:
+    import pipeline as p
+
+    return {
+        "etapas": {**p.ETAPAS, "visualizacion": False},
+        "categorias": p.CATEGORIAS,
+        "captura": {"categoria": p.CAPTURA_CATEGORIA, "poses": p.CAPTURA_POSES,
+                    "ciclos": p.CAPTURA_CICLOS, "esperar_enter": p.CAPTURA_ESPERAR_ENTER},
+        "rehacer": p.REHACER, "fase": p.FASE_TRIANGULACION, "calibracion": p.CALIBRACION_USADA,
+        "parametros": {k: getattr(cfg, k) for k in (
+            "PERIODO", "N_BITS_GRAY", "GAMMA_TH", "GAMMA_TH_Y", "SUAVIZADO_FASE_PX", "UMBRAL_INTENSIDAD",
+            "CAM_EXPOSICION_US", "PATRON_COLUMNAS", "PATRON_FILAS", "PATRON_DISTANCIA_MM", "Z_MIN_MM", "Z_MAX_MM")},
+        "fuentes_demo": fuentes_demo(),
+        "datos": str(cfg.DATOS),
+    }
+
+
+TIPOS_MIME = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+              ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml"}
+
+
+class Manejador(BaseHTTPRequestHandler):
+    server_version = "TesisFranjas/1.0"
+
+    def log_message(self, formato, *args):  # silencio: el registro útil va a la web
+        pass
+
+    # --- utilidades ---
+    def _enviar(self, codigo: int, cuerpo: bytes, tipo: str, extra: dict | None = None) -> None:
+        self.send_response(codigo)
+        self.send_header("Content-Type", tipo)
+        self.send_header("Content-Length", str(len(cuerpo)))
+        self.send_header("Cache-Control", "no-store")
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(cuerpo)
+
+    def _json(self, datos, codigo: int = 200) -> None:
+        self._enviar(codigo, json.dumps(datos, ensure_ascii=False).encode(), "application/json; charset=utf-8")
+
+    def _error(self, codigo: int, mensaje: str) -> None:
+        self._json({"error": mensaje}, codigo)
+
+    def _cuerpo(self) -> dict:
+        largo = int(self.headers.get("Content-Length") or 0)
+        return json.loads(self.rfile.read(largo) or b"{}")
+
+    # --- rutas ---
+    def do_GET(self) -> None:
+        url = urlparse(self.path)
+        q = {k: v[0] for k, v in parse_qs(url.query).items()}
+        try:
+            if url.path in ("/", "/index.html"):
+                return self._estatico("index.html")
+            if url.path.startswith("/estatico/"):
+                return self._estatico(url.path.removeprefix("/estatico/"))
+            if url.path == "/api/config":
+                return self._json(configuracion_por_defecto())
+            if url.path == "/api/estado":
+                return self._json({"ejecucion": ejecucion.estado(), "calibracion": resumen_calibracion(),
+                                   "poses": inventario()})
+            if url.path == "/api/eventos":
+                return self._eventos()
+            if url.path == "/api/vivo.jpg":
+                if not ARCHIVO_VIVO.exists():
+                    return self._error(404, "sin vista en vivo")
+                return self._enviar(200, ARCHIVO_VIVO.read_bytes(), "image/jpeg")
+            if url.path == "/api/imagen":
+                return self._imagen(q)
+            if url.path == "/api/nube":
+                cat, pose = self._cat_pose(q)
+                datos = generar_nube(cat, pose, int(q.get("max", 400_000)))
+                return self._enviar(200, datos, "application/octet-stream")
+            return self._error(404, "ruta desconocida")
+        except FileNotFoundError as exc:
+            return self._error(404, f"no disponible todavía: {exc}")
+        except (ValueError, KeyError) as exc:
+            return self._error(400, str(exc))
+        except (OSError, EOFError) as exc:  # p. ej. archivo a medio escribir
+            return self._error(503, f"reintentar: {exc}")
+
+    def do_POST(self) -> None:
+        url = urlparse(self.path)
+        try:
+            if url.path == "/api/ejecutar":
+                ejecucion.lanzar(self._cuerpo())
+                return self._json({"ok": True})
+            if url.path == "/api/detener":
+                ejecucion.detener()
+                return self._json({"ok": True})
+            if url.path == "/api/entrada":
+                ejecucion.entrada(str(self._cuerpo().get("texto", "")))
+                return self._json({"ok": True})
+            return self._error(404, "ruta desconocida")
+        except RuntimeError as exc:
+            return self._error(409, str(exc))
+
+    def _cat_pose(self, q: dict) -> tuple[str, str]:
+        cat, pose = q.get("cat", ""), q.get("pose", "")
+        if cat not in cfg.CATEGORIAS or not RE_POSE.match(pose):
+            raise ValueError("categoría o pose inválida")
+        return cat, pose
+
+    def _estatico(self, nombre: str) -> None:
+        ruta = (DIR_ESTATICO / nombre).resolve()
+        if DIR_ESTATICO not in ruta.parents or not ruta.is_file():
+            return self._error(404, "no encontrado")
+        self._enviar(200, ruta.read_bytes(), TIPOS_MIME.get(ruta.suffix, "application/octet-stream"))
+
+    def _imagen(self, q: dict) -> None:
+        cat, pose = self._cat_pose(q)
+        img, escala = generar_imagen(cat, pose, q.get("tipo", ""))
+        ancho = int(q.get("ancho", 900))
+        if img.shape[1] > ancho:
+            f = ancho / img.shape[1]
+            img = cv2.resize(img, (0, 0), fx=f, fy=f, interpolation=cv2.INTER_AREA)
+        if img.dtype != np.uint8:
+            img = np.clip(img, 0, 255).astype(np.uint8)
+        # JPEG para mapas continuos y ruidosos (≈10x más liviano que PNG); PNG para la máscara (colores planos)
+        tipo = q.get("tipo", "")
+        ext, mime, params = (".png", "image/png", []) if tipo == "mascara" else (
+            ".jpg", "image/jpeg", [cv2.IMWRITE_JPEG_QUALITY, 90])
+        ok, datos = cv2.imencode(ext, img, params)
+        if not ok:
+            raise OSError("no se pudo codificar la imagen")
+        self._enviar(200, datos.tobytes(), mime,
+                     {"X-Escala": quote(escala),
+                      "Access-Control-Expose-Headers": "X-Escala"})
+
+    def _eventos(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+        q = difusor.suscribir()
+        try:
+            self._sse("estado", ejecucion.estado())
+            while True:
+                try:
+                    evento, datos = q.get(timeout=15)
+                    self._sse(evento, datos)
+                except queue.Empty:
+                    self.wfile.write(b": latido\n\n")
+                    self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
+        finally:
+            difusor.desuscribir(q)
+
+    def _sse(self, evento: str, datos: dict) -> None:
+        self.wfile.write(f"event: {evento}\ndata: {json.dumps(datos, ensure_ascii=False)}\n\n".encode())
+        self.wfile.flush()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Interfaz web del sistema de proyección de franjas.")
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="127.0.0.1 = solo este equipo (por defecto); 0.0.0.0 = toda la red, sin autenticación")
+    parser.add_argument("--puerto", type=int, default=8000)
+    parser.add_argument("--sin-navegador", action="store_true", help="No abrir el navegador automáticamente")
+    args = parser.parse_args()
+
+    threading.Thread(target=vigilar, daemon=True).start()
+    servidor = ThreadingHTTPServer((args.host, args.puerto), Manejador)
+    servidor.daemon_threads = True
+    url = f"http://{'127.0.0.1' if args.host == '0.0.0.0' else args.host}:{args.puerto}"
+    print(f"[OK] Interfaz en {url}  (datos: {cfg.DATOS})  — Ctrl+C para salir")
+    if args.host == "0.0.0.0":
+        print("[AVISO] Accesible desde la red sin contraseña: cualquiera en la red puede lanzar capturas.")
+    if not args.sin_navegador:
+        threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+    try:
+        servidor.serve_forever()
+    except KeyboardInterrupt:
+        print("\nCerrando…")
+    finally:
+        ejecucion.detener()
+        servidor.server_close()
+
+
+if __name__ == "__main__":
+    main()
