@@ -80,7 +80,13 @@ fi
 
 # ---------------------------------------------------------------- 5. Regla udev del LightCrafter (opcional)
 REGLA=/etc/udev/rules.d/99-lightcrafter.rules
-if [[ $UDEV -eq 1 ]]; then
+if [[ $UDEV -eq 1 ]] && ! sudo -n true 2>/dev/null && [[ ! -t 0 ]]; then
+  # Sin terminal interactiva sudo no puede pedir la contraseña: se indican los comandos
+  aviso "sudo necesita la contraseña y no hay terminal interactiva. Ejecuta en una terminal:"
+  echo "      sudo cp $RAIZ/instalacion/99-lightcrafter.rules $REGLA"
+  echo "      sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-match=hidraw"
+  echo "    (o simplemente: ./instalar.sh --udev desde una terminal normal)"
+elif [[ $UDEV -eq 1 ]]; then
   sudo cp instalacion/99-lightcrafter.rules "$REGLA"
   sudo udevadm control --reload-rules
   sudo udevadm trigger --subsystem-match=hidraw
