@@ -81,7 +81,7 @@ VIS_COLOR_3D = "profundidad"                 # "profundidad" o "textura"
 # ==============================================================================
 
 DIR_FASES = cfg.DIR_RESULTADOS / "fases"
-DIR_CALIBRACION = cfg.DIR_RESULTADOS / "calibracion"
+DIR_CALIBRACION = cfg.DIR_CALIBRACION
 DIR_RECONSTRUCCION = cfg.DIR_RESULTADOS / "reconstruccion"
 
 
@@ -137,7 +137,7 @@ def _verificar_calibracion_existente() -> None:
         raise SystemExit(
             f"[PIPELINE] No existe la calibración '{ruta}'.\n"
             f"           Activa la etapa 'calibracion' (con poses del patrón organizadas) o copia "
-            f"una calibración previa a esa carpeta."
+            f"una calibración previa a esa carpeta (MANUAL.md §20.5)."
         )
     resumen = ruta.with_name("Estereo_TSC_0_2.json")
     texto = ""
@@ -189,6 +189,13 @@ def etapa_visualizacion() -> None:
     visualizacion.visualizar_pose(VIS_CATEGORIA, VIS_POSE, color_3d=VIS_COLOR_3D)
 
 
+# Sección del manual con los problemas frecuentes de cada etapa
+AYUDA_ETAPA = {
+    "patrones": "§16.2", "lightcrafter": "§16.2", "captura": "§16.3", "organizar": "§16.4",
+    "fase_relativa": "§16.5", "fase_absoluta": "§16.5", "calibracion": "§16.6",
+    "reconstruccion": "§16.7", "visualizacion": "§16.8",
+}
+
 FUNCIONES = {
     "patrones": etapa_patrones,
     "lightcrafter": etapa_lightcrafter,
@@ -225,6 +232,8 @@ def main() -> None:
             raise SystemExit(f"\n[PIPELINE] Interrumpido en la etapa '{etapa}'.")
         except Exception as exc:
             print(f"\n[ERROR] La etapa '{etapa}' falló: {exc}")
+            print(f"        Posibles causas y soluciones: MANUAL.md {AYUDA_ETAPA.get(etapa, '§16')} "
+                  f"(o ejecuta .env/bin/python verificar.py)")
             raise SystemExit(1) from exc
         print(f"[PIPELINE] '{etapa}' terminada en {time.perf_counter() - t0:.1f} s")
     print(f"\n[PIPELINE] Proceso completo en {time.perf_counter() - t_total:.1f} s. "

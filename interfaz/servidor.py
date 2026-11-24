@@ -54,7 +54,7 @@ import configuracion as cfg  # noqa: E402
 DIR_ESTATICO = Path(__file__).resolve().parent / "estatico"
 DIR_FASES = cfg.DIR_RESULTADOS / "fases"
 DIR_RECONSTRUCCION = cfg.DIR_RESULTADOS / "reconstruccion"
-DIR_CALIBRACION = cfg.DIR_RESULTADOS / "calibracion"
+DIR_CALIBRACION = cfg.DIR_CALIBRACION
 ARCHIVO_VIVO = cfg.DIR_RESULTADOS / ".vivo" / "frame.jpg"
 RE_POSE = re.compile(r"^pose_\d+$")
 PROMPTS = ("presiona Enter", "(q = terminar)", "¿Es plano (p), objeto (o)")

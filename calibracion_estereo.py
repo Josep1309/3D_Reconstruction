@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -251,7 +252,7 @@ def _mascara_ajuste(mascara_tablero: np.ndarray, calidad: np.ndarray, gamma_th: 
 
 def ejecutar_calibracion_estereo(
     dir_fases: Path = cfg.DIR_RESULTADOS / "fases",
-    dir_salida: Path = cfg.DIR_RESULTADOS / "calibracion",
+    dir_salida: Path = cfg.DIR_CALIBRACION,
     pattern_size: tuple[int, int] = (cfg.PATRON_COLUMNAS, cfg.PATRON_FILAS),
     center_distance: float = cfg.PATRON_DISTANCIA_MM,
     pattern_type: str = cfg.PATRON_TIPO,
@@ -262,6 +263,7 @@ def ejecutar_calibracion_estereo(
     borde: int = cfg.BORDE_MASCARA,
     gamma_th_y: float = cfg.GAMMA_TH_Y,
     guardar_mapas: bool = False,
+    dir_diagnostico: Path = cfg.DIR_RESULTADOS / "calibracion",
 ) -> dict:
     """Ejecuta el flujo de `Traditional_StereoCalib.m` sobre las fases del patrón de calibración."""
     nombres, poses = fase.cargar_fases_categoria(dir_fases, "patron")
@@ -269,6 +271,7 @@ def ejecutar_calibracion_estereo(
     cam_size_wh = (ancho_cam, alto_cam)
     world_points = generar_puntos_mundo_circulos(pattern_size, center_distance, pattern_type)
     dir_salida.mkdir(parents=True, exist_ok=True)
+    dir_diagnostico.mkdir(parents=True, exist_ok=True)
 
     print(f"=== Calibración Estéreo Tradicional ({len(poses)} poses, cámara {ancho_cam}x{alto_cam}) ===")
 
@@ -417,7 +420,7 @@ def ejecutar_calibracion_estereo(
         if guardar_mapas else {}
     )
     np.savez_compressed(
-        dir_salida / "patron_PhasesData.npz",
+        dir_diagnostico / "patron_PhasesData.npz",
         poses=np.array(usados), M=m_corr, M_raw=m_raw, worldPoints=world_points,
         Images=np.stack(texturas, axis=-1), **extra_mapas,
     )
@@ -449,8 +452,17 @@ def ejecutar_calibracion_estereo(
     ruta_json = dir_salida / "Estereo_TSC_0_2.json"
     ruta_json.write_text(json.dumps(resumen, indent=2), encoding="utf-8")
 
-    _guardar_figura_diagnostico(dir_salida, texturas[0], pts_cam[0], residuos[0], usados[0])
-    print(f"[OK] Calibración guardada en:\n  - {ruta_tsc}\n  - {ruta_tsc_j}\n  - {ruta_json}")
+    _guardar_figura_diagnostico(dir_diagnostico, texturas[0], pts_cam[0], residuos[0], usados[0])
+
+    # Copia en el historial: recalibrar no hace perder la calibración anterior
+    historial = dir_salida / "historial" / datetime.now().strftime("%Y%m%d_%H%M%S")
+    historial.mkdir(parents=True, exist_ok=True)
+    for ruta in (ruta_tsc, ruta_tsc_j, ruta_json):
+        shutil.copy2(ruta, historial / ruta.name)
+    print(f"[OK] Calibración guardada en:\n  - {ruta_tsc}\n  - {ruta_tsc_j}\n  - {ruta_json}\n"
+          f"  (copia en {historial}; diagnósticos en {dir_diagnostico})")
+    print("     Para volver a una calibración anterior, copia sus 3 archivos desde historial/ a "
+          f"'{dir_salida}'. Recuerda hacer commit de calibraciones/ para que viaje con el código.")
     return resumen
 
 
@@ -518,7 +530,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Calibración Estéreo Tradicional Cámara-Proyector.")
     parser.add_argument("--fases", type=Path, default=cfg.DIR_RESULTADOS / "fases",
                         help="Carpeta con las fases absolutas (salida de la etapa fase_absoluta)")
-    parser.add_argument("--salida", type=Path, default=cfg.DIR_RESULTADOS / "calibracion",
+    parser.add_argument("--salida", type=Path, default=cfg.DIR_CALIBRACION,
                         help="Carpeta donde se guarda la calibración")
     parser.add_argument("--cols", type=int, default=cfg.PATRON_COLUMNAS, help="Columnas de círculos")
     parser.add_argument("--rows", type=int, default=cfg.PATRON_FILAS, help="Filas de círculos")

@@ -305,7 +305,7 @@ def cargar_reconstruccion_pose(ruta: Path) -> dict[str, np.ndarray]:
 
 def procesar_reconstruccion(
     dir_fases: Path = cfg.DIR_RESULTADOS / "fases",
-    ruta_calibracion: Path = cfg.DIR_RESULTADOS / "calibracion" / "Estereo_TSC_0_2.npz",
+    ruta_calibracion: Path = cfg.DIR_CALIBRACION / "Estereo_TSC_0_2.npz",
     dir_salida: Path = cfg.DIR_RESULTADOS / "reconstruccion",
     categorias: Sequence[str] = ("objeto", "plano"),
     fd: str = cfg.FASE_TRIANGULACION,
@@ -420,7 +420,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Reconstrucción 3D estéreo cámara-proyector.")
     parser.add_argument("--fases", type=Path, default=cfg.DIR_RESULTADOS / "fases")
     parser.add_argument("--calibracion", type=Path,
-                        default=cfg.DIR_RESULTADOS / "calibracion" / "Estereo_TSC_0_2.npz",
+                        default=cfg.DIR_CALIBRACION / "Estereo_TSC_0_2.npz",
                         help="Archivo .npz de calibración estéreo")
     parser.add_argument("--salida", type=Path, default=cfg.DIR_RESULTADOS / "reconstruccion")
     parser.add_argument("--categorias", nargs="+", default=["objeto", "plano"])

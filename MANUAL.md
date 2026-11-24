@@ -25,10 +25,11 @@ proyecto pueda operar el montaje, entender los resultados y modificar el código
 13. [Etapa `reconstruccion`: triangulación 3D](#13-etapa-reconstruccion-triangulación-3d)
 14. [Etapa `visualizacion`](#14-etapa-visualizacion)
 15. [Resultados de referencia y precisión](#15-resultados-de-referencia-y-precisión)
-16. [Diagnóstico de problemas](#16-diagnóstico-de-problemas)
+16. [Solución de problemas por etapa](#16-solución-de-problemas-por-etapa)
 17. [Correspondencia con el código MATLAB y diferencias](#17-correspondencia-con-el-código-matlab-y-diferencias)
 18. [Referencia de archivos de salida](#18-referencia-de-archivos-de-salida)
 19. [Interfaz web](#19-interfaz-web)
+20. [Instalación en otro computador](#20-instalación-en-otro-computador)
 
 ---
 
@@ -108,8 +109,9 @@ CAPTURA_POSES = 3              # pide Enter antes de cada objeto/pose
 3. Revisa en la salida: error RMS por pose, la línea `Cobertura del proyector` y los avisos.
 4. Vuelve a `"calibracion": False` para medir objetos.
 
-> Si quieres conservar una calibración anterior, copia `resultados/calibracion/` a otro lugar
-> antes de recalibrar: la etapa sobrescribe los archivos.
+> Cada recalibración guarda una copia en `calibraciones/historial/<fecha>/`, así que la anterior
+> no se pierde. Después de recalibrar, haz commit de `calibraciones/` para que viaje con el código
+> (§20.5).
 
 ### 2.3 Otros flujos
 
@@ -185,6 +187,9 @@ Tesis/
 ├── visualizacion.py          ← etapa 'visualizacion'
 │
 ├── arduino_pulses/           ← firmware del generador de pulsos
+├── calibraciones/            ← calibración vigente + historial/ (VERSIONADA, §20.5)
+├── instalar.sh, verificar.py, requirements.txt, instalacion/  ← instalación (§20)
+├── interfaz/                 ← interfaz web (§19)
 ├── patterns/secuencia_completa_bmp/   f_00.bmp … f_49.bmp
 ├── capturas/                 ← CRUDAS: nunca se modifican ni se borran
 │   └── <categoria>/<AAAAMMDD_HHMMSS>/ *_frame_XXX.tiff + captura_50_frames.avi
@@ -193,7 +198,7 @@ Tesis/
 │   └── <categoria>/pose_XX/{H,V}/P18_F00 … P18_F25.tiff
 ├── resultados/               ← DERIVADOS
 │   ├── fases/<categoria>/pose_XX_relativa.npz|.png, pose_XX.npz|.png
-│   ├── calibracion/Estereo_TSC_0_2(.npz|_J.npz|.json), patron_PhasesData.npz, diagnóstico
+│   ├── calibracion/patron_PhasesData.npz, diagnóstico (no versionado)
 │   ├── reconstruccion/<categoria>/<cat>_pose_XX.ply|.npz, <cat>_resumen.json, figuras
 │   └── visualizacion/*.png
 └── Matlab_Codes/             ← código original de referencia (no se ejecuta)
@@ -822,7 +827,99 @@ Los tiempos de proceso no incluyen la captura (2.5 s por ciclo de 50 patrones).
 
 ---
 
-## 16. Diagnóstico de problemas
+## 16. Solución de problemas por etapa
+
+**Primer paso ante cualquier problema:** ejecuta `.env/bin/python verificar.py` (§20.7). Revisa
+Python, paquetes, cámara, proyector, patrones, calibración y datos, y dice qué hacer en cada caso.
+Si una etapa del pipeline falla, el mensaje de error indica la subsección de esta guía que le
+corresponde. Cada subsección es una tabla de **síntoma → causa probable → solución**.
+
+### 16.1 Instalación y arranque
+
+| Síntoma | Causa probable | Solución |
+|---|---|---|
+| `ModuleNotFoundError: numpy / cv2 / matplotlib` | Se ejecutó con el Python del sistema, o falta instalar | Usa `.env/bin/python …`; si persiste, `./instalar.sh` (§20.2) |
+| `ResolutionImpossible` / conflicto de numpy al instalar | Versiones de OpenCV y numpy incompatibles con PySpin | Usa las de `requirements.txt` (numpy < 2, OpenCV 4.11); no actualices OpenCV a 4.12+ o 5.x mientras uses PySpin 4.x |
+| `No se pudo crear el entorno` en `instalar.sh` | Falta el módulo venv | `sudo apt install python3.10-venv` |
+| `ModuleNotFoundError: PySpin` | PySpin no instalado | Solo hace falta para capturar: §20.3 |
+| `ImportError: libSpinnaker.so…` al importar PySpin | Falta el Spinnaker SDK o es de otra versión que el wheel | Instala el SDK de la **misma versión** que el wheel (§20.3) |
+| `No hay calibración en …` | Falta `calibraciones/` | Cópiala del otro equipo o recalibra (§20.5) |
+
+### 16.2 Patrones y LightCrafter (etapas `patrones` y `lightcrafter`)
+
+| Síntoma | Causa probable | Solución |
+|---|---|---|
+| `Sin permisos para abrir /dev/hidrawX` | Falta la regla udev | `./instalar.sh --udev` y reconectar el USB (§20.4) |
+| `No se detectó el DLP LightCrafter 4500 por USB` | Cable mini-USB desconectado o proyector apagado | Conéctalo; `lsusb` debe mostrar `0451:6401` |
+| `Timeout esperando respuesta…` | El proyector está ocupado o el software de TI lo tiene abierto | Cierra el software de TI y apaga y enciende el proyector |
+| `Bandera de validación DLPC350 = 0x..` | Tiempos no válidos para la secuencia cargada | Lee el detalle impreso. Sin *Insert Black*, la exposición debe ser igual al período; con él, período ≥ exposición + 230 µs (§7) |
+| La secuencia proyectada no coincide con `f_00…f_49` | Se cargó otra secuencia o en otro orden | Regenera (etapa `patrones`) y vuelve a cargarla en el software de TI en orden |
+
+### 16.3 Captura (cámara FLIR y Arduino)
+
+| Síntoma | Causa probable | Solución |
+|---|---|---|
+| `No se encontró ninguna cámara FLIR` | Cable, alimentación, o la cámara está abierta en otro programa | Cierra SpinView o la otra interfaz; prueba otro puerto **USB3** (azul); comprueba que SpinView la vea |
+| `Sin trigger tras … ms en el frame N` | El Arduino no está enviando pulsos, o Line0 está desconectado | Revisa la alimentación del Arduino, el cable pin 9 → Line0 y la masa común |
+| Frames incompletos o pérdidas con cámara USB3 | Buffer USB del kernel pequeño | Sube `usbfs_memory_mb` a 1000, como indica FLIR (§20.3) |
+| `Δt … [AVISO] posible pulso perdido` | El equipo está cargado, o mala conexión del trigger | Cierra otros programas; el organizador descarta los ciclos rotos, pero conviene repetir la pose |
+| Imágenes saturadas o muy oscuras | Exposición inadecuada | Ajusta `CAM_EXPOSICION_US` (debe ser menor de 50 ms) |
+| Funciona en el equipo original pero no en otro | Versión de PySpin, SDK o Python distinta | §20.3 |
+
+### 16.4 Organizar
+
+| Síntoma | Causa probable | Solución |
+|---|---|---|
+| `no se encontró el par negro → blanco` | No hay un ciclo completo, o el blanco no se distingue del resto | Captura de nuevo; revisa la exposición (que el blanco no sature) |
+| `pureza baja` / `corrimientos poco sinusoidales` | Frame perdido, o la secuencia del proyector no coincide | Repite la pose; verifica la secuencia cargada (§16.2) |
+| `la escena se movió … se descarta` | El objeto o el soporte se movieron durante los 2.5 s | Fija bien el objeto y repite |
+| `modulación H baja` | Franjas horizontales con poco contraste (DMD en diamante, desenfoque) | Esperable en este proyector. Mejora con `CICLOS_POR_CAPTURA` 2–4 o enfocando mejor |
+| Una pose quedó en la categoría equivocada | El nombre de la carpeta no tenía la palabra clave | Mueve la captura cruda a `capturas/<categoria>/`, borra `capturas_ordenadas/` y reorganiza (§9) |
+| La interfaz no pregunta si es plano u objeto | Sin terminal interactiva se asigna `objeto` | Guarda las capturas en `capturas/plano/` u `objeto/` |
+
+### 16.5 Fases (envuelta y desenvuelta)
+
+| Síntoma | Causa probable | Solución |
+|---|---|---|
+| Fase con saltos o franjas de colores mezcladas | Orden de bits Gray equivocado o mala binarización | El orden se detecta solo; revisa el panel "Orden de franja k": debe crecer en escalones limpios |
+| Muchos píxeles inválidos (máscara casi vacía) | Poco contraste, sombras o superficies muy oscuras o brillantes | Más ciclos, mejor enfoque o iluminación; ajusta `GAMMA_TH`, `GAMMA_TH_Y` o `UMBRAL_INTENSIDAD` |
+| Trama fina en los mapas de fase | Rejilla de micro-espejos del DMD vista por la cámara | Ya se atenúa con `SUAVIZADO_FASE_PX`; desenfocar levemente el proyector también ayuda |
+| Cambié un umbral y no cambia nada | Caché | `REHACER = True` (o "Recalcular todo" en la interfaz) |
+
+### 16.6 Calibración
+
+| Síntoma | Causa probable | Solución |
+|---|---|---|
+| `[AVISO] … se descarta la pose` | No se detectaron los 9 × 12 círculos | Tablero completo en la imagen, sin reflejos y bien iluminado; revisa la imagen blanca de esa pose |
+| `Solo N poses válidas` | Menos de 3 poses con el tablero detectado | Captura más poses (10–15 recomendadas) |
+| `Cobertura del proyector … [AVISO]` | Las poses no cubren todo el campo del proyector | Agrega poses con el tablero en los bordes y esquinas, inclinado ±20–30° |
+| Una pose marcada `<-- revisar` | Mala detección o fase ruidosa en esa pose | Quítala (§9, cómo excluir) y recalibra |
+| Escala global incorrecta (objetos más grandes o más pequeños) | Tamaño real del tablero distinto de 15 mm | Mide el tablero y ajusta `PATRON_DISTANCIA_MM` (§12.6) |
+| Quiero volver a la calibración anterior | — | Copia sus 3 archivos desde `calibraciones/historial/<fecha>/` a `calibraciones/` (§20.5) |
+
+### 16.7 Reconstrucción y precisión
+
+| Síntoma | Causa probable | Solución |
+|---|---|---|
+| `No existe la calibración …` | Falta `calibraciones/Estereo_TSC_0_2.npz` | §20.5 |
+| `% de los puntos fuera del rango calibrado` | El objeto está en una zona del proyector que la calibración no cubrió | Recalibra con más cobertura (§16.6) |
+| Error de planitud en forma de cuenco (±1–2 mm en las esquinas) | Calibración con pocas poses, poca inclinación o poca cobertura | 10–15 poses con ±20–30°; confirma que la superficie sea realmente plana |
+| Error sistemático cerca del borde izquierdo de la imagen | Zona del proyector (u_p alto) no cubierta por la calibración | Igual que el anterior: poses del tablero desplazadas a esa zona |
+| Huecos o estrías horizontales en superficies oscuras | Poco contraste de las franjas H (DMD en diamante) | Más ciclos por captura; mejor iluminación; ver el último punto de §16.9 |
+| Puntos sueltos muy lejos del objeto | Atípicos que pasan el filtro | Ajusta `Z_MIN_MM`, `Z_MAX_MM` y `SALTO_MAX_MM` |
+| Resultados distintos tras cambiar `FASE_TRIANGULACION` | Esperable: Fx y Fy no tienen la misma sensibilidad | Usa `auto` (§13.3) |
+
+### 16.8 Interfaz web
+
+| Síntoma | Causa probable | Solución |
+|---|---|---|
+| `Address already in use` | El puerto 8000 está ocupado (¿otra interfaz abierta?) | `interfaz/servidor.py --puerto 8001` |
+| "Sin conexión con el servidor…" | Se cerró el servidor | Vuelve a ejecutar `interfaz/servidor.py` y recarga la página |
+| El visor 3D no muestra nada | El navegador no tiene WebGL, o la pose no está reconstruida | Prueba con Chrome o Firefox actualizados; revisa que la pose tenga los 4 puntos verdes |
+| Las capturas del modo demo aparecen como poses reales | Se guardan en `capturas/` con sufijo `_simulada` | Borra esas carpetas y las poses que generaron (§19.1) |
+| No se puede abrir desde otra PC | El servidor escucha solo en el equipo local | `--host 0.0.0.0` (sin contraseña: solo en redes de confianza) |
+
+### 16.9 Limitaciones conocidas del montaje
 
 - **Las franjas horizontales (H) tienen muy poco contraste** (γ ≈ 0.08–0.25 frente a ≈ 0.55 en
   las V).
@@ -833,27 +930,8 @@ Los tiempos de proceso no incluyen la captura (2.5 s por ciclo de 50 patrones).
   - *Mitigación física:* capturar con `CICLOS_POR_CAPTURA = 2–4`, o usar un período mayor solo
     para las franjas H. Esto último requiere cambiar `secuencia_patrones.py`, recargar el
     proyector y recalibrar.
-  - *Síntoma:* en superficies oscuras o poco iluminadas aparecen huecos y estrías horizontales en
-    la reconstrucción (por ejemplo, la zona izquierda de la madera en el objeto de prueba).
-- **Error sistemático cerca del borde izquierdo de la imagen** (u_p alto). La calibración no
-  cubrió esa zona del proyector. Recaptura el tablero con poses que la cubran (tablero desplazado
-  a la izquierda de la imagen y en las esquinas) y con más inclinación. La calibración lo avisa
-  con `Cobertura del proyector … [AVISO]`.
-- **Error de planitud en forma de cuenco** (±1–2 mm en las esquinas). Viene de la calibración:
-  pocas poses, poca inclinación o poca cobertura. Se recomiendan 10–15 poses con ±20–30°.
-  Confirma también que la superficie "plana" lo sea de verdad.
-- **Escala global incorrecta.** Revisa el tamaño real del tablero (§12.6).
-- **"no se encontró el par negro → blanco".** La captura no tiene un ciclo completo o la
-  exposición satura y el blanco no se distingue. Revisa la exposición de la cámara.
-- **"pureza baja".** Se perdió un frame o la secuencia del LightCrafter no coincide con
-  `f_00…f_49`.
-- **La calibración descarta una pose.** No se detectaron los 9 × 12 círculos: tablero cortado,
-  reflejos o poca luz. Mira la imagen blanca de esa pose.
-- **"Sin trigger tras … ms".** El Arduino está apagado, Line0 desconectado o el LightCrafter no
-  está en modo de trigger externo.
-- **Los resultados no cambian tras modificar un umbral.** Las fases y la reconstrucción se
-  reutilizan desde la caché: pon `REHACER = True`.
-- **La reconstrucción avisa "% de los puntos fuera del rango calibrado".** Ver el segundo punto.
+- **Cobertura de la calibración actual:** solo el 43 % del ancho del proyector (§16.6).
+- **El control del LightCrafter solo funciona en Linux** (usa `/dev/hidraw`).
 
 ---
 
@@ -904,9 +982,10 @@ No se portaron las calibraciones híbridas ni la recalibración (`HybridCalibCod
 | `capturas_ordenadas/<cat>/pose_XX/{H,V}/P18_FYY.tiff` | 26 imágenes por orientación | `organizar` |
 | `resultados/fases/<cat>/pose_XX_relativa.npz` | `phiX/Y, AX/Y, BX/Y, qX/Y` | `fase_relativa` |
 | `resultados/fases/<cat>/pose_XX.npz` | `Fx, Fy, up, vp, kX, kY, qFx, qFy, BX, BY, Itex, MaskX/Y/C` | `fase_absoluta` |
-| `resultados/calibracion/Estereo_TSC_0_2.npz` | Calibración (intrínsecos fijos) | `calibracion` |
-| `resultados/calibracion/Estereo_TSC_0_2_J.npz` | Calibración conjunta | `calibracion` |
-| `resultados/calibracion/Estereo_TSC_0_2.json` | Resumen legible | `calibracion` |
+| `calibraciones/Estereo_TSC_0_2.npz` | Calibración (intrínsecos fijos) — versionada | `calibracion` |
+| `calibraciones/Estereo_TSC_0_2_J.npz` | Calibración conjunta — versionada | `calibracion` |
+| `calibraciones/Estereo_TSC_0_2.json` | Resumen legible — versionado | `calibracion` |
+| `calibraciones/historial/<fecha>/` | Copia de cada calibración anterior | `calibracion` |
 | `resultados/calibracion/patron_PhasesData.npz` | Correspondencias del tablero | `calibracion` |
 | `resultados/reconstruccion/<cat>/<cat>_pose_XX.ply` | Nube de puntos | `reconstruccion` |
 | `resultados/reconstruccion/<cat>/<cat>_pose_XX.npz` | `X, Y, Z, Mask` (y `E` en planos) | `reconstruccion` |
@@ -1051,4 +1130,213 @@ API, por si se quiere automatizar algo:
 ```bash
 TESIS_DIR_DATOS=~/pruebas_tesis .env/bin/python interfaz/servidor.py
 ```
+
+---
+
+## 20. Instalación en otro computador
+
+El proyecto se mueve entre computadores como un repositorio git. Lo que **viaja con el código**:
+
+- el código y la interfaz web;
+- la documentación;
+- la lista de dependencias (`requirements.txt`);
+- la regla udev del proyector (`instalacion/`);
+- la **calibración vigente y su historial** (`calibraciones/`).
+
+Lo que **no viaja**, porque pesa mucho o depende del equipo:
+
+- el entorno de Python (`.env/`), que se recrea con `instalar.sh`;
+- los datos (`capturas/`, `capturas_ordenadas/`, `resultados/`), que se copian aparte;
+- los patrones `.bmp`, que se regeneran solos;
+- el SDK de la cámara, que se instala aparte (§20.3).
+
+### 20.1 Requisitos
+
+- **Linux de 64 bits** (probado en Ubuntu 22.04). El procesamiento y la interfaz funcionarían en
+  otros sistemas, pero la etapa `lightcrafter` usa `/dev/hidraw`, que solo existe en Linux.
+- **Python 3.10** (recomendado). Funciona desde 3.9, pero el wheel de PySpin debe corresponder
+  exactamente a la versión de Python. En Ubuntu: `sudo apt install python3.10 python3.10-venv`.
+- **git**, y unos 5 GB libres por cada sesión de capturas.
+
+### 20.2 Instalación rápida
+
+```bash
+git clone <url-del-repositorio> Tesis      # o copia la carpeta del proyecto
+cd Tesis
+./instalar.sh                              # entorno .env + dependencias + patrones + verificación
+./instalar.sh --udev                       # (opcional) LightCrafter sin sudo; pide la clave
+./instalar.sh --pyspin ~/Descargas/spinnaker_python-…-cp310-…whl   # (opcional) cámara, ver §20.3
+```
+
+`instalar.sh` se puede ejecutar varias veces: omite lo que ya está hecho. Pasos:
+
+1. Busca Python 3.10 (o 3.x; con `--python RUTA` se elige otro).
+2. Crea el entorno `.env/` e instala `requirements.txt`.
+3. Opcionalmente, instala PySpin y la regla udev.
+4. Genera los patrones si faltan.
+5. Ejecuta `verificar.py`.
+
+**Sobre las versiones** (`requirements.txt`): numpy 1.26.4, **opencv-python 4.11.0.86** y
+matplotlib 3.10.9.
+
+- numpy tiene que ser < 2 porque PySpin 4.x lo exige.
+- OpenCV 4.12+ y 5.x exigen numpy ≥ 2, así que **no se debe actualizar OpenCV** mientras se use
+  PySpin 4.x.
+- Se verificó que OpenCV 4.11 da exactamente los mismos resultados que la 5.0 con las capturas
+  de referencia: mismos errores de calibración y misma planitud de 0.498 mm. Solo cambia
+  levemente la calibración conjunta `_J`, que no se usa por defecto.
+
+### 20.3 Cámara FLIR: Spinnaker SDK y PySpin
+
+PySpin es la librería de Python de la cámara. **No está en PyPI**: viene de FLIR (Teledyne) en
+dos partes que deben ser **de la misma versión**:
+
+- el **Spinnaker SDK**, con el driver y las librerías del sistema;
+- el **wheel de PySpin** para tu versión de Python.
+
+En el equipo original se usan **Spinnaker 4.4.0.246** y el wheel
+`spinnaker_python-4.4.0.246-cp310-cp310-linux_x86_64`. Solo hace falta para **capturar**;
+organizar, procesar, calibrar, reconstruir y la interfaz funcionan sin él (incluido el modo demo).
+
+Pasos:
+
+1. **Descarga** desde la web de Teledyne FLIR, sección *Spinnaker SDK* (pide una cuenta
+   gratuita), dos archivos para *Linux Ubuntu 22.04, amd64*:
+   - el paquete del SDK, `spinnaker-<versión>-amd64-pkg…tar.gz`;
+   - el paquete de Python para la **misma versión** y para **Python 3.10**
+     (`cp310`, `spinnaker_python-<versión>-cp310-…tar.gz`).
+2. **Instala el SDK.** Descomprime el paquete y sigue su `README`. En las versiones recientes:
+
+   ```bash
+   tar xzf spinnaker-*-amd64-pkg*.tar.gz && cd spinnaker-*-amd64
+   sudo sh install_spinnaker.sh
+   ```
+
+   Durante la instalación, acepta:
+   - añadir tu usuario al grupo `flirimaging` (permisos USB de la cámara);
+   - aumentar la memoria USB (`usbfs`), si te lo ofrece.
+
+   Después cierra la sesión y vuelve a entrar, o reinicia. Los nombres exactos pueden cambiar
+   entre versiones: si difieren, manda el `README` del paquete.
+3. **Comprueba el SDK:** abre **SpinView** (viene con el SDK) y confirma que ve la cámara y
+   muestra imagen. Si SpinView no la ve, el problema es del SDK, del cable o de los permisos,
+   no del código del proyecto.
+4. **Instala PySpin en el entorno del proyecto:** descomprime el paquete de Python y pásale el
+   `.whl`:
+
+   ```bash
+   ./instalar.sh --pyspin /ruta/spinnaker_python-<versión>-cp310-cp310-linux_x86_64.whl
+   ```
+
+5. **Verifica:** `.env/bin/python verificar.py` debe mostrar "PySpin importado" y el modelo de la
+   cámara.
+
+**Memoria USB (cámaras USB3).** Si hay frames incompletos o la captura se corta, sube el buffer
+USB del kernel a 1000 MB, como recomienda FLIR:
+
+```bash
+sudo sh -c 'echo 1000 > /sys/module/usbcore/parameters/usbfs_memory_mb'     # hasta reiniciar
+```
+
+Para que sea permanente, añade `usbcore.usbfs_memory_mb=1000` a `GRUB_CMDLINE_LINUX_DEFAULT` en
+`/etc/default/grub`, ejecuta `sudo update-grub` y reinicia.
+
+**Problemas frecuentes:**
+
+| Síntoma | Causa | Solución |
+|---|---|---|
+| `ModuleNotFoundError: PySpin` | El wheel no está instalado en `.env` | Paso 4 |
+| `ImportError: libSpinnaker.so…` | Falta el SDK o es de otra versión que el wheel | Instala el SDK de la misma versión (paso 2) |
+| `… is not a supported wheel on this platform` | El wheel es de otra versión de Python | Descarga el `cp3XX` que coincida con `.env/bin/python -V` |
+| pip pide numpy ≥ 2 o hay conflicto con numpy | Se actualizó OpenCV | Reinstala `requirements.txt` (OpenCV 4.11) |
+| SpinView no ve la cámara | Permisos (grupo `flirimaging`), cable o puerto | Cierra y abre sesión tras instalar; usa un puerto USB3 |
+| PySpin funciona pero `verificar.py` no detecta la cámara | La cámara está abierta en otro programa | Cierra SpinView y la interfaz web |
+
+### 20.4 Permisos del LightCrafter (regla udev)
+
+El proyector se controla por USB-HID (`/dev/hidrawX`), que por defecto solo puede abrir root.
+La regla `instalacion/99-lightcrafter.rules` da acceso al usuario sin sudo:
+
+```bash
+./instalar.sh --udev        # copia la regla a /etc/udev/rules.d/ y recarga udev
+```
+
+Después desconecta y conecta el USB del proyector. Alternativa temporal, hasta reiniciar:
+`sudo chmod a+rw /dev/hidrawX`. El mensaje de error del script indica cuál es la X.
+
+### 20.5 La calibración viaja con el código
+
+La calibración vigente está en **`calibraciones/`**, versionada en git:
+
+- `Estereo_TSC_0_2.npz`;
+- `Estereo_TSC_0_2_J.npz`;
+- `Estereo_TSC_0_2.json`.
+
+Son unos 15 KB. Así, al clonar el proyecto en otro computador conectado **al mismo montaje** se
+puede reconstruir sin recalibrar.
+
+- **Cada recalibración** sobrescribe esos tres archivos y guarda una copia en
+  `calibraciones/historial/<fecha>/`. Los diagnósticos pesados (`patron_PhasesData.npz` y las
+  figuras) quedan en `resultados/calibracion/`, que no se versiona.
+- **Después de recalibrar, haz commit**:
+  `git add calibraciones && git commit -m "Nueva calibración"`. `verificar.py` avisa si hay
+  cambios sin commit.
+- **Para volver a una calibración anterior**, copia sus tres archivos desde
+  `calibraciones/historial/<fecha>/` a `calibraciones/`.
+- **La calibración es del montaje, no del computador.** Si se movió la cámara o el proyector,
+  si se reenfocó o si se cambió de equipo físico, hay que recalibrar. `verificar.py` comprueba
+  que el período de las franjas y la resolución de la cámara conectada coincidan con los de la
+  calibración.
+- La variable `TESIS_DIR_CALIBRACION` permite usar otra carpeta de calibración, por ejemplo para
+  pruebas.
+
+### 20.6 Los datos
+
+`capturas/` (crudas), `capturas_ordenadas/` y `resultados/` no están en git: pesan varios GB.
+Opciones:
+
+- **Copiar solo `capturas/`.** Lo demás se regenera con el pipeline: organizar, fases y
+  reconstrucción.
+- **Usarlas desde un disco externo** sin copiarlas:
+  `TESIS_DIR_DATOS=/media/disco/tesis .env/bin/python interfaz/servidor.py`. La variable vale
+  para el pipeline, la interfaz y `verificar.py`.
+
+### 20.7 Verificar la instalación
+
+```bash
+.env/bin/python verificar.py                 # todo, incluido el hardware conectado
+.env/bin/python verificar.py --sin-hardware  # sin buscar cámara ni proyector
+```
+
+Revisa, en orden:
+
+1. versión de Python y entorno virtual;
+2. paquetes y versiones;
+3. PySpin y la cámara (modelo, serie y resolución);
+4. regla udev, detección y respuesta del LightCrafter;
+5. los 50 patrones;
+6. la calibración: existencia, período, resolución de la cámara, cobertura y cambios sin commit;
+7. la carpeta de datos (escritura y espacio libre);
+8. el puerto de la interfaz.
+
+Cada problema dice **qué hacer y en qué sección de este manual** está el detalle. Termina con
+código 0 si no hay errores (✖); las advertencias (⚠) no impiden usar el sistema.
+
+### 20.8 Lista para mover el proyecto a otro computador
+
+En el equipo de origen:
+
+1. `git status` sin cambios pendientes, en particular en `calibraciones/`.
+2. `git push` al repositorio remoto, o copiar la carpeta del proyecto sin `.env/`.
+3. Si hacen falta los datos, copiar `capturas/` (o tenerlas en un disco externo).
+
+En el equipo de destino:
+
+1. `git clone …` y `cd Tesis`.
+2. `./instalar.sh`. Si se va a capturar, también `--pyspin …` (§20.3); si se va a configurar el
+   proyector, `--udev`.
+3. `.env/bin/python verificar.py`, con la cámara y el proyector conectados.
+4. Prueba rápida sin hardware: interfaz web → *Modo demo* → *Capturar y reconstruir*.
+5. Con el montaje real, captura un plano de referencia y comprueba que el error de planitud sea
+   el esperado (≈ 0.5 mm). Si es mucho mayor, algo cambió en el montaje: recalibra.
 

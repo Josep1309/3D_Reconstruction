@@ -1,0 +1,16 @@
+# Dependencias de Python del sistema de reconstrucción 3D por franjas.
+# Instalación: ./instalar.sh   (o: python3.10 -m venv .env && .env/bin/pip install -r requirements.txt)
+#
+# Versiones probadas con Python 3.10.12 en Ubuntu 22.04 (Linux x86_64).
+#
+# numpy debe ser < 2: el wheel de PySpin 4.x (cámara FLIR) exige numpy<2.0. Por eso OpenCV queda
+# en 4.11, la última versión que acepta numpy 1.x (OpenCV 4.12+ y 5.x exigen numpy>=2).
+numpy==1.26.4
+opencv-python==4.11.0.86
+matplotlib==3.10.9
+
+# La interfaz web solo usa la librería estándar: no necesita paquetes extra.
+#
+# PySpin (cámara FLIR) NO está en PyPI: se instala aparte desde el Spinnaker SDK de FLIR.
+# Solo hace falta para capturar; procesar, calibrar y visualizar funcionan sin él.
+# Ver MANUAL.md §20.3 o:  ./instalar.sh --pyspin /ruta/spinnaker_python-...-cp310-...whl

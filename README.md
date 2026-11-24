@@ -38,8 +38,22 @@ Se configura editando la cabecera de `pipeline.py` (qué etapas correr) y `confi
 | Procesar capturas copiadas a `capturas/` | `organizar` → `reconstruccion` |
 | Ver resultados ya calculados | `visualizacion` |
 
-La calibración es **opcional**: si no se activa, se usa la última guardada en
-`resultados/calibracion/`. Las poses ya procesadas se reutilizan.
+La calibración es **opcional**: si no se activa, se usa la guardada en `calibraciones/`
+(versionada en git, viaja con el código). Las poses ya procesadas se reutilizan.
+
+## Instalación en otro computador
+
+```bash
+git clone <url> Tesis && cd Tesis
+./instalar.sh                    # entorno Python + dependencias + patrones + verificación
+./instalar.sh --udev             # opcional: LightCrafter sin sudo
+./instalar.sh --pyspin <wheel>   # opcional: cámara FLIR (requiere el Spinnaker SDK)
+.env/bin/python verificar.py     # dice qué falta y dónde buscar la solución
+```
+
+La instalación de la cámara (Spinnaker SDK + PySpin) está explicada paso a paso en el §20.3 de
+[`MANUAL.md`](MANUAL.md). Los problemas frecuentes de cada etapa, con su causa y solución, están
+en el §16.
 
 ## Estado actual (capturas del 2026-10-30)
 

@@ -19,7 +19,11 @@ DATOS = Path(os.environ.get("TESIS_DIR_DATOS", RAIZ)).expanduser().resolve()
 DIR_PATRONES = RAIZ / "patterns" / "secuencia_completa_bmp"   # .bmp que se cargan al LightCrafter
 DIR_CAPTURAS = DATOS / "capturas"                 # capturas crudas (cualquier nombre / formato)
 DIR_ORDENADAS = DATOS / "capturas_ordenadas"      # <categoria>/pose_XX/{H,V}/P18_FYY.tiff
-DIR_RESULTADOS = DATOS / "resultados"             # fases, calibración y reconstrucción
+DIR_RESULTADOS = DATOS / "resultados"             # fases, reconstrucción y diagnósticos
+# Calibración vigente del montaje (archivos pequeños, VERSIONADOS en git para que viajen con el
+# código). Cada recalibración guarda además una copia en calibraciones/historial/<fecha>/.
+# TESIS_DIR_CALIBRACION permite usar otra carpeta (p. ej. para pruebas).
+DIR_CALIBRACION = Path(os.environ.get("TESIS_DIR_CALIBRACION", RAIZ / "calibraciones")).expanduser().resolve()
 
 # Categorías de captura: patrón de círculos, plano de referencia y objeto
 CATEGORIAS = ("patron", "plano", "objeto")

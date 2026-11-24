@@ -1,0 +1,9 @@
+# Acceso al TI DLP LightCrafter 4500 (controlador DLPC350, USB 0451:6401) sin sudo.
+# Lo instala ./instalar.sh --udev, o a mano:
+#   sudo cp instalacion/99-lightcrafter.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+# y desconectar/conectar el cable USB del proyector.
+#
+# TAG+="uaccess": da acceso al usuario con sesión iniciada en el equipo.
+# GROUP="plugdev": da acceso también a los usuarios de ese grupo (p. ej. por SSH).
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0451", ATTRS{idProduct}=="6401", MODE="0660", GROUP="plugdev", TAG+="uaccess"

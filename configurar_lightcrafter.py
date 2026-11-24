@@ -1,8 +1,11 @@
 """Configuración por USB (HID) del proyector TI DLP LightCrafter 4500 (DLPC350).
 
 Modifica los parámetros en la sección 'PARÁMETROS DE CONFIGURACIÓN' de abajo
-y ejecuta directamente:
-    sudo /home/jose/Documents/Tesis/.env/bin/python /home/jose/Documents/Tesis/configurar_lightcrafter.py
+y ejecuta, desde la carpeta del proyecto:
+    .env/bin/python configurar_lightcrafter.py
+
+Si da error de permisos sobre /dev/hidrawX, instala una vez la regla udev:
+    ./instalar.sh --udev        (ver MANUAL.md §20.4)
 """
 
 from __future__ import annotations
@@ -98,12 +101,14 @@ class LightCrafter4500:
             try:
                 self.fd = os.open(self.device_path, os.O_RDWR | os.O_NONBLOCK)
             except PermissionError as exc:
+                raiz = Path(__file__).resolve().parent
                 raise PermissionError(
                     f"Sin permisos para abrir '{self.device_path}'.\n"
-                    f"Ejecuta una sola vez en la terminal:\n"
+                    f"Solución permanente (una sola vez), desde '{raiz}':\n"
+                    f"    ./instalar.sh --udev\n"
+                    f"y desconecta/conecta el USB del LightCrafter. Solución temporal (hasta reiniciar):\n"
                     f"    sudo chmod a+rw {self.device_path}\n"
-                    f"o corre el script con:\n"
-                    f"    sudo /home/jose/Documents/Tesis/.env/bin/python /home/jose/Documents/Tesis/configurar_lightcrafter.py"
+                    f"Más detalles: MANUAL.md §20.4"
                 ) from exc
 
     def close(self) -> None:

@@ -19,8 +19,13 @@ de `Matlab_Codes/Codes/`, que son solo referencia y no se ejecutan. El manual co
   probarla sin hardware ni tocar datos reales, usa
   `TESIS_DIR_DATOS=<copia> … --sin-navegador` y el modo demo (`"simular": "objeto/<carpeta>"` en
   `POST /api/ejecutar`).
-- Python 3.10 en `.env/`: numpy 1.26, opencv 5.0, matplotlib y spinnaker-python (PySpin, solo
-  para capturar).
+- Python 3.10 en `.env/`, creado con `./instalar.sh` desde `requirements.txt`: numpy 1.26,
+  **opencv 4.11** y matplotlib, más spinnaker-python (PySpin, solo para capturar).
+  - PySpin 4.x exige numpy<2 y OpenCV ≥4.12 exige numpy≥2: **no subas OpenCV**.
+  - Se verificó que 4.11 da los mismos resultados que 5.0.
+- `.env/bin/python verificar.py [--sin-hardware]` diagnostica la instalación. La guía de problemas
+  por etapa está en MANUAL.md §16 e instalación/PySpin en §20. Si agregas un error nuevo,
+  documéntalo en la tabla de su etapa.
 - No hay tests automáticos. La verificación se hace corriendo el pipeline sobre las capturas
   existentes y mirando:
   - el error de planitud de `plano`, que hoy da ≈ 0.50 mm de media
@@ -47,8 +52,11 @@ Las etapas corren en un orden fijo desde `pipeline.py` (`ETAPAS`):
 - Categorías: `patron` (tablero de 9×12 círculos blancos, 15 mm), `plano` (referencia de
   planitud) y `objeto`.
 - La **calibración es opcional**: con `calibracion = False` la reconstrucción usa
-  `resultados/calibracion/Estereo_TSC_0_2.npz`, y `pipeline.main()` verifica que exista antes de
-  empezar. Las fases de `patron` solo se calculan si se calibra.
+  `calibraciones/Estereo_TSC_0_2.npz` (`cfg.DIR_CALIBRACION`), y `pipeline.main()` verifica que
+  exista antes de empezar.
+  - `calibraciones/` está **versionada**: viaja con el código. Cada recalibración copia a
+    `calibraciones/historial/<fecha>/`.
+  - Los diagnósticos pesados van a `resultados/calibracion/`. Las fases de `patron` solo se calculan si se calibra.
 - **Caché en todas las etapas de proceso:**
   - las de fase omiten las poses cuyo `.npz` es más reciente que sus imágenes
     (`fase._actualizado`);
