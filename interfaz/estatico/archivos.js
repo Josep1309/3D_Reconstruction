@@ -52,6 +52,7 @@ function pintarArchivos() {
     grupos.get(p.configuracion).push(p);
   }
   for (const [config, procesos] of [...grupos.entries()].reverse()) cont.appendChild(bloqueConfiguracion(config, procesos));
+  if (d.lotes?.length) cont.appendChild(bloquePapelera(d.lotes));
   pintarSeleccion();
 }
 
@@ -92,6 +93,50 @@ function bloqueConfiguracion(config, procesos) {
   return det;
 }
 
+// Nota editable (nombre de la pieza, comentario del proceso…); se guarda al salir del campo
+function campoNota(claves, valor, ayuda) {
+  const input = document.createElement("input");
+  input.type = "text"; input.className = "ar-nota"; input.value = valor || ""; input.maxLength = 200;
+  input.placeholder = ayuda; input.setAttribute("aria-label", ayuda);
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") input.blur(); e.stopPropagation(); });
+  input.addEventListener("change", async () => {
+    for (const clave of [].concat(claves)) {
+      try { await api("/api/notas", { clave, texto: input.value }); } catch (err) { agregarLog(`[ERROR] ${err.message}`); }
+    }
+    refrescarEstado();
+  });
+  return input;
+}
+
+function bloquePapelera(lotes) {
+  const det = document.createElement("details");
+  det.className = "ar-config ar-papelera-lista";
+  det.innerHTML = `<summary><b></b><span class="ar-cuenta"></span></summary>`;
+  $("b", det).textContent = t("ar_papelera_titulo");
+  $(".ar-cuenta", det).textContent = t("ar_papelera_resumen", { n: lotes.length, t: megas(lotes.reduce((a, l) => a + l.bytes, 0)) });
+  for (const l of lotes) {
+    const fila = document.createElement("div");
+    fila.className = "ar-lote";
+    fila.innerHTML = `<b></b><span></span><small></small>`;
+    $("b", fila).textContent = l.fecha ? fechaHora(l.fecha) : l.id;
+    $("span", fila).textContent = l.capturas.length ? l.capturas.join(", ") : t("ar_lote_sin_capturas");
+    $("small", fila).textContent = megas(l.bytes);
+    const b = boton(t("ar_restaurar"), async () => {
+      try {
+        const r = await api("/api/archivos/restaurar", { lote: l.id });
+        if (r.conflictos?.length) alert(t("ar_restaurado_conflictos", { n: r.conflictos.length }));
+      } catch (err) { alert(err.message); }
+      await cargarArchivos(); refrescarEstado();
+    });
+    b.disabled = !l.restaurable;
+    if (!l.restaurable) b.title = t("ar_lote_no_restaurable");
+    fila.appendChild(b);
+    det.appendChild(fila);
+  }
+  return det;
+}
+
 function etiqueta(texto, tipo = "") {
   const s = document.createElement("span");
   s.className = `ar-etiqueta ${tipo}`; s.textContent = texto;
@@ -111,9 +156,10 @@ function bloqueProceso(p) {
   casilla.setAttribute("aria-label", t("ar_sel_proceso"));
   casilla.addEventListener("change", () => { todas.forEach((c) => (casilla.checked ? ar.sel.add(c) : ar.sel.delete(c))); pintarArchivos(); });
   $("b", cab).textContent = t("ar_proceso", { a: fechaHora(p.id), b: fechaHora(p.fin, false) });
-  $("small", cab).textContent = p.registrado ? "" : t("ar_sin_registro");
+  $("small", cab).textContent = megas(p.bytes) + (p.registrado ? "" : " · " + t("ar_sin_registro"));
+  cab.insertBefore(campoNota(`proceso:${p.id}`, p.nota, t("ar_nota_proceso")), $("small", cab));
   if (p.calibraciones.length) {
-    $("small", cab).textContent += (p.registrado ? "" : " · ") + t("ar_calibs", { l: p.calibraciones.map((c) => c.id + (c.activa ? " ✓" : "")).join(", ") });
+    $("small", cab).textContent += " · " + t("ar_calibs", { l: p.calibraciones.map((c) => c.id + (c.activa ? " ✓" : "")).join(", ") });
   }
   div.appendChild(cab);
   const tabla = document.createElement("div");
@@ -152,6 +198,14 @@ function filaCaptura(it) {
     s.title = pasos.filter((k) => p[k]).map((k) => t(`ar_paso_${k}`)).join(" · ") || t("ar_nada");
     poses.appendChild(s);
   }
+  if (it.poses.length) {  // nota de la pieza: se guarda para cada pose de la captura
+    const nota = campoNota(it.poses.map((p) => `pose:${it.cat}/${p.pose}`), it.nota, t("ar_nota_pose"));
+    nota.classList.add("ar-nota-pose");
+    poses.appendChild(nota);
+  }
+  const tam = document.createElement("small");
+  tam.className = "ar-tam"; tam.textContent = megas(it.bytes || 0);
+  $(".ar-botones", fila).appendChild(tam);
   if (it.existe) $(".ar-botones", fila).appendChild(boton(t("ar_ver"), () => { ar.viendo = it; verCaptura(it); }));
   return fila;
 }

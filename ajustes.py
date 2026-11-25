@@ -45,9 +45,9 @@ def leer(ruta: Path = RUTA) -> dict:
 
 
 def guardar(datos: dict, ruta: Path = RUTA) -> None:
-    tmp = ruta.with_name(ruta.name + ".tmp")
-    tmp.write_text(json.dumps(datos, indent=1, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(ruta)
+    import sesiones
+
+    sesiones.escribir_json(ruta, datos)
 
 
 def valores(efectivos: dict, base: dict | None = None) -> dict:

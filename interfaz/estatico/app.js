@@ -249,6 +249,7 @@ function pintarListaPoses() {
         (p.erms_mm ? ` · ${t("pose_planitud", { v: fmt(p.erms_mm, 3) })}` : "") +
         (p.calculada_con ? `\n${t("pose_calculada_con", { a: p.calculada_con })}` : "") +
         (p.ajustes_ok === false ? `\n⚠ ${t("pose_otros_ajustes")}` : "");
+      if (p.nota) b.title = `${p.nota}\n${b.title}`;
       b.innerHTML = `${p.pose.replace("pose_", "")}<span class="puntitos">${etapas.map((k) => `<i class="${p[k] ? "si" : ""}"></i>`).join("")}</span>`;
       b.addEventListener("click", () => { $("#v-seguir").checked = false; seleccionar(cat, p.pose); });
       $(".poses", bloque).appendChild(b);
@@ -270,7 +271,9 @@ function pintarSelectores() {
   sc.value = est.cat;
   const poses = (est.poses[est.cat] || []).map((p) => p.pose);
   if (!poses.includes(est.pose)) est.pose = poses[poses.length - 1] || null;
-  sp.innerHTML = poses.length ? poses.map((p) => `<option>${p}</option>`).join("") : `<option value=''>${t("sin_poses")}</option>`;
+  const notaDe = (p) => (est.poses[est.cat] || []).find((x) => x.pose === p)?.nota;
+  sp.innerHTML = poses.length ? poses.map((p) => `<option value="${p}">${p}${notaDe(p) ? " · " + escHTML(notaDe(p)) : ""}</option>`).join("")
+    : `<option value=''>${t("sin_poses")}</option>`;
   sp.value = est.pose || "";
 }
 
@@ -279,6 +282,7 @@ function pintarMetricas() {
   m.innerHTML = "";
   if (!p) return;
   const items = [];
+  if (p.nota) items.push([t("met_nota"), p.nota]);
   if (p.puntos) items.push([t("met_puntos"), p.puntos.toLocaleString(locale())]);
   if (p.z && p.z[0] !== null && p.z[0] !== undefined) items.push(["Z", `${fmt(p.z[0])}–${fmt(p.z[1])} mm`]);
   if (p.erms_mm) items.push([t("met_planitud"), `${fmt(p.erms_mm, 3)} mm`]);

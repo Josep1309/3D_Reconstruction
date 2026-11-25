@@ -20,6 +20,7 @@ recalibrar.
 from __future__ import annotations
 
 import json
+import os
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -54,10 +55,20 @@ def _leer_json(ruta: Path, defecto):
         return defecto
 
 
-def _escribir_json(ruta: Path, datos) -> None:
-    tmp = ruta.with_name(ruta.name + ".tmp")
-    tmp.write_text(json.dumps(datos, indent=1, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(ruta)
+# Candado de los archivos JSON de datos (registro, notas, manifiesto, ajustes): el servidor atiende
+# peticiones en varios hilos, y dos «leer, cambiar y escribir» simultáneos perderían o mezclarían datos
+ESCRITURA = threading.RLock()
+
+
+def escribir_json(ruta: Path, datos, indent: int = 1) -> None:
+    """Escritura atómica: a un temporal único (proceso e hilo) y luego renombrado."""
+    tmp = ruta.with_name(f".{ruta.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    with ESCRITURA:
+        tmp.write_text(json.dumps(datos, indent=indent, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(ruta)
+
+
+_escribir_json = escribir_json
 
 
 # ------------------------------------------------------------------ registro de procesos
@@ -74,6 +85,13 @@ def registrar_proceso(carpetas: list[Path], plan: list[tuple[str, int]], ruta: P
     """
     if not carpetas:
         return
+    with ESCRITURA:
+        _registrar(carpetas, plan, ruta)
+    if any(clave_carpeta(c).startswith("patron/") for c in carpetas):
+        fijar_configuracion(None)
+
+
+def _registrar(carpetas: list[Path], plan: list[tuple[str, int]], ruta: Path) -> None:
     registro = leer_registro(ruta)
     horas = [h for h in (hora_de_carpeta(c) for c in carpetas) if h is not None]
     registro.append({
@@ -83,11 +101,14 @@ def registrar_proceso(carpetas: list[Path], plan: list[tuple[str, int]], ruta: P
         "carpetas": [clave_carpeta(c) for c in carpetas],
     })
     _escribir_json(ruta, registro)
-    if any(clave_carpeta(c).startswith("patron/") for c in carpetas):
-        fijar_configuracion(None)
 
 
 def quitar_del_registro(carpetas: set[str], ruta: Path = REGISTRO) -> None:
+    with ESCRITURA:
+        _quitar(carpetas, ruta)
+
+
+def _quitar(carpetas: set[str], ruta: Path) -> None:
     registro = leer_registro(ruta)
     if not registro:
         return

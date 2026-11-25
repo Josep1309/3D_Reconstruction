@@ -322,6 +322,9 @@ def inventario() -> dict:
     import ajustes
 
     esperada_rel, esperada_abs = ajustes.firmas_esperadas()
+    import archivos
+
+    notas = archivos.leer_notas()
     datos = {}
     for cat in cfg.CATEGORIAS:
         resumen_ruta = DIR_RECONSTRUCCION / cat / f"{cat}_resumen.json"
@@ -340,6 +343,7 @@ def inventario() -> dict:
             f_rel, f_abs = _firma_pose(archivos["relativa"], "rel"), _firma_pose(archivos["absoluta"], "abs")
             distintos = [f for f, esperada in ((f_rel, esperada_rel), (f_abs, esperada_abs)) if f and f != esperada]
             poses.append({"pose": pose, **estado, "puntos": info.get("puntos"), "erms_mm": info.get("erms_mm"),
+                          "nota": notas.get(f"pose:{cat}/{pose}"),
                           "z": [info.get("z_p1_mm"), info.get("z_p99_mm")],
                           "ajustes_ok": not distintos,
                           "calculada_con": " · ".join(ajustes.describir_firma(f) for f in (f_rel, f_abs) if f)})
@@ -369,6 +373,7 @@ def listado_archivos() -> dict:
     lista = sesiones.procesos()
     conf = sesiones.configuracion_vigente()
     rangos = sesiones.configuraciones(lista)
+    notas = archivos.leer_notas()
     calibs = ce.listar_calibraciones(DIR_CALIBRACION)
     proceso_calib = {}
     for c in calibs:
@@ -383,16 +388,22 @@ def listado_archivos() -> dict:
             for pose in it["poses"]:
                 estado = {k: _mtime(r) is not None for k, r in _archivos_pose(it["cat"], pose).items()}
                 poses.append({"pose": pose, **estado})
+            # Espacio: captura cruda + poses organizadas (lo que se libera al borrarla, sin contar resultados)
+            bytes_item = archivos.tamano(cfg.DIR_CAPTURAS / it["carpeta"]) + sum(
+                archivos.tamano(cfg.DIR_ORDENADAS / it["cat"] / p["pose"]) for p in poses)
             items.append({"cat": it["cat"], "carpeta": it["carpeta"], "hora": it["hora"].isoformat(timespec="seconds"),
                           "existe": it["existe"], "poses": poses, "rechazo": it.get("rechazo"),
-                          "pureza": it.get("pureza")})
+                          "pureza": it.get("pureza"), "bytes": bytes_item,
+                          "nota": notas.get(f"pose:{it['cat']}/{it['poses'][0]}") if it["poses"] else None})
         salida.append({
             "id": p["id"], "fin": p["fin"].isoformat(timespec="seconds"), "registrado": p["registrado"],
+            "nota": notas.get(f"proceso:{p['id']}"), "bytes": sum(i["bytes"] for i in items),
             "patron": p["patron"], "configuracion": config, "vigente": bool(conf) and config == conf["proceso"],
             "inicia_configuracion": config == p["id"], "calibraciones": proceso_calib.get(p["id"], []),
             "items": items,
         })
-    return {"procesos": salida, "vigente": sesiones.info_vigente(), "papelera": archivos.info_papelera()}
+    return {"procesos": salida, "vigente": sesiones.info_vigente(), "papelera": archivos.info_papelera(),
+            "lotes": archivos.listar_papelera()}
 
 
 def _tamano(ruta: Path) -> int:
@@ -972,7 +983,14 @@ class Manejador(BaseHTTPRequestHandler):
                 tmp.write_text(json.dumps({"exposicion_us": us}), encoding="utf-8")
                 tmp.replace(dir_vivo / "control.json")
                 return self._json({"ok": True, "activa": ejecucion.estado()["ejecutando"]})
-            if url.path in ("/api/archivos/borrar", "/api/archivos/vaciar_papelera", "/api/configuracion/elegir"):
+            if url.path == "/api/notas":
+                import archivos
+
+                cuerpo = self._cuerpo()
+                archivos.guardar_nota(str(cuerpo.get("clave", "")), str(cuerpo.get("texto", "")))
+                return self._json({"ok": True})
+            if url.path in ("/api/archivos/borrar", "/api/archivos/vaciar_papelera", "/api/configuracion/elegir",
+                            "/api/archivos/restaurar"):
                 if ejecucion.estado()["ejecutando"]:
                     raise RuntimeError("hay un proceso en curso: espera a que termine")
                 return self._json(self._post_archivos(url.path, self._cuerpo()))
@@ -1051,6 +1069,16 @@ class Manejador(BaseHTTPRequestHandler):
                 _cache_errores.clear()
             difusor.emitir("log", {"texto": f"[OK] {len(carpetas)} captura(s) movidas a la papelera "
                                             f"({res['elementos']} elementos): {res['papelera']}"})
+            return res
+        if ruta == "/api/archivos/restaurar":
+            with _lock_npz, _lock_errores:
+                res = archivos.restaurar(str(cuerpo.get("lote", "")))
+                _cache_mapas.limpiar()
+                _cache_errores.clear()
+            texto = f"[OK] Restaurado de la papelera: {res['devueltos']} elementos"
+            if res["conflictos"]:
+                texto += f" · [AVISO] {len(res['conflictos'])} ya existían y quedaron en la papelera"
+            difusor.emitir("log", {"texto": texto})
             return res
         if ruta == "/api/archivos/vaciar_papelera":
             res = archivos.vaciar_papelera()

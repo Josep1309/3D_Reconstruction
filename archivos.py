@@ -27,6 +27,7 @@ import configuracion as cfg
 import sesiones
 
 PAPELERA = cfg.DATOS / "papelera"
+META = "papelera.json"  # qué se quitó del manifiesto y del registro (para restaurar)
 EXT_IMAGEN = {".png", ".tif", ".tiff", ".bmp", ".jpg", ".jpeg"}
 
 
@@ -74,6 +75,11 @@ def _mover(origen: Path, destino_raiz: Path) -> bool:
 
 def mover_a_papelera(carpetas: list[str]) -> dict:
     """Mueve a la papelera las capturas indicadas ('cat/nombre') y todo lo derivado de ellas."""
+    with sesiones.ESCRITURA:
+        return _mover_a_papelera(carpetas)
+
+
+def _mover_a_papelera(carpetas: list[str]) -> dict:
     items = {i["carpeta"]: i for i in sesiones.capturas()}
     destino = PAPELERA / datetime.now().strftime("%Y%m%d_%H%M%S")
     movidos = 0
@@ -91,19 +97,116 @@ def mover_a_papelera(carpetas: list[str]) -> dict:
             dir_rec = cfg.DIR_RESULTADOS / "reconstruccion" / cat
             for archivo in [*dir_rec.glob(f"{cat}_{pose}.*"), *dir_rec.glob(f"reconstruccion_{cat}_{pose}.*")]:
                 movidos += _mover(archivo, destino)
-    _actualizar_indices(poses_borradas, set(carpetas))
+    quitadas = _actualizar_indices(poses_borradas, set(carpetas))
+    registro = [e for e in sesiones.leer_registro() if set(e.get("carpetas", [])) & set(carpetas)]
     sesiones.quitar_del_registro(set(carpetas))
     sesiones._cache.clear()
+    # Lo necesario para restaurar el lote tal como estaba (mismos nombres de pose)
+    destino.mkdir(parents=True, exist_ok=True)
+    (destino / META).write_text(json.dumps({
+        "fecha": datetime.now().isoformat(timespec="seconds"), "carpetas": carpetas,
+        "manifiesto_poses": quitadas["poses"], "rechazadas": quitadas["rechazadas"],
+        "registro": [{**e, "carpetas": [c for c in e["carpetas"] if c in carpetas]} for e in registro],
+    }, indent=1, ensure_ascii=False), encoding="utf-8")
     return {"carpetas": len(carpetas), "elementos": movidos, "papelera": str(destino)}
 
 
-def _actualizar_indices(poses_borradas: dict[str, set[str]], carpetas: set[str]) -> None:
+def listar_papelera() -> list[dict]:
+    """Lotes de la papelera (el más reciente primero) con lo que contiene cada uno."""
+    lotes = []
+    for lote in sorted((p for p in PAPELERA.glob("*") if p.is_dir()), reverse=True) if PAPELERA.is_dir() else []:
+        try:
+            meta = json.loads((lote / META).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            meta = {}
+        capturas = meta.get("carpetas") or sorted(
+            f"{c.parent.name}/{c.name}" for c in (lote / "capturas").glob("*/*")) if (lote / "capturas").is_dir() else meta.get("carpetas", [])
+        raices = {q.name for q in lote.iterdir() if q.name != META}
+        lotes.append({"id": lote.name, "fecha": meta.get("fecha"), "capturas": capturas,
+                      # sin metadatos (p. ej. una pose repetida) se devuelven solo los archivos
+                      "restaurable": raices <= {"capturas", "capturas_ordenadas", "resultados"},
+                      "con_datos": bool(meta),
+                      "bytes": sum(f.stat().st_size for f in lote.rglob("*") if f.is_file())})
+    return lotes
+
+
+def restaurar(lote_id: str) -> dict:
+    """Devuelve un lote de la papelera a su lugar, con sus entradas del manifiesto y del registro.
+
+    No pisa nada: si algo ya existe en el destino, ese elemento queda en la papelera."""
+    with sesiones.ESCRITURA:
+        return _restaurar(lote_id)
+
+
+def _restaurar(lote_id: str) -> dict:
+    lote = PAPELERA / lote_id
+    if "/" in lote_id or lote_id.startswith(".") or not lote.is_dir():
+        raise FileNotFoundError(f"no existe el lote {lote_id} en la papelera")
+    try:
+        meta = json.loads((lote / META).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        meta = {}
+    raices = {p.name for p in lote.iterdir() if p.name != META}
+    if not raices <= {"capturas", "capturas_ordenadas", "resultados"}:
+        raise ValueError(f"el lote {lote_id} no tiene la estructura de la papelera (p. ej. viene de reorganizar): "
+                         f"restáuralo a mano")
+    devueltos, conflictos = 0, []
+    for origen in sorted(p for p in lote.iterdir() if p.name != META):
+        for elemento in ([origen] if origen.is_file() else _elementos(origen)):
+            destino = cfg.DATOS / elemento.relative_to(lote)
+            if destino.exists():
+                conflictos.append(str(elemento.relative_to(lote)))
+                continue
+            destino.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(elemento), str(destino))
+            devueltos += 1
+    ruta_man = cfg.DIR_ORDENADAS / "manifiesto.json"
+    if meta.get("manifiesto_poses") or meta.get("rechazadas"):
+        try:
+            manifiesto = json.loads(ruta_man.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            manifiesto = {"version": 1, "poses": []}
+        existentes = {(e["categoria"], int(e["pose"])) for e in manifiesto.get("poses", [])}
+        manifiesto.setdefault("poses", []).extend(
+            e for e in meta.get("manifiesto_poses", []) if (e["categoria"], int(e["pose"])) not in existentes)
+        manifiesto.setdefault("rechazadas", {}).update(meta.get("rechazadas", {}))
+        sesiones.escribir_json(ruta_man, manifiesto, indent=2)
+    if meta.get("registro"):
+        registro = sesiones.leer_registro() + meta["registro"]
+        sesiones._escribir_json(sesiones.REGISTRO, sorted(registro, key=lambda e: e.get("inicio", "")))
+    if not conflictos:
+        shutil.rmtree(lote, ignore_errors=True)
+    sesiones._cache.clear()
+    return {"devueltos": devueltos, "conflictos": conflictos, "sin_datos_manifiesto": not meta}
+
+
+def _elementos(carpeta: Path) -> list[Path]:
+    """Hojas a mover: las carpetas de captura/pose completas y los archivos sueltos."""
+    salida = []
+    for p in sorted(carpeta.rglob("*")):
+        rel = p.relative_to(carpeta)
+        # capturas/<cat>/<captura> y capturas_ordenadas/<cat>/pose_XX se mueven enteras
+        if p.is_dir() and carpeta.name in ("capturas", "capturas_ordenadas") and len(rel.parts) == 2:
+            salida.append(p)
+        elif p.is_file() and not any(q in salida for q in p.parents):
+            if carpeta.name in ("capturas", "capturas_ordenadas") and len(rel.parts) > 2:
+                continue  # ya va dentro de su carpeta
+            salida.append(p)
+    return salida
+
+
+def _actualizar_indices(poses_borradas: dict[str, set[str]], carpetas: set[str]) -> dict:
     ruta = cfg.DIR_ORDENADAS / "manifiesto.json"
     try:
         manifiesto = json.loads(ruta.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         manifiesto = None
+    quitadas = {"poses": [], "rechazadas": {}}
     if manifiesto is not None:
+        quitadas["poses"] = [e for e in manifiesto.get("poses", [])
+                             if f"pose_{int(e['pose']):02d}" in poses_borradas.get(e["categoria"], set())]
+        quitadas["rechazadas"] = {f: r for f, r in manifiesto.get("rechazadas", {}).items()
+                                  if sesiones.clave_carpeta(r.get("fuente", "")) in carpetas}
         ultimo = manifiesto.setdefault("ultimo_indice", {})
         for e in manifiesto.get("poses", []):
             ultimo[e["categoria"]] = max(int(ultimo.get(e["categoria"], -1)), int(e["pose"]))
@@ -113,9 +216,7 @@ def _actualizar_indices(poses_borradas: dict[str, set[str]], carpetas: set[str])
         ]
         manifiesto["rechazadas"] = {f: r for f, r in manifiesto.get("rechazadas", {}).items()
                                     if sesiones.clave_carpeta(r.get("fuente", "")) not in carpetas}
-        tmp = ruta.with_name(ruta.name + ".tmp")
-        tmp.write_text(json.dumps(manifiesto, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(ruta)
+        sesiones.escribir_json(ruta, manifiesto, indent=2)
     for cat, poses in poses_borradas.items():
         ruta_res = cfg.DIR_RESULTADOS / "reconstruccion" / cat / f"{cat}_resumen.json"
         try:
@@ -124,6 +225,39 @@ def _actualizar_indices(poses_borradas: dict[str, set[str]], carpetas: set[str])
             continue
         ruta_res.write_text(json.dumps({k: v for k, v in resumen.items() if k not in poses}, indent=2),
                             encoding="utf-8")
+    return quitadas
+
+
+# ------------------------------------------------------------------ notas
+NOTAS = cfg.DATOS / "notas.json"
+
+
+def leer_notas() -> dict[str, str]:
+    """{"proceso:<id>": texto, "pose:<cat>/<pose>": texto} (p. ej. «pieza A, cara superior»)."""
+    try:
+        datos = json.loads(NOTAS.read_text(encoding="utf-8"))
+        return datos if isinstance(datos, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def guardar_nota(clave: str, texto: str) -> None:
+    if not re.fullmatch(r"(proceso:[\dT:-]+|pose:(patron|plano|objeto)/pose_\d+)", clave):
+        raise ValueError(f"clave de nota inválida: {clave}")
+    with sesiones.ESCRITURA:  # leer, cambiar y escribir sin que otra petición se meta en medio
+        notas = leer_notas()
+        texto = texto.strip()[:200]
+        if texto:
+            notas[clave] = texto
+        else:
+            notas.pop(clave, None)
+        sesiones.escribir_json(NOTAS, notas)
+
+
+def tamano(ruta: Path) -> int:
+    if ruta.is_file():
+        return ruta.stat().st_size
+    return sum(f.stat().st_size for f in ruta.rglob("*") if f.is_file()) if ruta.is_dir() else 0
 
 
 def info_papelera() -> dict:
