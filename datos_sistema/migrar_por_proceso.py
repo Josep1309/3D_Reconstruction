@@ -16,9 +16,9 @@ Ahora:  capturas/<P>/<cat>/<captura>     capturas_ordenadas/<P>/<cat>/pose_XX re
   junto con la lista de movimientos, que permite deshacerlo todo (`--deshacer`).
 
 Uso:
-    .env/bin/python migrar_por_proceso.py              # solo muestra qué haría (no toca nada)
-    .env/bin/python migrar_por_proceso.py --aplicar    # lo hace
-    .env/bin/python migrar_por_proceso.py --deshacer respaldo_migracion_20261125_103000
+    .env/bin/python -m datos_sistema.migrar_por_proceso              # solo muestra qué haría (no toca nada)
+    .env/bin/python -m datos_sistema.migrar_por_proceso --aplicar    # lo hace
+    .env/bin/python -m datos_sistema.migrar_por_proceso --deshacer respaldo_migracion_20261125_103000
 """
 
 from __future__ import annotations
@@ -30,9 +30,9 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-import configuracion as cfg
-import rutas
-import sesiones
+from datos_sistema import configuracion as cfg
+from datos_sistema import rutas
+from datos_sistema import sesiones
 
 
 def planificar() -> dict:
@@ -130,7 +130,7 @@ def aplicar(plan: dict) -> Path:
     manifiesto = _actualizar_manifiesto(plan["manifiesto"], plan["procesos"])
     sesiones.escribir_json(cfg.DIR_ORDENADAS / "manifiesto.json", manifiesto, indent=2)
     # proceso.json de cada proceso y origen.json de cada pose
-    import organizar_capturas as oc
+    from procesamiento import organizar_capturas as oc
 
     entrada_de = {(e["categoria"], f"pose_{int(e['pose']):02d}"): e for e in manifiesto.get("poses", [])}
     for p in plan["procesos"]:
@@ -206,7 +206,7 @@ def main() -> None:
         return
     respaldo = aplicar(plan)
     print(f"\n[OK] Migración hecha. Respaldo y lista de movimientos en {respaldo}")
-    print(f"     Para deshacerla: .env/bin/python migrar_por_proceso.py --deshacer {respaldo.name}")
+    print(f"     Para deshacerla: .env/bin/python -m datos_sistema.migrar_por_proceso --deshacer {respaldo.name}")
 
 
 if __name__ == "__main__":

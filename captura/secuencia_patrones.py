@@ -5,8 +5,8 @@ from collections.abc import Mapping
 import cv2
 import numpy as np
 
-import configuracion as cfg
-from patterns import generar_patrones_binarios
+from datos_sistema import configuracion as cfg
+from captura.patterns import generar_patrones_binarios
 
 
 ANCHO = cfg.PROYECTOR_ANCHO

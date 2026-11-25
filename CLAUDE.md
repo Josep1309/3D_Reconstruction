@@ -3,16 +3,16 @@
 Tesis: reconstrucción 3D por proyección de franjas (phase shifting + código Gray) con un
 proyector TI DLP LightCrafter 4500 (912×1140, DMD en diamante), una cámara FLIR Blackfly S
 (1280×1024) y un Arduino que dispara ambos a 20 Hz. Es un port a Python de los scripts de MATLAB
-de `Matlab_Codes/Codes/`, que son solo referencia y no se ejecutan. El manual completo está en
-`MANUAL.md`.
+de `recursos/Matlab_Codes/Codes/`, que son solo referencia y no se ejecutan. El manual completo está en
+`docs/MANUAL.md`.
 
 ## Comandos
 
 ```bash
 .env/bin/python pipeline.py                 # TODO se controla editando la cabecera de pipeline.py
-.env/bin/python organizar_capturas.py --simular
-.env/bin/python calibracion_estereo.py --help
-.env/bin/python reconstruccion_3d.py --categorias objeto --fase Fy
+.env/bin/python -m procesamiento.organizar_capturas --simular
+.env/bin/python -m procesamiento.calibracion_estereo --help
+.env/bin/python -m procesamiento.reconstruccion_3d --categorias objeto --fase Fy
 ```
 
 - Interfaz web: `.env/bin/python interfaz/servidor.py [--puerto N --sin-navegador]`. Para
@@ -41,6 +41,23 @@ de `Matlab_Codes/Codes/`, que son solo referencia y no se ejecutan. El manual co
 - `visualizacion` llama a `plt.show()` y bloquea si no se desactiva.
 
 ## Arquitectura
+
+Carpetas del código (paquetes; se importan como `from procesamiento import fase`,
+`from datos_sistema import configuracion as cfg`):
+
+- `captura/`: capturar_patrones, configurar_lightcrafter, secuencia_patrones, patterns.
+- `procesamiento/`: organizar_capturas, fase, calibracion_estereo, reconstruccion_3d, mascara,
+  visualizacion.
+- `datos_sistema/`: configuracion, ajustes, rutas, sesiones, archivos, importar, mediciones,
+  avance, migrar_por_proceso.
+- En la raíz quedan solo `pipeline.py` y `verificar.py`. Los demás scripts se corren con
+  `.env/bin/python -m <carpeta>.<módulo>` desde la raíz.
+- `docs/` (MANUAL, AUDITORIA) y `recursos/` (patterns .bmp, arduino_pulses, instalacion,
+  Matlab_Codes).
+- **Todos los datos** están en `datos/` (`cfg.DATOS`, gitignored): capturas, capturas_ordenadas,
+  resultados, papelera y los .json de estado (ajustes, notas, mediciones, procesos_captura,
+  configuracion_elegida).
+
 
 Las etapas corren en un orden fijo desde `pipeline.py` (`ETAPAS`):
 
@@ -143,7 +160,7 @@ Las etapas corren en un orden fijo desde `pipeline.py` (`ETAPAS`):
     allí, en los dos idiomas: `data-i18n` en el HTML y `t("clave")` en el JS.
 
   No agregues dependencias de CDN: el equipo del laboratorio puede no tener internet.
-- `configuracion.DATOS` sale de `TESIS_DIR_DATOS` (por defecto, la raíz del proyecto).
+- `configuracion.DATOS` sale de `TESIS_DIR_DATOS` (por defecto, `<proyecto>/datos`).
 
 ## Convenciones y decisiones no obvias
 

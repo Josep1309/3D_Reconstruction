@@ -26,9 +26,9 @@ La organización es incremental: las fuentes ya registradas en el manifiesto se 
 reciben el siguiente número de pose. `--rehacer` reconstruye todo desde cero.
 
 Ejemplos:
-    python organizar_capturas.py                         # todo lo que haya en capturas/
-    python organizar_capturas.py --entrada ~/Descargas/sesion3 --categoria objeto
-    python organizar_capturas.py --simular               # solo muestra qué haría
+    python -m procesamiento.organizar_capturas                         # todo lo que haya en capturas/
+    python -m procesamiento.organizar_capturas --entrada ~/Descargas/sesion3 --categoria objeto
+    python -m procesamiento.organizar_capturas --simular               # solo muestra qué haría
 """
 
 from __future__ import annotations
@@ -48,8 +48,8 @@ from typing import Sequence
 import cv2
 import numpy as np
 
-import configuracion as cfg
-import rutas
+from datos_sistema import configuracion as cfg
+from datos_sistema import rutas
 
 
 EXT_IMAGEN = {".tiff", ".tif", ".png", ".bmp", ".jpg", ".jpeg", ".pgm"}
@@ -406,7 +406,7 @@ def categoria_por_contenido(sec: np.ndarray, descripcion: str, interactivo: bool
     referencia incluyen la placa de fondo a otra profundidad), así que se pregunta al usuario cuando
     hay terminal; si no, se asigna `objeto` y se deja constancia en el manifiesto.
     """
-    from calibracion_estereo import detectar_puntos_tablero
+    from procesamiento.calibracion_estereo import detectar_puntos_tablero
 
     blanco = np.clip(sec[-1], 0, 255).astype(np.uint8)
     try:
@@ -539,7 +539,7 @@ def _hora_fuente(fuente: str) -> datetime | None:
 
 def anotar_pose_en_proceso(proceso: str, categoria: str, pose: str) -> None:
     """Agrega la pose organizada al `proceso.json` de su carpeta de proceso."""
-    import sesiones
+    from datos_sistema import sesiones
 
     ruta = cfg.DIR_CAPTURAS / proceso / "proceso.json"
     with sesiones.ESCRITURA:
@@ -646,7 +646,7 @@ def organizar(
     print(f"[INFO] {len(fuentes)} fuentes de captura encontradas en: {', '.join(map(str, entradas))}")
 
     nuevas: dict[str, list[str]] = {}
-    import avance
+    from datos_sistema import avance
 
     for k, fuente in enumerate(fuentes):
         avance.contador(k, len(fuentes), f"Captura {k + 1} de {len(fuentes)}: {_ruta_relativa(fuente.ruta)}")

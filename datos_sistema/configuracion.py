@@ -12,11 +12,12 @@ from pathlib import Path
 # ==============================================================================
 # --- DIRECTORIOS ---
 # ==============================================================================
-RAIZ = Path(__file__).resolve().parent
-# Carpeta base de los datos. Por defecto la del proyecto; la variable de entorno TESIS_DIR_DATOS
-# permite trabajar con otra copia (p. ej. para probar sin tocar las capturas reales).
-DATOS = Path(os.environ.get("TESIS_DIR_DATOS", RAIZ)).expanduser().resolve()
-DIR_PATRONES = RAIZ / "patterns" / "secuencia_completa_bmp"   # .bmp que se cargan al LightCrafter
+RAIZ = Path(__file__).resolve().parent.parent  # raíz del proyecto (este archivo está en datos_sistema/)
+# Carpeta base de los datos: <proyecto>/datos/ (capturas, resultados, papelera y los .json de
+# estado). La variable de entorno TESIS_DIR_DATOS permite trabajar con otra copia (p. ej. para
+# probar sin tocar las capturas reales).
+DATOS = Path(os.environ.get("TESIS_DIR_DATOS", RAIZ / "datos")).expanduser().resolve()
+DIR_PATRONES = RAIZ / "recursos" / "patterns" / "secuencia_completa_bmp"   # .bmp que se cargan al LightCrafter
 DIR_CAPTURAS = DATOS / "capturas"                 # capturas crudas (cualquier nombre / formato)
 DIR_ORDENADAS = DATOS / "capturas_ordenadas"      # <categoria>/pose_XX/{H,V}/P18_FYY.tiff
 DIR_RESULTADOS = DATOS / "resultados"             # fases, reconstrucción y diagnósticos

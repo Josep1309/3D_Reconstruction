@@ -19,7 +19,7 @@ Flujo:
    figura, más `<categoria>_resumen.json`. Las poses sin cambios se reutilizan (caché).
 
 Ejemplo de uso:
-    python reconstruccion_3d.py --categorias objeto plano --fase auto
+    python -m procesamiento.reconstruccion_3d --categorias objeto plano --fase auto
 """
 
 from __future__ import annotations
@@ -33,12 +33,12 @@ from typing import Sequence
 import cv2
 import numpy as np
 
-import configuracion as cfg
-import mascara
-import fase
-import rutas
-import sesiones
-from calibracion_estereo import normalizar_mapa_color
+from datos_sistema import configuracion as cfg
+from procesamiento import mascara
+from procesamiento import fase
+from datos_sistema import rutas
+from datos_sistema import sesiones
+from procesamiento.calibracion_estereo import normalizar_mapa_color
 
 
 # ==============================================================================

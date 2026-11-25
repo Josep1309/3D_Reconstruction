@@ -23,9 +23,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-import configuracion as cfg
-import rutas
-import sesiones
+from datos_sistema import configuracion as cfg
+from datos_sistema import rutas
+from datos_sistema import sesiones
 
 PAPELERA = cfg.DATOS / "papelera"
 META = "papelera.json"  # qué se quitó del manifiesto y del registro (para restaurar)

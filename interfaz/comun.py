@@ -9,7 +9,7 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
 
-import configuracion as cfg  # noqa: E402
+from datos_sistema import configuracion as cfg  # noqa: E402
 
 
 DIR_ESTATICO = Path(__file__).resolve().parent / "estatico"
@@ -30,7 +30,7 @@ def _mtime(ruta: Path) -> float | None:
 
 def _archivos_pose(cat: str, pose: str) -> dict[str, Path]:
     """Archivos de cada paso de una pose, en la carpeta de su proceso (rutas.py)."""
-    import rutas
+    from datos_sistema import rutas
 
     return {
         "organizada": rutas.dir_pose_ordenada(cat, pose) / "H" / f"{cfg.PREFIJO_ORDENADAS}{cfg.IMAGENES_POR_ORIENTACION + 1:02d}.tiff",
@@ -42,8 +42,8 @@ def _archivos_pose(cat: str, pose: str) -> dict[str, Path]:
 
 def listar_poses(cat: str) -> list[str]:
     """Poses de la categoría en la configuración vigente del montaje (sesiones.py)."""
-    import rutas
-    import sesiones
+    from datos_sistema import rutas
+    from datos_sistema import sesiones
 
     vigentes = sesiones.poses_vigentes(cat)
     return [p for p in rutas.poses(cat) if vigentes is None or p in vigentes]

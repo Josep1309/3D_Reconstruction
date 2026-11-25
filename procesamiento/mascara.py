@@ -28,8 +28,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-import configuracion as cfg
-import rutas
+from datos_sistema import configuracion as cfg
+from datos_sistema import rutas
 
 DEFECTO = {"umbral": None, "recortes": [], "exclusiones": [], "erosion": 0, "min_isla": 0, "mayor": False}
 
@@ -44,7 +44,7 @@ def ruta_json(cat: str, pose: str) -> Path:
 
 def fase_triangulacion() -> str:
     """'Fx', 'Fy' o 'ambas': la fase con la que se triangula (decide qué modulación γ se usa)."""
-    import reconstruccion_3d as r3d
+    from procesamiento import reconstruccion_3d as r3d
 
     ruta = cfg.DIR_CALIBRACION / "Estereo_TSC_0_2.npz"
     try:
@@ -142,7 +142,7 @@ def guardar(cat: str, pose: str, mascara: np.ndarray, params: dict) -> Path:
     if not cv2.imwrite(str(tmp), mascara.astype(np.uint8) * 255):
         raise OSError(f"No se pudo escribir {destino}")
     os.replace(tmp, destino)
-    import sesiones
+    from datos_sistema import sesiones
 
     sesiones.escribir_json(ruta_json(cat, pose), {**normalizar(params), "fase": fase_triangulacion(),
                                                   "conservados": int(mascara.sum()), "total": int(mascara.size)})

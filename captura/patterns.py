@@ -55,7 +55,8 @@ if __name__ == "__main__":
     NUM_PASOS = 6       # 6-step phase shifting (desplazamiento de 3 px por paso)
     ANCHO = 912         # Resolución del LightCrafter 4500 (ancho x alto = 912 x 1140)
     ALTO = 1140
-    Path("patterns").mkdir(exist_ok=True)
+    destino = Path(__file__).resolve().parent.parent / "recursos" / "patterns"  # ejemplo de prueba
+    destino.mkdir(parents=True, exist_ok=True)
 
     imagenes = generar_patrones_binarios(
         width=ANCHO, 
@@ -66,6 +67,6 @@ if __name__ == "__main__":
     )
 
     for idx, img in enumerate(imagenes):
-        nombre_archivo = f"patterns/patron_binario_paso_{idx+1}_de_{NUM_PASOS}.png"
+        nombre_archivo = str(destino / f"patron_binario_paso_{idx+1}_de_{NUM_PASOS}.png")
         cv2.imwrite(nombre_archivo, img)
         print(f"Guardado: {nombre_archivo} (shift = {idx * (PERIODO / NUM_PASOS):.1f} px)")

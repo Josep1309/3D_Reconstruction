@@ -9,7 +9,7 @@ Ventana 2: nube de puntos 3D (submuestreada) coloreada por profundidad o por tex
 Usa los resultados de las etapas organizar, fase_relativa, fase_absoluta y reconstruccion.
 
 Ejemplo:
-    .env/bin/python visualizacion.py          # usa los valores de la sección de abajo
+    .env/bin/python -m procesamiento.visualizacion          # usa los valores de la sección de abajo
 """
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-import configuracion as cfg
-import fase
+from datos_sistema import configuracion as cfg
+from procesamiento import fase
 
 # ==============================================================================
 # --- PARÁMETROS (EDITA AQUÍ) ---
@@ -67,7 +67,7 @@ def visualizar_pose(
             raise FileNotFoundError(f"No hay poses organizadas de '{categoria}'.")
         pose = poses[-1].name
         print(f"[INFO] Visualizando la última pose: {categoria}/{pose}")
-    import rutas
+    from datos_sistema import rutas
 
     dir_pose = rutas.dir_pose_ordenada(categoria, pose)  # en la carpeta de su proceso
     dir_fases = rutas.dir_fases(categoria, pose)

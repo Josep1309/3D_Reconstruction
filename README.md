@@ -6,9 +6,9 @@ Blackfly S**, disparada por el mismo pulso de un **Arduino**, las captura. Luego
 se desenvuelve con el código Gray, se obtienen las coordenadas del proyector y se triangula cada
 píxel con la calibración estéreo cámara–proyector.
 
-Adaptación a Python de los scripts de MATLAB de `Matlab_Codes/Codes/`.
+Adaptación a Python de los scripts de MATLAB de `recursos/Matlab_Codes/Codes/`.
 
-**📖 La documentación completa está en [`MANUAL.md`](MANUAL.md)**: teoría, uso, cada etapa,
+**📖 La documentación completa está en [`docs/MANUAL.md`](docs/MANUAL.md)**: teoría, uso, cada etapa,
 funciones principales, diagnóstico y correspondencia con el MATLAB.
 
 ## Inicio rápido
@@ -52,7 +52,7 @@ git clone <url> Tesis && cd Tesis
 ```
 
 La instalación de la cámara (Spinnaker SDK + PySpin) está explicada paso a paso en el §20.3 de
-[`MANUAL.md`](MANUAL.md). Los problemas frecuentes de cada etapa, con su causa y solución, están
+[`docs/MANUAL.md`](docs/MANUAL.md). Los problemas frecuentes de cada etapa, con su causa y solución, están
 en el §16.
 
 ## Estado actual (montaje del 2026-11-24)

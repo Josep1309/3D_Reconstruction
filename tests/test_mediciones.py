@@ -6,7 +6,7 @@ import math
 
 import pytest
 
-import mediciones
+from datos_sistema import mediciones
 
 
 def _p(fx, x, y, z):

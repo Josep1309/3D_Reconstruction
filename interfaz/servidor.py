@@ -41,7 +41,7 @@ from consultas import _cache_errores, _lock_errores, configuracion_por_defecto, 
 
 import cv2
 import numpy as np
-import configuracion as cfg
+from datos_sistema import configuracion as cfg
 
 
 TIPOS_MIME = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -105,7 +105,7 @@ class Manejador(BaseHTTPRequestHandler):
             if url.path == "/api/config":
                 return self._json(configuracion_por_defecto())
             if url.path == "/api/estado":
-                import sesiones
+                from datos_sistema import sesiones
 
                 return self._json({"ejecucion": ejecucion.estado(), "calibracion": resumen_calibracion(),
                                    "poses": inventario(), "vigente": sesiones.info_vigente()})
@@ -122,7 +122,7 @@ class Manejador(BaseHTTPRequestHandler):
                 radio = int(min(max(float(q.get("radio", 6)), 1), 40))
                 return self._json(punto_3d(cat, pose, float(q["fx"]), float(q["fy"]), radio))
             if url.path == "/api/mediciones":
-                import mediciones
+                from datos_sistema import mediciones
 
                 cat, pose = self._cat_pose(q)
                 return self._json(mediciones.listar(cat, pose))
@@ -146,16 +146,16 @@ class Manejador(BaseHTTPRequestHandler):
             if url.path == "/api/descargar":
                 return self._descargar(q)
             if url.path == "/api/ajustes":
-                import ajustes
+                from datos_sistema import ajustes
 
                 return self._json(ajustes.leer())
             if url.path == "/api/sistema":
                 return self._json(estado_sistema(q.get("hw", "1") == "1", q.get("forzar") == "1"))
             if url.path == "/api/manual":  # MANUAL.md, que la interfaz muestra con su índice
-                return self._enviar(200, (RAIZ / "MANUAL.md").read_bytes(), "text/markdown; charset=utf-8")
+                return self._enviar(200, (RAIZ / "docs" / "MANUAL.md").read_bytes(), "text/markdown; charset=utf-8")
             if url.path == "/api/calibraciones":
-                import calibracion_estereo as ce
-                import sesiones
+                from procesamiento import calibracion_estereo as ce
+                from datos_sistema import sesiones
 
                 lista = ce.listar_calibraciones(DIR_CALIBRACION)
                 for c in lista:
@@ -164,11 +164,11 @@ class Manejador(BaseHTTPRequestHandler):
             if url.path == "/api/archivos":
                 return self._json(listado_archivos())
             if url.path == "/api/captura/lista":
-                import archivos
+                from datos_sistema import archivos
 
                 return self._json([p.name for p in archivos.frames_captura(q.get("carpeta", ""))])
             if url.path == "/api/captura/imagen":
-                import archivos
+                from datos_sistema import archivos
 
                 return self._imagen(q, archivos.leer_frame(q.get("carpeta", ""), int(q.get("i", 0))), "intensidad")
             if url.path == "/api/calibracion":
@@ -198,7 +198,7 @@ class Manejador(BaseHTTPRequestHandler):
                 ejecucion.detener()
                 return self._json({"ok": True})
             if url.path == "/api/ajustes":  # los guarda la interfaz al cambiar cualquier ajuste
-                import ajustes
+                from datos_sistema import ajustes
 
                 cuerpo = self._cuerpo()
                 if not isinstance(cuerpo.get("efectivos"), dict):
@@ -220,7 +220,7 @@ class Manejador(BaseHTTPRequestHandler):
                 cat, pose = self._cat_pose({k: str(v) for k, v in cuerpo.items()})
                 return self._json(guardar_comparacion(cat, pose))
             if url.path in ("/api/mediciones/guardar", "/api/mediciones/borrar", "/api/mediciones/actualizar"):
-                import mediciones
+                from datos_sistema import mediciones
 
                 cuerpo = self._cuerpo()
                 cat, pose = self._cat_pose(cuerpo)
@@ -236,14 +236,14 @@ class Manejador(BaseHTTPRequestHandler):
                     return self._json(previa_mascara(cat, pose, cuerpo.get("parametros") or {},
                                                      vista=str(cuerpo.get("vista", "textura"))))
                 if url.path.endswith("borrar"):
-                    import mascara
+                    from procesamiento import mascara
 
                     otras = [p for p in cuerpo.get("poses") or [] if RE_POSE.match(str(p))]
                     return self._json({"borradas": [p for p in [pose, *otras] if mascara.borrar(cat, p)]})
                 otras = [p for p in cuerpo.get("poses") or [] if RE_POSE.match(str(p))]
                 return self._json(guardar_mascara(cat, pose, cuerpo.get("parametros") or {}, otras))
             if url.path == "/api/importar/elegir":  # ventana del sistema para elegir la carpeta
-                import importar
+                from datos_sistema import importar
 
                 if self.client_address[0] not in ("127.0.0.1", "::1"):  # se abriría en el equipo del servidor
                     return self._json({"error": "La ventana para elegir carpetas solo funciona en el equipo del servidor; escribe la ruta"}, 400)
@@ -252,17 +252,17 @@ class Manejador(BaseHTTPRequestHandler):
                 except RuntimeError as exc:
                     return self._json({"error": str(exc)}, 500)
             if url.path == "/api/importar/analizar":  # qué se importaría de una carpeta (sin copiar nada)
-                import importar
+                from datos_sistema import importar
 
                 return self._json(importar.analizar(str(self._cuerpo().get("ruta", ""))))
             if url.path == "/api/notas":
-                import archivos
+                from datos_sistema import archivos
 
                 cuerpo = self._cuerpo()
                 archivos.guardar_nota(str(cuerpo.get("clave", "")), str(cuerpo.get("texto", "")))
                 return self._json({"ok": True})
             if url.path == "/api/poses/borrar":  # {cat, poses, simular}: simular = qué se movería
-                import archivos
+                from datos_sistema import archivos
 
                 cuerpo = self._cuerpo()
                 cat = str(cuerpo.get("cat", ""))
@@ -275,7 +275,7 @@ class Manejador(BaseHTTPRequestHandler):
                     raise RuntimeError("hay un proceso en curso: espera a que termine")
                 return self._json(archivos.borrar_poses(cat, poses))
             if url.path == "/api/procesos/renombrar":
-                import archivos
+                from datos_sistema import archivos
 
                 if ejecucion.estado()["ejecutando"]:
                     raise RuntimeError("hay un proceso en curso: espera a que termine")
@@ -288,7 +288,7 @@ class Manejador(BaseHTTPRequestHandler):
                     raise RuntimeError("hay un proceso en curso: espera a que termine")
                 return self._json(self._post_archivos(url.path, self._cuerpo()))
             if url.path == "/api/calibraciones/activar":
-                import calibracion_estereo as ce
+                from procesamiento import calibracion_estereo as ce
                 if ejecucion.estado()["ejecutando"]:
                     raise RuntimeError("hay un proceso en curso: espera a que termine para cambiar de calibración")
                 ident = str(self._cuerpo().get("id", ""))
@@ -325,7 +325,7 @@ class Manejador(BaseHTTPRequestHandler):
                                 {"Content-Disposition": f'attachment; filename="calibracion_{ruta.stat().st_mtime:.0f}.json"'})
         cat, pose = self._cat_pose(q)
         if tipo == "ply":
-            import rutas
+            from datos_sistema import rutas
 
             ruta = rutas.reconstruccion(cat, pose, "ply")
             if not ruta.exists():
@@ -347,9 +347,9 @@ class Manejador(BaseHTTPRequestHandler):
         raise ValueError("tipo de descarga desconocido")
 
     def _post_archivos(self, ruta: str, cuerpo: dict) -> dict:
-        import archivos
-        import calibracion_estereo as ce
-        import sesiones
+        from datos_sistema import archivos
+        from procesamiento import calibracion_estereo as ce
+        from datos_sistema import sesiones
 
         if ruta == "/api/archivos/borrar":
             carpetas = [str(c) for c in cuerpo.get("carpetas", [])]

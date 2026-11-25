@@ -25,7 +25,7 @@ import json
 import time
 from pathlib import Path
 
-import configuracion as cfg
+from datos_sistema import configuracion as cfg
 
 # ==============================================================================
 # --- CONFIGURACIÓN DEL PIPELINE (EDITA AQUÍ) ---
@@ -102,7 +102,7 @@ DIR_RECONSTRUCCION = cfg.DIR_RESULTADOS / "reconstruccion"
 
 
 def etapa_patrones() -> None:
-    import secuencia_patrones as sp
+    from captura import secuencia_patrones as sp
 
     sp.guardar_secuencia(sp.crear_secuencia_completa())
     print(f"[OK] Patrones en '{cfg.DIR_PATRONES}'. Cárgalos en el LightCrafter en ese orden "
@@ -110,7 +110,7 @@ def etapa_patrones() -> None:
 
 
 def etapa_lightcrafter() -> None:
-    import configurar_lightcrafter as lcr
+    from captura import configurar_lightcrafter as lcr
 
     lcr.main(cfg.LCR_EXPOSICION_US, cfg.LCR_PERIODO_US, reiniciar=True, solo_leer=False)
 
@@ -125,7 +125,7 @@ def plan_de_captura() -> list[tuple[str, int]]:
 
 
 def etapa_captura() -> None:
-    import capturar_patrones as cp
+    from captura import capturar_patrones as cp
 
     plan = plan_de_captura()
     if not plan:
@@ -133,7 +133,7 @@ def etapa_captura() -> None:
     if len(plan) > 1:
         print("[INFO] Plan de captura: " + ", ".join(f"{c} × {n}" for c, n in plan)
               + "  (con «q» se termina la categoría actual y se pasa a la siguiente)")
-    import sesiones
+    from datos_sistema import sesiones
 
     todas: list[Path] = []
     # Todo el proceso (patrón, plano y objeto) va a una sola carpeta: capturas/AAAA-MM-DD_HHMM/<cat>/
@@ -152,7 +152,7 @@ def etapa_captura() -> None:
 
 
 def etapa_organizar() -> None:
-    import organizar_capturas as oc
+    from procesamiento import organizar_capturas as oc
 
     nuevas = oc.organizar(
         [Path(e) for e in ORGANIZAR_ENTRADAS], cfg.DIR_ORDENADAS,
@@ -160,7 +160,7 @@ def etapa_organizar() -> None:
     )
     total = sum(len(v) for v in nuevas.values())
     print(f"[OK] {total} poses nuevas organizadas en '{cfg.DIR_ORDENADAS}'.")
-    import sesiones
+    from datos_sistema import sesiones
 
     if sesiones.resumen_texto():
         print(f"[PIPELINE] {sesiones.resumen_texto()}")
@@ -199,7 +199,7 @@ def _verificar_calibracion_existente() -> None:
 
 
 def etapa_fase_relativa() -> None:
-    import fase
+    from procesamiento import fase
 
     fase.etapa_fase_relativa(
         cfg.DIR_ORDENADAS, DIR_FASES, _categorias_fase(), n_step=cfg.N_PASOS,
@@ -209,7 +209,7 @@ def etapa_fase_relativa() -> None:
 
 
 def etapa_fase_absoluta() -> None:
-    import fase
+    from procesamiento import fase
 
     fase.etapa_fase_absoluta(
         cfg.DIR_ORDENADAS, DIR_FASES, _categorias_fase(), fringe_pitch=cfg.PERIODO, n_step=cfg.N_PASOS,
@@ -220,8 +220,8 @@ def etapa_fase_absoluta() -> None:
 
 
 def etapa_calibracion() -> None:
-    import calibracion_estereo as ce
-    import sesiones
+    from procesamiento import calibracion_estereo as ce
+    from datos_sistema import sesiones
 
     resumen = ce.ejecutar_calibracion_estereo(DIR_FASES, DIR_CALIBRACION, poses_calibracion=CALIBRACION_POSES,
                                     forzar=CALIBRACION_FORZAR,
@@ -236,7 +236,7 @@ def etapa_calibracion() -> None:
 
 
 def etapa_reconstruccion() -> None:
-    import reconstruccion_3d as r3d
+    from procesamiento import reconstruccion_3d as r3d
 
     categorias = [c for c in CATEGORIAS if c != "patron"] or ["objeto"]
     r3d.procesar_reconstruccion(DIR_FASES, ruta_calibracion(), DIR_RECONSTRUCCION, categorias,
@@ -246,7 +246,7 @@ def etapa_reconstruccion() -> None:
 
 
 def etapa_visualizacion() -> None:
-    import visualizacion
+    from procesamiento import visualizacion
 
     visualizacion.visualizar_pose(VIS_CATEGORIA, VIS_POSE, color_3d=VIS_COLOR_3D)
 
@@ -284,10 +284,10 @@ def main() -> None:
         print("[AVISO] 'captura' activa sin 'organizar': las capturas nuevas no se procesarán.")
     if ETAPAS.get("reconstruccion") and not ETAPAS.get("calibracion"):
         _verificar_calibracion_existente()
-    import sesiones
+    from datos_sistema import sesiones
 
     if not AJUSTES_APLICADOS:  # por terminal: los mismos ajustes que la interfaz (<DATOS>/ajustes.json)
-        import ajustes
+        from datos_sistema import ajustes
 
         cambios = ajustes.aplicar_guardados()
         if cambios:
@@ -299,7 +299,7 @@ def main() -> None:
         print(f"\n{'#' * 78}\n# ETAPA: {etapa}\n{'#' * 78}")
         t0 = time.perf_counter()
         if etapa in ("fase_relativa", "fase_absoluta", "reconstruccion"):
-            import avance  # para la barra de la interfaz: una parte por categoría
+            from datos_sistema import avance  # para la barra de la interfaz: una parte por categoría
 
             avance.partes(len(_categorias_fase()) if etapa != "reconstruccion" else len([c for c in CATEGORIAS if c != "patron"] or ["objeto"]))
         try:

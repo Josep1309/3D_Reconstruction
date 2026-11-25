@@ -83,11 +83,11 @@ REGLA=/etc/udev/rules.d/99-lightcrafter.rules
 if [[ $UDEV -eq 1 ]] && ! sudo -n true 2>/dev/null && [[ ! -t 0 ]]; then
   # Sin terminal interactiva sudo no puede pedir la contraseña: se indican los comandos
   aviso "sudo necesita la contraseña y no hay terminal interactiva. Ejecuta en una terminal:"
-  echo "      sudo cp $RAIZ/instalacion/99-lightcrafter.rules $REGLA"
+  echo "      sudo cp $RAIZ/recursos/instalacion/99-lightcrafter.rules $REGLA"
   echo "      sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-match=hidraw"
   echo "    (o simplemente: ./instalar.sh --udev desde una terminal normal)"
 elif [[ $UDEV -eq 1 ]]; then
-  sudo cp instalacion/99-lightcrafter.rules "$REGLA"
+  sudo cp recursos/instalacion/99-lightcrafter.rules "$REGLA"
   sudo udevadm control --reload-rules
   sudo udevadm trigger --subsystem-match=hidraw
   ok "Regla udev instalada en $REGLA: desconecta y conecta el USB del LightCrafter"
@@ -98,10 +98,10 @@ else
 fi
 
 # ---------------------------------------------------------------- 6. Patrones del proyector
-if [[ $(ls patterns/secuencia_completa_bmp/f_*.bmp 2>/dev/null | wc -l) -lt 50 ]]; then
+if [[ $(ls recursos/patterns/secuencia_completa_bmp/f_*.bmp 2>/dev/null | wc -l) -lt 50 ]]; then
   echo "== Generando los 50 patrones del proyector…"
-  .env/bin/python secuencia_patrones.py >/dev/null
-  ok "Patrones en patterns/secuencia_completa_bmp/ (deben coincidir con los cargados en el LightCrafter)"
+  .env/bin/python -m captura.secuencia_patrones >/dev/null
+  ok "Patrones en recursos/patterns/secuencia_completa_bmp/ (deben coincidir con los cargados en el LightCrafter)"
 else
   ok "Patrones del proyector presentes"
 fi

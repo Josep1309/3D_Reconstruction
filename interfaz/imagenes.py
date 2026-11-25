@@ -10,7 +10,7 @@ from comun import DIR_COMPARACIONES, RE_ORDENADA, RE_REF, _archivos_pose, _mtime
 
 import cv2
 import numpy as np
-import configuracion as cfg
+from datos_sistema import configuracion as cfg
 
 
 class _CacheMapas:
@@ -84,9 +84,9 @@ def cargar_npz(ruta: Path) -> _Npz:
 
 
 def _leer_ordenada(cat: str, pose: str, orient: str, indice: int) -> np.ndarray:
-    import fase
+    from procesamiento import fase
 
-    import rutas
+    from datos_sistema import rutas
 
     return fase.leer_gris(fase.buscar_imagen_patron(rutas.dir_pose_ordenada(cat, pose) / orient / cfg.PREFIJO_ORDENADAS, indice))
 
@@ -299,7 +299,7 @@ def generar_nube(cat: str, pose: str, maximo: int, indices: bool = False) -> byt
 
 # ------------------------------------------------------------------ máscara (pestaña «Máscara»)
 def _base_mascara(cat: str, pose: str):
-    import mascara
+    from procesamiento import mascara
 
     d = cargar_npz(_archivos_pose(cat, pose)["absoluta"])
     fd = mascara.fase_triangulacion()
@@ -310,7 +310,7 @@ def _base_mascara(cat: str, pose: str):
 
 def estado_mascara(cat: str, pose: str) -> dict:
     """Parámetros guardados (o None), la fase usada, el umbral γ actual y el histograma de γ."""
-    import mascara
+    from procesamiento import mascara
 
     valido, gamma, umbral, fd, _ = _base_mascara(cat, pose)
     g = gamma[valido]
@@ -327,7 +327,7 @@ def previa_mascara(cat: str, pose: str, params: dict, ancho: int = 960, vista: s
     lo que ya descartaba la fase oscurecido. Si hay reconstrucción, cuántos de sus puntos quedan."""
     import base64
 
-    import mascara
+    from procesamiento import mascara
 
     valido, gamma, _, _, itex = _base_mascara(cat, pose)
     m = mascara.calcular(valido, gamma, params)
@@ -358,7 +358,7 @@ def previa_mascara(cat: str, pose: str, params: dict, ancho: int = 960, vista: s
 
 def guardar_mascara(cat: str, pose: str, params: dict, otras: list[str]) -> dict:
     """Guarda la máscara de la pose y, con los mismos parámetros, la de `otras` poses."""
-    import mascara
+    from procesamiento import mascara
 
     hechas = {}
     for p in [pose, *[o for o in otras if o != pose]]:

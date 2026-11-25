@@ -22,6 +22,8 @@ def test_sin_nombres_indefinidos():
 def test_modulos_importan():
     import importlib
 
-    for modulo in ("pipeline", "fase", "calibracion_estereo", "reconstruccion_3d", "organizar_capturas",
-                   "capturar_patrones", "sesiones", "archivos", "verificar", "servidor", "ejecutor"):
+    # todos los módulos del proyecto, en sus carpetas
+    paquetes = [p.parent.name + "." + p.stem for d in ("captura", "procesamiento", "datos_sistema")
+                for p in sorted((RAIZ / d).glob("*.py")) if p.stem != "__init__"]
+    for modulo in ("pipeline", *paquetes, "verificar", "servidor", "ejecutor", "comun", "imagenes", "consultas"):
         importlib.import_module(modulo)

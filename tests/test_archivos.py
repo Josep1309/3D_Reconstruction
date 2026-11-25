@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import shutil
 
-import archivos
-import configuracion as cfg
-import sesiones
+from datos_sistema import archivos
+from datos_sistema import configuracion as cfg
+from datos_sistema import sesiones
 
 
 def _preparar():

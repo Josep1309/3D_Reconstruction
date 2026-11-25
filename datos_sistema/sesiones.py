@@ -25,7 +25,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-import configuracion as cfg
+from datos_sistema import configuracion as cfg
 
 REGISTRO = cfg.DATOS / "procesos_captura.json"
 ELEGIDA = cfg.DATOS / "configuracion_elegida.json"
@@ -136,7 +136,7 @@ def capturas(dir_capturas: Path | None = None, dir_ordenadas: Path | None = None
         cal = e.get("calidad") or {}
         if "pureza_H" in cal:
             pureza_de[clave] = min(pureza_de.get(clave, 1.0), cal["pureza_H"], cal["pureza_V"])
-    import rutas
+    from datos_sistema import rutas
 
     items: dict[str, dict] = {}
     # capturas/<proceso>/<cat>/<captura> (estructura actual) y capturas/<cat>/<captura> (anterior)
@@ -402,6 +402,6 @@ def proceso_de_poses(categoria: str, poses: list[str]) -> str | None:
 
 
 def _rutas():
-    import rutas  # rutas no depende de sesiones, pero se importa tarde por orden de carga
+    from datos_sistema import rutas  # rutas no depende de sesiones, pero se importa tarde por orden de carga
 
     return rutas

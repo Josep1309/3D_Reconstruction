@@ -7,9 +7,9 @@ from datetime import datetime, timedelta
 
 import pytest
 
-import calibracion_estereo as ce
-import configuracion as cfg
-import sesiones
+from procesamiento import calibracion_estereo as ce
+from datos_sistema import configuracion as cfg
+from datos_sistema import sesiones
 
 T0 = datetime(2026, 11, 24, 10, 0, 0)
 
@@ -120,7 +120,7 @@ def test_ajustes_de_la_interfaz(monkeypatch):
 
 
 def test_ajustes_guardados_y_firmas(tmp_path):
-    import ajustes
+    from datos_sistema import ajustes
 
     ruta = tmp_path / "ajustes.json"
     ajustes.guardar({"efectivos": {"SUAVIZADO_FASE_PX": None, "GAMMA_TH": 0.2, "MED_FILT": 3}}, ruta)

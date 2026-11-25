@@ -18,8 +18,8 @@ Flujo:
    además de la calibración conjunta (`Estereo_TSC_0_2_J.npz`) y un resumen `.json`.
 
 Ejemplo de uso:
-    python calibracion_estereo.py
-    python calibracion_estereo.py --distancia 15 --cols 9 --rows 12
+    python -m procesamiento.calibracion_estereo
+    python -m procesamiento.calibracion_estereo --distancia 15 --cols 9 --rows 12
 """
 
 from __future__ import annotations
@@ -33,9 +33,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-import configuracion as cfg
-import fase
-import rutas
+from datos_sistema import configuracion as cfg
+from procesamiento import fase
+from datos_sistema import rutas
 
 
 # ==============================================================================
@@ -264,7 +264,7 @@ def sesiones_patron(dir_ordenadas: Path | None = None, horas: float | None = Non
     capturas seguidas (si el patrón sigue después de una pausa, es el mismo proceso). Los
     parámetros se aceptan por compatibilidad y se ignoran.
     """
-    import sesiones
+    from datos_sistema import sesiones
 
     salida: dict[str, dict] = {}
     k = -1
@@ -482,7 +482,7 @@ def ejecutar_calibracion_estereo(
     `poses_calibracion` (por defecto la última sesión de captura). Los errores de reproyección se
     calculan para todas, así se ve si las poses de otra sesión son coherentes con el montaje actual.
     """
-    import avance
+    from datos_sistema import avance
 
     avance.paso("Cargando las fases del patrón")
     nombres, poses = fase.cargar_fases_categoria(dir_fases, "patron")
@@ -798,7 +798,7 @@ def _origen_poses(info: dict) -> list[dict]:
 def usar_configuracion_de(calib: dict) -> str:
     """Pone en uso la configuración de la que salió una calibración: su selección manual de poses,
     si se calibró así, o el proceso de captura de sus poses del patrón. Devuelve una descripción."""
-    import sesiones
+    from datos_sistema import sesiones
 
     if calib.get("seleccion"):
         sesiones.fijar_seleccion(calib["seleccion"])

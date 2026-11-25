@@ -18,15 +18,15 @@ from ejecucion import difusor, ejecucion
 from imagenes import cargar_npz
 
 import numpy as np
-import configuracion as cfg
-import mascara
-import rutas
+from datos_sistema import configuracion as cfg
+from procesamiento import mascara
+from datos_sistema import rutas
 
 
 def _firma_pose(ruta: Path, tipo: str) -> str | None:
     """Parámetros con los que se calculó la fase de una pose (los anteriores a la firma: los de
     configuracion.py). None si la pose aún no tiene esa fase."""
-    import fase
+    from procesamiento import fase
 
     if _mtime(ruta) is None:
         return None
@@ -38,10 +38,10 @@ def _firma_pose(ruta: Path, tipo: str) -> str | None:
 
 
 def inventario() -> dict:
-    import ajustes
+    from datos_sistema import ajustes
 
     esperada_rel, esperada_abs = ajustes.firmas_esperadas()
-    import archivos
+    from datos_sistema import archivos
 
     notas = archivos.leer_notas()
     datos = {}
@@ -89,9 +89,9 @@ def resumen_calibracion() -> dict | None:
 
 def listado_archivos() -> dict:
     """Todas las capturas agrupadas por proceso, con sus poses y lo calculado de cada una."""
-    import archivos
-    import calibracion_estereo as ce
-    import sesiones
+    from datos_sistema import archivos
+    from procesamiento import calibracion_estereo as ce
+    from datos_sistema import sesiones
 
     lista = sesiones.procesos()
     conf = sesiones.configuracion_vigente()
@@ -168,7 +168,7 @@ def estado_sistema(con_hardware: bool, forzar: bool = False) -> dict:
     import shutil
 
     disco = shutil.disk_usage(cfg.DATOS)
-    import archivos
+    from datos_sistema import archivos
 
     datos = {
         **verif, "con_hardware": con_hardware, "hora": time.strftime("%H:%M:%S"),
@@ -189,7 +189,7 @@ def _puntos_calibracion(info: dict) -> dict:
     """Correspondencias de la calibración en uso: las que guardó al calibrar
     (`Estereo_TSC_0_2_puntos.npz`) o, si es anterior a ese archivo, las recalculadas una vez desde
     las fases de sus poses (se guardan en resultados/calibracion/puntos_<fecha>.npz)."""
-    import calibracion_estereo as ce
+    from procesamiento import calibracion_estereo as ce
 
     ruta = DIR_CALIBRACION / ce.ARCHIVO_PUNTOS
     nuevo = ruta.exists()
@@ -213,7 +213,7 @@ def errores_calibracion(variante: str = "independiente") -> dict:
     """Errores de reproyección por pose con la calibración en uso, evaluada con SUS poses del
     patrón (las usadas y, en las calibraciones nuevas, también las detectadas que no entraron).
     Se recalcula solo cuando cambia la calibración en uso."""
-    import calibracion_estereo as ce
+    from procesamiento import calibracion_estereo as ce
 
     nombre = "Estereo_TSC_0_2_J.npz" if variante == "conjunta" else "Estereo_TSC_0_2.npz"
     ruta_cal = DIR_CALIBRACION / nombre
@@ -256,7 +256,7 @@ def errores_calibracion(variante: str = "independiente") -> dict:
 
 def fuentes_demo() -> list[str]:
     """Capturas existentes que puede reproducir la cámara simulada (solo del montaje vigente)."""
-    import sesiones
+    from datos_sistema import sesiones
 
     return [str(p.relative_to(cfg.DIR_CAPTURAS)) for _cat, nombre, p, _proc in rutas.capturas_en_disco()
             if p.is_dir() and not nombre.endswith("_simulada") and sesiones.captura_vigente(p)]
@@ -299,7 +299,7 @@ def vigilar() -> None:
 def guardar_comparacion(cat: str, pose: str) -> dict:
     """Copia el resultado actual de una pose (X, Y, Z, Mask, E) para compararlo después, p. ej. tras
     cambiar un ajuste (el reprocesado sobrescribe el resultado)."""
-    import archivos
+    from datos_sistema import archivos
 
     origen = _archivos_pose(cat, pose)["reconstruida"]
     if not origen.exists():

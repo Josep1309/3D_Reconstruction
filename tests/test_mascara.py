@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-import mascara
+from procesamiento import mascara
 
 
 def _objeto_con_agujeros():

@@ -5,9 +5,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import configuracion as cfg
-import organizar_capturas as oc
-import secuencia_patrones as sp
+from datos_sistema import configuracion as cfg
+from procesamiento import organizar_capturas as oc
+from captura import secuencia_patrones as sp
 
 L = cfg.IMAGENES_POR_CICLO
 

@@ -39,7 +39,7 @@ matplotlib.use("Agg")  # la interfaz web reemplaza a las ventanas de matplotlib
 import cv2  # noqa: E402
 import numpy as np  # noqa: E402
 
-import configuracion as cfg  # noqa: E402
+from datos_sistema import configuracion as cfg  # noqa: E402
 import pipeline  # noqa: E402
 
 DIR_VIVO = cfg.DIR_RESULTADOS / ".vivo"
@@ -114,7 +114,7 @@ class VistaEnVivo:
 
         Se busca sobre la imagen promediada (iluminación uniforme) llevada a resolución completa,
         porque el detector está ajustado al tamaño real de los círculos."""
-        from calibracion_estereo import detectar_puntos_tablero
+        from procesamiento.calibracion_estereo import detectar_puntos_tablero
 
         completa = cv2.resize(img_mitad, (0, 0), fx=2, fy=2, interpolation=cv2.INTER_LINEAR)
         try:
@@ -134,7 +134,7 @@ class VistaEnVivo:
         if m == self.control_m:
             return
         self.control_m = m
-        import capturar_patrones as cp
+        from captura import capturar_patrones as cp
 
         try:
             pedido = json.loads(ruta.read_text(encoding="utf-8"))
@@ -179,7 +179,7 @@ class VistaEnVivo:
 
 # Los ajustes de la interfaz se aplican con el módulo compartido `ajustes` (también lo usa pipeline.py)
 def aplicar_ajustes(efectivos: dict) -> list[str]:
-    import ajustes
+    from datos_sistema import ajustes
 
     return ajustes.aplicar(efectivos)
 
@@ -211,7 +211,7 @@ def configurar(conf: dict) -> None:
     if conf.get("seleccion"):
         # Selección manual de poses (pestaña Calibración): pasa a ser la configuración en uso, así las
         # etapas procesan exactamente esas poses y la calibración usa esas del patrón
-        import sesiones
+        from datos_sistema import sesiones
 
         sesiones.fijar_seleccion(conf["seleccion"])
         patron = conf["seleccion"].get("patron") or []
@@ -221,7 +221,7 @@ def configurar(conf: dict) -> None:
             f"{c} {len(v)}" for c, v in conf["seleccion"].items() if v), flush=True)
 
     # Captura: vista en vivo y, opcionalmente, cámara simulada
-    import capturar_patrones as cp
+    from captura import capturar_patrones as cp
 
     vista = VistaEnVivo(cfg.IMAGENES_POR_CICLO * max(p.CAPTURA_CICLOS, 1))
     vista.buscar_tablero = "patron" in (p.CAPTURA_PLAN or {p.CAPTURA_CATEGORIA: p.CAPTURA_POSES})
@@ -235,7 +235,7 @@ def configurar(conf: dict) -> None:
 
 def solo_vista_previa(conf: dict) -> None:
     """Abre la cámara y transmite la vista previa hasta que el usuario la cierra (Enter)."""
-    import capturar_patrones as cp
+    from captura import capturar_patrones as cp
 
     print("# ETAPA: previa", flush=True)
     vista = VistaEnVivo(cfg.IMAGENES_POR_CICLO)
@@ -281,8 +281,8 @@ def _al_detener(_senal, _marco) -> None:
 def importar_y_elegir(opciones: dict) -> None:
     """Importa una carpeta de capturas como proceso nuevo y lo deja como configuración en uso, para
     que las etapas siguientes procesen exactamente esas capturas (pestaña Archivos → Importar)."""
-    import importar
-    import sesiones
+    from datos_sistema import importar
+    from datos_sistema import sesiones
 
     print("# ETAPA: importar", flush=True)
     print(f"[INFO] Importando {opciones['ruta']}", flush=True)

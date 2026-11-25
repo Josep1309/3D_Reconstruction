@@ -127,12 +127,12 @@ CAPTURA_POSES = 3              # pide Enter antes de cada objeto/pose
 Algunos módulos se pueden correr solos con argumentos (`--help` los lista):
 
 ```bash
-.env/bin/python organizar_capturas.py --simular                # qué haría, sin escribir
-.env/bin/python organizar_capturas.py --entrada ~/sesion3 --categoria objeto
-.env/bin/python calibracion_estereo.py --distancia 15.0588 14.909
-.env/bin/python reconstruccion_3d.py --categorias objeto --fase Fy
-.env/bin/python capturar_patrones.py --categoria patron --poses 12
-.env/bin/python visualizacion.py                               # usa su cabecera
+.env/bin/python -m procesamiento.organizar_capturas --simular                # qué haría, sin escribir
+.env/bin/python -m procesamiento.organizar_capturas --entrada ~/sesion3 --categoria objeto
+.env/bin/python -m procesamiento.calibracion_estereo --distancia 15.0588 14.909
+.env/bin/python -m procesamiento.reconstruccion_3d --categorias objeto --fase Fy
+.env/bin/python -m captura.capturar_patrones --categoria patron --poses 12
+.env/bin/python -m procesamiento.visualizacion                               # usa su cabecera
 ```
 
 `configurar_lightcrafter.py` se configura en su cabecera. `fase.py` se usa desde el pipeline.
@@ -174,39 +174,62 @@ sudo chmod a+rw /dev/hidrawX       # el script dice cuál es X
 ```
 Tesis/
 ├── pipeline.py               ← CONTROL: qué etapas correr y con qué opciones
-├── configuracion.py          ← PARÁMETROS físicos y umbrales (compartidos)
+├── verificar.py              ← diagnóstico de la instalación (§20)
+├── instalar.sh, requirements.txt, requirements-dev.txt, README.md, CLAUDE.md
 │
-├── patterns.py               ← generador de franjas binarias desplazadas
-├── secuencia_patrones.py     ← etapa 'patrones': 50 .bmp para el LightCrafter
-├── configurar_lightcrafter.py← etapa 'lightcrafter': USB-HID con el DLPC350
-├── capturar_patrones.py      ← etapa 'captura': cámara FLIR con trigger externo
-├── organizar_capturas.py     ← etapa 'organizar': segmenta y ordena capturas crudas
-├── fase.py                   ← etapas 'fase_relativa' y 'fase_absoluta'
-├── calibracion_estereo.py    ← etapa 'calibracion'
-├── reconstruccion_3d.py      ← etapa 'reconstruccion'
-├── visualizacion.py          ← etapa 'visualizacion'
-│
-├── arduino_pulses/           ← firmware del generador de pulsos
-├── calibraciones/            ← calibración vigente + historial/ (VERSIONADA, §20.5)
-├── instalar.sh, verificar.py, requirements.txt, instalacion/  ← instalación (§20)
+├── captura/                  ← HARDWARE: cámara y proyector
+│   ├── capturar_patrones.py      etapa 'captura': cámara FLIR con trigger externo
+│   ├── configurar_lightcrafter.py  etapa 'lightcrafter': USB-HID con el DLPC350
+│   ├── secuencia_patrones.py     etapa 'patrones': 50 .bmp para el LightCrafter
+│   └── patterns.py               generador de franjas binarias desplazadas
+├── procesamiento/            ← CÁLCULOS, en orden
+│   ├── organizar_capturas.py     etapa 'organizar': segmenta y ordena capturas crudas
+│   ├── fase.py                   etapas 'fase_relativa' y 'fase_absoluta'
+│   ├── calibracion_estereo.py    etapa 'calibracion'
+│   ├── reconstruccion_3d.py      etapa 'reconstruccion'
+│   ├── mascara.py                máscara por pose y filtros (manchas, puntos aislados)
+│   └── visualizacion.py          etapa 'visualizacion'
+├── datos_sistema/            ← DÓNDE ESTÁ CADA COSA Y SU ESTADO
+│   ├── configuracion.py          PARÁMETROS físicos y umbrales (compartidos)
+│   ├── ajustes.py                ajustes de la interfaz (⚙)
+│   ├── rutas.py, sesiones.py     rutas de cada pose; procesos y configuración vigente
+│   ├── archivos.py, importar.py  papelera, notas, nombres de proceso; importar carpetas
+│   └── mediciones.py, avance.py, migrar_por_proceso.py
 ├── interfaz/                 ← interfaz web (§19)
-├── patterns/secuencia_completa_bmp/   f_00.bmp … f_49.bmp
-│   (las tres carpetas de datos se ordenan igual: una carpeta por PROCESO de captura, §4.1)
-├── capturas/                 ← CRUDAS: el código no las modifica; solo tú desde «Archivos» (a la papelera)
-│   └── <AAAA-MM-DD_HHMM>/                 ← un proceso de captura
-│       ├── proceso.json                   ← plan, hora, capturas y poses que salieron de él
-│       └── <categoria>/<AAAAMMDD_HHMMSS>/ *_frame_XXX.tiff
-├── capturas_ordenadas/       ← DERIVADAS (se pueden borrar y regenerar)
-│   ├── manifiesto.json
-│   └── <AAAA-MM-DD_HHMM>/<categoria>/pose_XX/{H,V}/P18_F00 … P18_F25.tiff + origen.json
-├── resultados/               ← DERIVADOS
-│   ├── <AAAA-MM-DD_HHMM>/fases/<categoria>/pose_XX_relativa.npz|.png, pose_XX.npz|.png
-│   ├── <AAAA-MM-DD_HHMM>/reconstruccion/<categoria>/<cat>_pose_XX.ply|.npz, figura
-│   ├── reconstruccion/<categoria>/<cat>_resumen.json   ← resumen de todas las poses
-│   ├── calibracion/ comparaciones/ visualizacion/     ← lo que no es de una pose
-│   └── …
-└── Matlab_Codes/             ← código original de referencia (no se ejecuta)
+├── tests/                    ← pruebas (pytest)
+├── docs/                     ← MANUAL.md (este archivo), AUDITORIA.md
+├── calibraciones/            ← calibración vigente + historial/ (VERSIONADA, §20.5)
+├── recursos/
+│   ├── patterns/secuencia_completa_bmp/   f_00.bmp … f_49.bmp
+│   ├── arduino_pulses/       ← firmware del generador de pulsos
+│   ├── instalacion/          ← reglas udev y archivos de instalación (§20)
+│   └── Matlab_Codes/         ← código original de referencia (no se ejecuta)
+│
+└── datos/                    ← TODO lo que genera el sistema (no está en git)
+    │  (las tres carpetas se ordenan igual: una carpeta por PROCESO de captura, §4.1)
+    ├── capturas/             ← CRUDAS: el código no las modifica; solo tú desde «Archivos» (a la papelera)
+    │   └── <AAAA-MM-DD_HHMM[_nombre]>/       ← un proceso de captura
+    │       ├── proceso.json                  ← plan, hora, nombre, capturas y poses que salieron de él
+    │       └── <categoria>/<AAAAMMDD_HHMMSS>/ *_frame_XXX.tiff
+    ├── capturas_ordenadas/   ← DERIVADAS (se pueden borrar y regenerar)
+    │   ├── manifiesto.json
+    │   └── <proceso>/<categoria>/pose_XX/{H,V}/P18_F00 … P18_F25.tiff + origen.json
+    ├── resultados/           ← DERIVADOS
+    │   ├── <proceso>/fases/<categoria>/pose_XX_relativa.npz|.png, pose_XX.npz|.png, pose_XX_mascara.png
+    │   ├── <proceso>/reconstruccion/<categoria>/<cat>_pose_XX.ply|.npz, figura
+    │   ├── reconstruccion/<categoria>/<cat>_resumen.json   ← resumen de todas las poses
+    │   └── calibracion/ comparaciones/ visualizacion/     ← lo que no es de una pose
+    ├── papelera/             ← lo que borras desde la interfaz (se puede restaurar)
+    └── ajustes.json, notas.json, mediciones.json, procesos_captura.json, configuracion_elegida.json
 ```
+
+**Rutas de datos en este manual:** cuando dice `capturas/…`, `resultados/…` o `ajustes.json`, se
+refiere a la carpeta de datos: `datos/capturas/…`, etc. Se puede usar otra carpeta con la variable
+de entorno `TESIS_DIR_DATOS`, por ejemplo una copia para probar.
+
+**Comandos de terminal:** `pipeline.py` y `verificar.py` se corren directamente. Los módulos de
+las carpetas se corren con `-m` y la carpeta, desde la raíz del proyecto, por ejemplo
+`.env/bin/python -m procesamiento.reconstruccion_3d --help`.
 
 ### 4.1 Una carpeta por proceso de captura
 
@@ -238,9 +261,9 @@ carpeta en cualquiera de las tres.
 funcionando. Para pasarlos a la nueva estructura, usa `migrar_por_proceso.py`:
 
 ```bash
-.env/bin/python migrar_por_proceso.py              # modo de prueba: muestra qué movería
-.env/bin/python migrar_por_proceso.py --aplicar    # lo hace
-.env/bin/python migrar_por_proceso.py --deshacer respaldo_migracion_<fecha>
+.env/bin/python -m datos_sistema.migrar_por_proceso              # modo de prueba: muestra qué movería
+.env/bin/python -m datos_sistema.migrar_por_proceso --aplicar    # lo hace
+.env/bin/python -m datos_sistema.migrar_por_proceso --deshacer respaldo_migracion_<fecha>
 ```
 
 - Agrupa los procesos igual que la pestaña Archivos.
@@ -261,8 +284,8 @@ Si tienes una carpeta con subcarpetas `patron/`, `plano/` y `objeto/` (no hace f
   2. Revisa lo que encontró (todavía no se copia nada) y pulsa *Importar*.
 - **Terminal:**
   ```bash
-  .env/bin/python importar.py /ruta/carpeta                       # muestra qué importaría
-  .env/bin/python importar.py /ruta/carpeta --aplicar --procesar  # importa y procesa todo
+  .env/bin/python -m datos_sistema.importar /ruta/carpeta                       # muestra qué importaría
+  .env/bin/python -m datos_sistema.importar /ruta/carpeta --aplicar --procesar  # importa y procesa todo
   ```
 
 Qué hace:
@@ -1181,7 +1204,7 @@ corresponde. Cada subsección es una tabla de **síntoma → causa probable → 
 
 ## 17. Correspondencia con el código MATLAB y diferencias
 
-| MATLAB (`Matlab_Codes/Codes/`) | Python |
+| MATLAB (`recursos/Matlab_Codes/Codes/`) | Python |
 |---|---|
 | `AcquisitionCodes/SaveImagesFromVidAvi.m`, `savePatterns.m` | `organizar_capturas.segmentar_secuencias`, `guardar_pose` |
 | `AcquisitionCodes/ConfAndCapture_FLIRcam_*.m` | `capturar_patrones.CamaraFLIR` |

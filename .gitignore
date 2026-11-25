@@ -1,13 +1,5 @@
 .env/
 __pycache__/
-patterns/
-capturas/
-capturas_ordenadas/
-resultados/
-procesos_captura.json
-configuracion_elegida.json
-papelera/
-ajustes.json
-notas.json
-respaldo_migracion_*/
-mediciones.json
+recursos/patterns/
+# Todo lo que genera el sistema (capturas, resultados, papelera, estado) va en datos/
+datos/

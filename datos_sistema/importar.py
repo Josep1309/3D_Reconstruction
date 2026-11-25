@@ -12,9 +12,9 @@ capturas que ya existen en el sistema (misma categoría y nombre) se omiten, par
 La fecha del proceso sale del nombre de las capturas (AAAAMMDD_HHMMSS) o de la fecha de sus archivos.
 
 Uso:
-    .env/bin/python importar.py /ruta/a/la/carpeta                 # muestra qué importaría
-    .env/bin/python importar.py /ruta/a/la/carpeta --aplicar       # importa
-    .env/bin/python importar.py /ruta/a/la/carpeta --aplicar --procesar   # e importa y procesa todo
+    .env/bin/python -m datos_sistema.importar /ruta/a/la/carpeta                 # muestra qué importaría
+    .env/bin/python -m datos_sistema.importar /ruta/a/la/carpeta --aplicar       # importa
+    .env/bin/python -m datos_sistema.importar /ruta/a/la/carpeta --aplicar --procesar   # e importa y procesa todo
 En la interfaz: pestaña Archivos → «Importar capturas».
 """
 
@@ -25,16 +25,16 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-import configuracion as cfg
-import rutas
-import sesiones
+from datos_sistema import configuracion as cfg
+from datos_sistema import rutas
+from datos_sistema import sesiones
 
 EXT_IMAGEN = {".tiff", ".tif", ".png", ".bmp", ".jpg", ".jpeg", ".pgm"}
 EXT_VIDEO = {".avi", ".mp4", ".mov", ".mkv", ".mj2", ".wmv", ".m4v", ".mpg", ".mpeg"}
 
 
 def _categoria(nombre: str) -> str | None:
-    from organizar_capturas import categoria_por_nombre
+    from procesamiento.organizar_capturas import categoria_por_nombre
 
     return categoria_por_nombre(Path(nombre), None)
 

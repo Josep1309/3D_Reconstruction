@@ -5,9 +5,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import configuracion as cfg
-import fase
-import secuencia_patrones as sp
+from datos_sistema import configuracion as cfg
+from procesamiento import fase
+from captura import secuencia_patrones as sp
 
 P, N, B = cfg.PERIODO, cfg.N_PASOS, cfg.N_BITS_GRAY
 

@@ -15,7 +15,7 @@ import json
 import math
 from pathlib import Path
 
-import configuracion as cfg
+from datos_sistema import configuracion as cfg
 
 RUTA = cfg.DATOS / "ajustes.json"
 
@@ -48,7 +48,7 @@ def leer(ruta: Path = RUTA) -> dict:
 
 
 def guardar(datos: dict, ruta: Path = RUTA) -> None:
-    import sesiones
+    from datos_sistema import sesiones
 
     sesiones.escribir_json(ruta, datos)
 
@@ -93,7 +93,7 @@ def aplicar_guardados() -> list[str]:
 
 def firmas_esperadas(efectivos: dict | None = None) -> tuple[str, str]:
     """Firmas (fase relativa, fase absoluta) que tendrían las poses calculadas con estos ajustes."""
-    import fase
+    from procesamiento import fase
 
     v = {**cfg.VALORES_ORIGINALES, **valores(leer().get("efectivos", {}) if efectivos is None else efectivos)}
     return (fase.firma_relativa(v["N_PASOS"], v["SUAVIZADO_FASE_PX"]),

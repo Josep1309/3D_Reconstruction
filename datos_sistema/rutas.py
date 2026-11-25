@@ -24,7 +24,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-import configuracion as cfg
+from datos_sistema import configuracion as cfg
 
 # AAAA-MM-DD_HHMM, con segundos o contador si se repite, y opcionalmente el nombre que le dio el
 # usuario en minúsculas y sin espacios: 2026-11-25_1530_cilindro-pintas

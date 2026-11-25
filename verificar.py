@@ -159,7 +159,7 @@ def verificar_lightcrafter(con_hardware: bool) -> None:
     if not con_hardware:
         informar("info", "Detección del proyector omitida (--sin-hardware)")
         return
-    import configurar_lightcrafter as lcr
+    from captura import configurar_lightcrafter as lcr
 
     try:
         ruta = lcr.LightCrafter4500._buscar_hidraw()
@@ -184,12 +184,12 @@ def verificar_patrones() -> None:
     titulo("Patrones del proyector")
     import cv2
 
-    import configuracion as cfg
+    from datos_sistema import configuracion as cfg
 
     bmps = sorted(cfg.DIR_PATRONES.glob("f_*.bmp"))
     if len(bmps) != cfg.IMAGENES_POR_CICLO:
         informar("aviso", f"{len(bmps)} de {cfg.IMAGENES_POR_CICLO} patrones en {cfg.DIR_PATRONES}",
-                 "Genera los patrones: .env/bin/python secuencia_patrones.py (deben coincidir con los "
+                 "Genera los patrones: .env/bin/python -m captura.secuencia_patrones (deben coincidir con los "
                  "cargados en el LightCrafter)", "§6")
         return
     img = cv2.imread(str(bmps[0]), cv2.IMREAD_GRAYSCALE)
@@ -204,7 +204,7 @@ def verificar_calibracion(tamano_camara: tuple[int, int] | None) -> None:
     titulo("Calibración del montaje")
     import numpy as np
 
-    import configuracion as cfg
+    from datos_sistema import configuracion as cfg
 
     ruta = cfg.DIR_CALIBRACION / "Estereo_TSC_0_2.npz"
     if not ruta.exists():
@@ -229,7 +229,7 @@ def verificar_calibracion(tamano_camara: tuple[int, int] | None) -> None:
         informar("error", f"La calibración es para una cámara de {tuple(datos['cam_size_wh'])} px y la conectada "
                           f"mide {tamano_camara}", "¿Es otra cámara o cambió la resolución? Recalibra.", "§20.5")
     try:  # el mismo control de calidad que decide si una calibración nueva se pone en uso
-        import calibracion_estereo as ce
+        from procesamiento import calibracion_estereo as ce
 
         resumen_json = json.loads((cfg.DIR_CALIBRACION / "Estereo_TSC_0_2.json").read_text(encoding="utf-8"))
         motivos = ce.control_calidad(resumen_json)
@@ -254,7 +254,7 @@ def verificar_calibracion(tamano_camara: tuple[int, int] | None) -> None:
 
 def verificar_datos() -> None:
     titulo("Datos")
-    import configuracion as cfg
+    from datos_sistema import configuracion as cfg
 
     informar("info", f"Carpeta de datos: {cfg.DATOS}"
                      + ("  (TESIS_DIR_DATOS)" if os.environ.get("TESIS_DIR_DATOS") else ""))
@@ -272,7 +272,7 @@ def verificar_datos() -> None:
                  "Libera espacio o usa un disco externo con TESIS_DIR_DATOS.", "§20.6")
     else:
         informar("ok", f"{libre:.0f} GB libres")
-    import rutas
+    from datos_sistema import rutas
 
     n = len(rutas.capturas_en_disco())
     procesos = sum(1 for p in cfg.DIR_CAPTURAS.glob("*") if p.is_dir() and rutas.es_proceso(p.name)) if cfg.DIR_CAPTURAS.exists() else 0

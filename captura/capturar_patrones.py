@@ -8,8 +8,8 @@ Cada pose se guarda en `capturas/<categoria>/<AAAAMMDD_HHMMSS>/` como `<categori
 (y opcionalmente un `.avi` FFV1 sin pérdida).
 
 Ejemplos:
-    python capturar_patrones.py --categoria patron --poses 10   # pide Enter antes de cada pose
-    python capturar_patrones.py --categoria objeto --ciclos 2
+    python -m captura.capturar_patrones --categoria patron --poses 10   # pide Enter antes de cada pose
+    python -m captura.capturar_patrones --categoria objeto --ciclos 2
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from typing import Callable
 import cv2
 import numpy as np
 
-import configuracion as cfg
+from datos_sistema import configuracion as cfg
 
 AlFrame = Callable[[int, np.ndarray], None]
 AlPrevia = Callable[[np.ndarray], None]
@@ -255,7 +255,7 @@ class CamaraSimulada:
     """
 
     def __init__(self, carpeta: Path, periodo_s: float = 0.05) -> None:
-        import organizar_capturas as oc
+        from procesamiento import organizar_capturas as oc
 
         fuentes = oc.descubrir_fuentes([Path(carpeta)])
         if not fuentes:
@@ -377,7 +377,7 @@ def nuevo_proceso(plan: list[tuple[str, int]], salida: Path = cfg.DIR_CAPTURAS, 
 
     Todas las poses del proceso (patrón, plano, objeto) se guardan dentro, en una subcarpeta por
     categoría: así se encuentran juntas al buscar a mano. Ver rutas.py."""
-    import rutas
+    from datos_sistema import rutas
 
     nombre = rutas.nombre_proceso(datetime.now(), etiqueta=nombre_usuario)
     carpeta = salida / nombre
@@ -392,7 +392,7 @@ def nuevo_proceso(plan: list[tuple[str, int]], salida: Path = cfg.DIR_CAPTURAS, 
 def cerrar_proceso(carpeta: Path, capturas: list[Path]) -> None:
     """Completa el `proceso.json` al terminar: hora de fin y capturas guardadas por categoría
     (las poses organizadas las agrega `organizar`)."""
-    import sesiones
+    from datos_sistema import sesiones
 
     ruta = carpeta / "proceso.json"
     with sesiones.ESCRITURA:
@@ -440,7 +440,7 @@ def capturar_poses(
       no sirve (p. ej. el proyector no proyectaba) se ofrece repetirla.
     - En la pausa, «r» repite la pose anterior (la descartada va a la papelera).
     """
-    import organizar_capturas as oc
+    from procesamiento import organizar_capturas as oc
 
     cantidad = cfg.IMAGENES_POR_CICLO * max(ciclos, 1)
     carpetas: list[Path] = []

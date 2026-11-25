@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import shutil
 
-import configuracion as cfg
-import migrar_por_proceso as mig
-import rutas
-import sesiones
+from datos_sistema import configuracion as cfg
+from datos_sistema import migrar_por_proceso as mig
+from datos_sistema import rutas
+from datos_sistema import sesiones
 
 
 def _estructura_anterior():
@@ -70,7 +70,7 @@ def test_migracion_ida_y_vuelta():
 
 
 def test_papelera_con_carpetas_de_proceso():
-    import archivos
+    from datos_sistema import archivos
 
     _estructura_anterior()
     shutil.rmtree(archivos.PAPELERA, ignore_errors=True)
@@ -89,7 +89,7 @@ def test_papelera_con_carpetas_de_proceso():
 
 
 def test_importar_carpeta_externa(tmp_path):
-    import importar
+    from datos_sistema import importar
 
     _estructura_anterior()
     externa = tmp_path / "viejas"
@@ -115,7 +115,7 @@ def test_importar_carpeta_externa(tmp_path):
 
 
 def test_renombrar_proceso():
-    import archivos
+    from datos_sistema import archivos
 
     _estructura_anterior()
     plan = mig.planificar()

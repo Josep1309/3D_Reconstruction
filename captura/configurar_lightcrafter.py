@@ -2,7 +2,7 @@
 
 Modifica los parámetros en la sección 'PARÁMETROS DE CONFIGURACIÓN' de abajo
 y ejecuta, desde la carpeta del proyecto:
-    .env/bin/python configurar_lightcrafter.py
+    .env/bin/python -m captura.configurar_lightcrafter
 
 Si da error de permisos sobre /dev/hidrawX, instala una vez la regla udev:
     ./instalar.sh --udev        (ver MANUAL.md §20.4)
@@ -16,7 +16,7 @@ import struct
 import time
 from pathlib import Path
 
-import configuracion as cfg
+from datos_sistema import configuracion as cfg
 
 # ==============================================================================
 # --- PARÁMETROS DE CONFIGURACIÓN (EDITA AQUÍ) ---
@@ -101,7 +101,7 @@ class LightCrafter4500:
             try:
                 self.fd = os.open(self.device_path, os.O_RDWR | os.O_NONBLOCK)
             except PermissionError as exc:
-                raiz = Path(__file__).resolve().parent
+                raiz = Path(__file__).resolve().parent.parent  # raíz del proyecto
                 raise PermissionError(
                     f"Sin permisos para abrir '{self.device_path}'.\n"
                     f"Solución permanente (una sola vez), desde '{raiz}':\n"

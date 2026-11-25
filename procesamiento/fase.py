@@ -26,7 +26,7 @@ from typing import Sequence
 import cv2
 import numpy as np
 
-import rutas
+from datos_sistema import rutas
 
 
 EXTENSIONES_IMAGEN = (".tiff", ".tif", ".png", ".bmp", ".jpg", ".jpeg")
@@ -278,8 +278,8 @@ def listar_poses(categoria: str | Path) -> list[Path]:
     Solo las de la configuración vigente del montaje (`sesiones.py`), salvo que
     `SOLO_CONFIGURACION_ACTUAL = False`. Acepta también la ruta de la categoría (uso anterior).
     """
-    import rutas
-    import sesiones
+    from datos_sistema import rutas
+    from datos_sistema import sesiones
 
     cat = categoria.name if isinstance(categoria, Path) else categoria
     vigentes = sesiones.poses_vigentes(cat)
@@ -304,7 +304,7 @@ def _firma_guardada(ruta: Path) -> str | None:
 def _firma_original(tipo: str) -> str:
     """Firma con los valores de configuracion.py tal como están en el archivo: la de los
     resultados calculados antes de que se guardara la firma."""
-    import configuracion as cfg
+    from datos_sistema import configuracion as cfg
 
     o = cfg.VALORES_ORIGINALES
     if tipo == "rel":
@@ -603,7 +603,7 @@ def cargar_fases_categoria(dir_fases: Path, categoria: str) -> tuple[list[str], 
     """Carga los `pose_XX.npz` (fase absoluta) de una categoría (de la configuración vigente),
     estén en la carpeta de su proceso o en la estructura anterior. `dir_fases` se ignora: queda
     por compatibilidad."""
-    import sesiones
+    from datos_sistema import sesiones
 
     vigentes = sesiones.poses_vigentes(categoria)
     archivos = [rutas.fase_absoluta(categoria, p) for p in rutas.poses(categoria) if vigentes is None or p in vigentes]

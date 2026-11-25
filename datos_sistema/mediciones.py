@@ -14,8 +14,8 @@ import math
 import uuid
 from datetime import datetime
 
-import configuracion as cfg
-import rutas
+from datos_sistema import configuracion as cfg
+from datos_sistema import rutas
 
 RUTA = cfg.DATOS / "mediciones.json"
 
@@ -29,7 +29,7 @@ def _leer() -> dict:
 
 
 def _escribir(datos: dict) -> None:
-    import sesiones
+    from datos_sistema import sesiones
 
     sesiones.escribir_json(RUTA, datos)
 
@@ -61,7 +61,7 @@ def listar(cat: str, pose: str) -> dict:
 
 
 def guardar(cat: str, pose: str, medicion: dict) -> dict:
-    import sesiones
+    from datos_sistema import sesiones
 
     a, b = _punto(medicion["a"]), _punto(medicion["b"])
     nueva = {"id": uuid.uuid4().hex[:10], "nombre": str(medicion.get("nombre") or "").strip()[:80],
@@ -75,7 +75,7 @@ def guardar(cat: str, pose: str, medicion: dict) -> dict:
 
 
 def borrar(cat: str, pose: str, ident: str) -> dict:
-    import sesiones
+    from datos_sistema import sesiones
 
     with sesiones.ESCRITURA:
         datos = _leer()
@@ -90,7 +90,7 @@ def borrar(cat: str, pose: str, ident: str) -> dict:
 def actualizar(cat: str, pose: str, medir) -> dict:
     """Vuelve a medir las mediciones desactualizadas en los mismos lugares de la imagen, con la
     reconstrucción actual. `medir(fx, fy)` devuelve el punto 3D más cercano."""
-    import sesiones
+    from datos_sistema import sesiones
 
     firma = firma_reconstruccion(cat, pose)
     fallidas = []
