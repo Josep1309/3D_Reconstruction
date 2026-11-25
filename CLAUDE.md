@@ -46,7 +46,9 @@ Las etapas corren en un orden fijo desde `pipeline.py` (`ETAPAS`):
 - `pipeline.py`: qué etapas corren y opciones de flujo. Las etapas son envoltorios
   `etapa_<nombre>()`.
 - Datos:
-  - `capturas/` (crudas, **nunca modificar ni borrar**);
+  - `capturas/` (crudas). **Tú nunca las modificas ni las borras.** El usuario sí puede, desde la
+    pestaña Archivos (`archivos.py` las mueve a `<DATOS>/papelera/`). Para probar borrados, usa
+    una copia con `cp -al` y copia aparte el `manifiesto.json`, que se reescribe;
   - `capturas_ordenadas/` (derivado, con `manifiesto.json`);
   - `resultados/` (derivado).
 
@@ -67,8 +69,17 @@ Las etapas corren en un orden fijo desde `pipeline.py` (`ETAPAS`):
   - Los diagnósticos pesados van a `resultados/calibracion/`. Las fases de `patron` solo se calculan si se calibra.
 - **Solo la configuración vigente** (`sesiones.py`, `SOLO_CONFIGURACION_ACTUAL = True`):
   `fase.listar_poses`, `fase.cargar_fases_categoria`, la reconstrucción y la interfaz filtran a
-  las poses desde el último proceso de captura con patrón. `etapa_captura` registra cada proceso
-  en `<DATOS>/procesos_captura.json`; sin registro, una pausa > 3 min separa procesos.
+  las poses de una configuración, que va de un proceso con patrón hasta el siguiente. Por defecto
+  es la última; `configuracion_elegida.json` fija otra.
+  - `etapa_captura` registra cada proceso en `<DATOS>/procesos_captura.json`. Sin registro, una
+    pausa > 3 min separa procesos, salvo que siga el patrón.
+  - Al activar una calibración también cambia la configuración, y viceversa.
+- **Ajustes de la interfaz:** `conf["ajustes"]` sobrescribe variables de `cfg`
+  (`ejecutor.aplicar_ajustes`, null = desactivado).
+  - Las fases guardan una `firma` de sus parámetros. Si falta, se asume la de
+    `cfg.VALORES_ORIGINALES`.
+  - El id de la reconstrucción incluye z, salto y `PLANO_UMBRAL_MM`. Por eso cambiar un ajuste
+    recalcula solo lo afectado.
 - **Caché en todas las etapas de proceso:**
   - las de fase omiten las poses cuyo `.npz` es más reciente que sus imágenes
     (`fase._actualizado`);
@@ -83,7 +94,13 @@ Las etapas corren en un orden fijo desde `pipeline.py` (`ETAPAS`):
   - `servidor.py`: HTTP con la librería estándar, SSE, `vigilar()` sobre los archivos de
     resultados, imágenes generadas desde los `.npz`;
   - `ejecutor.py`: corre `pipeline.main()` en un subproceso y aplica la configuración JSON;
-  - `estatico/`: HTML, CSS y JS sin dependencias, con un visor WebGL propio en `nube.js`;
+  - `estatico/`: HTML, CSS y JS sin dependencias, en scripts clásicos que comparten globales y se
+    cargan antes que `app.js`:
+    - `nube.js`: visor WebGL propio;
+    - `galeria.js`: visor de imágenes y explorador de carpetas;
+    - `ajustes.js`: diálogo ⚙ y tema (`data-theme` en `<html>`);
+    - `archivos.js`: pestaña Archivos;
+    - `calibracion.js`: pestaña Calibración;
   - textos de la interfaz en español e inglés en `estatico/i18n.js`. Todo texto visible nuevo va
     allí, en los dos idiomas: `data-i18n` en el HTML y `t("clave")` en el JS.
 

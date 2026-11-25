@@ -120,6 +120,8 @@ function refrescarEstado() {
       pintarCalibracion(d.calibracion);
       pintarListaPoses();
       pintarSelectores();
+      if (est.paso === "archivos" && !est.ejec.ejecutando) cargarArchivos();
+      if (est.paso === "captura") cargarCarpetasPose();
       pintarPasos();
       pintarMetricas();
     } catch (err) { agregarLog(`[ERROR] estado: ${err.message}`); }
@@ -174,7 +176,7 @@ function pintarListaPoses() {
     const nota = document.createElement("p");
     nota.className = "nota vigente";
     const desde = new Date(v.desde).toLocaleString(locale(), { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
-    nota.textContent = t("vigente_nota", { f: desde }) + (v.procesos_ocultos ? " " + t("vigente_ocultos", { n: v.procesos_ocultos }) : "");
+    nota.textContent = t(v.auto ? "vigente_nota" : "vigente_nota_elegida", { f: desde }) + (v.procesos_ocultos ? " " + t("vigente_ocultos", { n: v.procesos_ocultos }) : "");
     nota.title = t("vigente_title");
     cont.appendChild(nota);
   }
@@ -265,6 +267,8 @@ function cargarPanel() {
   if (!panel) return;
   if (est.paso === "nube") return cargarNube();
   if (est.paso === "calibracion") return cargarErroresCalib();
+  if (est.paso === "captura") return cargarCarpetasPose();
+  if (est.paso === "archivos") return cargarArchivos();
   for (const fig of $$("figure[data-tipo]", panel)) cargarFigura(fig);
 }
 
@@ -514,6 +518,7 @@ function confMedir() {
     categorias: calibrar ? ["plano", "objeto"] : [cat],
     captura: { categoria: cat, poses: +$("#m-poses").value || 1, ciclos: +$("#m-ciclos").value || 1, esperar_enter: $("#m-pausa").checked },
     rehacer: false, fase: $("#a-fase").value, calibracion: $("#a-calib").value, ...posesCalib(),
+    ajustes: ajustesParaEnviar(),
     simular: $("#m-demo").checked ? $("#m-fuente").value : null,
   };
 }
@@ -543,6 +548,7 @@ function confAvanzada() {
       ciclos: +$("#a-ciclos").value || 1, esperar_enter: $("#a-pausa").checked,
     },
     rehacer: $("#a-rehacer").checked, fase: $("#a-fase").value, calibracion: $("#a-calib").value, ...posesCalib(),
+    ajustes: ajustesParaEnviar(),
     simular: $("#m-demo").checked ? $("#m-fuente").value : null,
   };
 }
@@ -588,6 +594,8 @@ function redibujarTextos() {
   pintarListaPoses(); pintarSelectores(); pintarMetricas(); notaMedir(); notaAvanzada(); textoNube();
   pintarTextoVivo();
   if (est.paso === "calibracion") { pintarErroresCalib(); pintarListaCalib(); }
+  if (est.paso === "archivos") pintarArchivos();
+  redibujarAjustes();
   if (!$("#n-vacio").classList.contains("oculto") && !est.visor?.n) $("#n-vacio").textContent = t("sin_nube");
   cargarPanel();  // recarga las figuras visibles (textos de escala y avisos en el nuevo idioma)
 }
@@ -606,6 +614,8 @@ async function iniciar() {
   $("#avanzado").addEventListener("input", notaAvanzada);
   notaAvanzada();
   $("#a-fase").value = c.fase; $("#a-calib").value = c.calibracion; $("#a-rehacer").checked = c.rehacer;
+  iniciarVisor();
+  iniciarArchivos();
   if (Array.isArray(c.calib_poses)) {  // lista explícita en pipeline.py
     const o = document.createElement("option");
     o.value = "lista"; o.dataset.i18n = "calib_poses_lista"; o.textContent = t("calib_poses_lista");
@@ -617,6 +627,7 @@ async function iniciar() {
   $("#ec-elegir").addEventListener("change", actualizarBotonUsar);
   $("#ec-usar").addEventListener("click", usarCalibracion);
   $("#b-ver-calib").addEventListener("click", () => mostrarPaso("calibracion"));
+  iniciarAjustes(c.parametros);  // después de fijar los selects con los valores de pipeline.py
   $("#m-ciclos").value = c.captura.ciclos;
   const fuentes = c.fuentes_demo;
   $("#m-fuente").innerHTML = fuentes.map((f) => `<option>${f}</option>`).join("") || `<option value=''>${t("sin_capturas")}</option>`;

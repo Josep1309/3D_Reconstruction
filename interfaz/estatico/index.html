@@ -6,6 +6,7 @@
   <title>Reconstrucción 3D por franjas</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1 2h2v12H1zM5 2h2v12H5zM9 2h2v12H9zM13 2h2v12h-2z' fill='%23f28c28'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/estatico/estilo.css">
+  <script>try { const t = localStorage.getItem("tema"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (_) {}</script>
   <script src="/estatico/i18n.js"></script>
 </head>
 <body>
@@ -20,6 +21,10 @@
   <div class="estado-global">
     <span id="chip-calib" class="chip" data-i18n-title="chip_calib_title" title="Calibración en uso">—</span>
     <span id="chip-estado" class="chip chip-inactivo"><i></i><b>Inactivo</b></span>
+    <button id="b-ajustes" type="button" class="boton-icono" data-i18n-title="ajustes" data-i18n-aria="ajustes" title="Ajustes" aria-label="Ajustes">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.4 7.4 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.4 7.4 0 0 0 1.7-1l2.4 1 2-3.4ZM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z" transform="translate(-1 0)"/></svg>
+      <i class="marca-cambio" hidden></i>
+    </button>
     <div class="segmentado idioma" role="group" data-i18n-aria="idioma" aria-label="Idioma">
       <button type="button" data-idioma="es" lang="es" title="Español">ES</button>
       <button type="button" data-idioma="en" lang="en" title="English">EN</button>
@@ -110,33 +115,7 @@
       <p class="nota" data-i18n="proceso_nota">Las etapas siempre se ejecutan en este orden. Marca las que quieras correr.</p>
       <ol id="etapas" class="secuencia"></ol>
       <h3 class="subtitulo" data-i18n="opciones">Opciones</h3>
-      <div class="campos">
-        <div class="campo">
-          <span class="etiqueta"><label for="a-fase" data-i18n="triangulacion">Triangulación</label>
-            <button type="button" class="ayuda" data-i18n-ayuda="ayuda_triangulacion" data-i18n-etiqueta="triangulacion">?</button></span>
-          <select id="a-fase">
-            <option value="auto" data-i18n="fase_auto">auto (línea base)</option>
-            <option value="Fy">Fy</option><option value="Fx">Fx</option>
-            <option value="ambas" data-i18n="fase_ambas">ambas</option>
-          </select>
-        </div>
-        <div class="campo">
-          <span class="etiqueta"><label for="a-calib-poses" data-i18n="calib_poses">Poses del patrón</label>
-            <button type="button" class="ayuda" data-i18n-ayuda="ayuda_calib_poses" data-i18n-etiqueta="calib_poses">?</button></span>
-          <select id="a-calib-poses">
-            <option value="ultima_sesion" data-i18n="calib_poses_ultima">última sesión</option>
-            <option value="todas" data-i18n="calib_poses_todas">todas</option>
-          </select>
-        </div>
-        <div class="campo">
-          <span class="etiqueta"><label for="a-calib" data-i18n="calibracion">Calibración</label>
-            <button type="button" class="ayuda" data-i18n-ayuda="ayuda_calibracion" data-i18n-etiqueta="calibracion">?</button></span>
-          <select id="a-calib">
-            <option value="independiente" data-i18n="calib_indep">independiente</option>
-            <option value="conjunta" data-i18n="calib_conj">conjunta (_J)</option>
-          </select>
-        </div>
-      </div>
+      <p class="nota" data-i18n="opciones_en_ajustes">Triangulación, máscaras y filtros: en Ajustes (⚙, arriba a la derecha).</p>
       <div class="fila-casilla">
         <label class="casilla"><input id="a-rehacer" type="checkbox"> <span data-i18n="rehacer">Recalcular todo</span></label>
         <button type="button" class="ayuda" data-i18n-ayuda="ayuda_rehacer" data-i18n-etiqueta="rehacer">?</button>
@@ -177,6 +156,7 @@
       <button role="tab" data-paso="desenvuelta"><span>4</span><b data-i18n="paso_desenvuelta">Fase desenvuelta</b></button>
       <button role="tab" data-paso="profundidad"><span>5</span><b data-i18n="paso_profundidad">Profundidad</b></button>
       <button role="tab" data-paso="nube"><span>6</span><b data-i18n="paso_nube">Nube de puntos</b></button>
+      <button role="tab" data-paso="archivos" class="paso-aparte"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3A1.5 1.5 0 0 1 3 1.5h3.2l1.5 1.8H13A1.5 1.5 0 0 1 14.5 4.8v7.7A1.5 1.5 0 0 1 13 14H3a1.5 1.5 0 0 1-1.5-1.5Zm1.5 0v9.5h10V4.8H7l-1.5-1.8Z"/></svg><b data-i18n="paso_archivos">Archivos</b></button>
       <button role="tab" data-paso="calibracion" class="paso-aparte"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Zm0 2.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z"/></svg><b data-i18n="paso_calibracion">Calibración</b></button>
     </nav>
 
@@ -209,12 +189,7 @@
     </section>
 
     <section class="panel" data-panel="captura">
-      <div class="rejilla">
-        <figure data-tipo="franja_V"><figcaption><span data-i18n="fig_franja_V">Franjas verticales (paso 0)</span></figcaption></figure>
-        <figure data-tipo="franja_H"><figcaption><span data-i18n="fig_franja_H">Franjas horizontales (paso 0)</span></figcaption></figure>
-        <figure data-tipo="gray_V"><figcaption><span data-i18n="fig_gray_V">Código Gray V (primer bit)</span></figcaption></figure>
-        <figure data-tipo="textura"><figcaption><span data-i18n="fig_textura_blanco">Textura (patrón blanco)</span></figcaption></figure>
-      </div>
+      <div id="carpetas-pose" class="explorador"></div>
     </section>
 
     <section class="panel" data-panel="envuelta">
@@ -261,6 +236,17 @@
       </div>
     </section>
 
+    <section class="panel" data-panel="archivos">
+      <p class="explica" data-i18n="explica_archivos">Todas las capturas guardadas, agrupadas por proceso de captura y por configuración del montaje (cada configuración empieza en un proceso que capturó el patrón). Solo la configuración en uso se procesa y aparece en las demás pestañas. «Ver» muestra las imágenes crudas de una captura; lo que borres va a la papelera, de donde se puede recuperar hasta vaciarla.</p>
+      <div id="ar-barra" class="ar-barra"></div>
+      <div id="ar-contenido" class="explorador"></div>
+      <div id="ar-seleccion" class="ar-seleccion oculto" role="region" aria-live="polite">
+        <span id="ar-sel-texto"></span>
+        <button id="ar-sel-limpiar" type="button" data-i18n="ar_quitar_seleccion">Quitar selección</button>
+        <button id="ar-sel-borrar" type="button" class="peligro" data-i18n="ar_borrar_sel">Mover a la papelera</button>
+      </div>
+    </section>
+
     <section class="panel" data-panel="calibracion">
       <p class="explica" data-i18n="explica_calib">Error de reproyección de cada pose del tablero con la calibración en uso: cuántos píxeles separan los círculos medidos de los que predice el modelo. «Cámara» y «proyector» evalúan cada uno por separado; «estéreo» usa una sola pose del tablero vista por los dos a través de la línea base R, T, y es el que importa para reconstruir. Si el estéreo es mucho mayor que los otros dos, esa pose no es coherente con el montaje (casi siempre porque la cámara o el proyector se movieron).</p>
       <div class="ec-elegir">
@@ -268,6 +254,7 @@
           <button type="button" class="ayuda" data-i18n-ayuda="ayuda_ec_elegir" data-i18n-etiqueta="ec_en_uso">?</button></span>
         <select id="ec-elegir"></select>
         <button id="ec-usar" class="primario" data-i18n="ec_usar">Usar esta calibración</button>
+        <div id="ec-origen" class="ec-origen"></div>
       </div>
       <div id="ec-resumen" class="ec-resumen"></div>
       <p id="ec-aviso" class="ec-aviso oculto" role="alert"></p>
@@ -297,8 +284,86 @@
   </main>
 </div>
 
+<dialog id="ajustes" class="ajustes" aria-labelledby="aj-titulo">
+  <form method="dialog" class="ajustes-marco">
+    <header class="ajustes-cabecera">
+      <h2 id="aj-titulo" data-i18n="ajustes">Ajustes</h2>
+      <button value="cerrar" class="boton-icono" data-i18n-aria="cerrar" aria-label="Cerrar">✕</button>
+    </header>
+    <div class="ajustes-cuerpo">
+      <section>
+        <h3 data-i18n="aj_apariencia">Apariencia</h3>
+        <div class="aj-fila">
+          <span class="aj-nombre" data-i18n="aj_tema">Tema</span>
+          <div class="segmentado tema" role="group" data-i18n-aria="aj_tema" aria-label="Tema">
+            <button type="button" data-tema="auto" data-i18n="aj_tema_auto">Automático</button>
+            <button type="button" data-tema="light" data-i18n="aj_tema_claro">Claro</button>
+            <button type="button" data-tema="dark" data-i18n="aj_tema_oscuro">Oscuro</button>
+          </div>
+        </div>
+      </section>
+      <section>
+        <h3 data-i18n="aj_fase">Fase y máscaras</h3>
+        <p class="nota" data-i18n="aj_fase_nota">Cambian qué píxeles se consideran válidos. Desactiva una casilla para no aplicar ese paso.</p>
+        <div id="aj-fase" class="aj-lista"></div>
+      </section>
+      <section>
+        <h3 data-i18n="aj_reconstruccion">Reconstrucción</h3>
+        <div class="aj-fila">
+          <span class="aj-nombre"><label for="a-fase" data-i18n="triangulacion">Fase para triangular</label>
+            <button type="button" class="ayuda" data-i18n-ayuda="ayuda_triangulacion" data-i18n-etiqueta="triangulacion">?</button></span>
+          <select id="a-fase">
+            <option value="auto" data-i18n="fase_auto">auto (línea base)</option>
+            <option value="Fy" data-i18n="fase_fy">Fy (franjas horizontales)</option>
+            <option value="Fx" data-i18n="fase_fx">Fx (franjas verticales)</option>
+            <option value="ambas" data-i18n="fase_ambas">ambas</option>
+          </select>
+        </div>
+        <div id="aj-rec" class="aj-lista"></div>
+      </section>
+      <section>
+        <h3 data-i18n="aj_calibracion">Calibración</h3>
+        <div class="aj-fila">
+          <span class="aj-nombre"><label for="a-calib" data-i18n="calibracion">Calibración</label>
+            <button type="button" class="ayuda" data-i18n-ayuda="ayuda_calibracion" data-i18n-etiqueta="calibracion">?</button></span>
+          <select id="a-calib">
+            <option value="independiente" data-i18n="calib_indep">independiente</option>
+            <option value="conjunta" data-i18n="calib_conj">conjunta (_J)</option>
+          </select>
+        </div>
+        <div class="aj-fila">
+          <span class="aj-nombre"><label for="a-calib-poses" data-i18n="calib_poses">Poses del patrón</label>
+            <button type="button" class="ayuda" data-i18n-ayuda="ayuda_calib_poses" data-i18n-etiqueta="calib_poses">?</button></span>
+          <select id="a-calib-poses">
+            <option value="ultima_sesion" data-i18n="calib_poses_ultima">última sesión</option>
+            <option value="todas" data-i18n="calib_poses_todas">todas</option>
+          </select>
+        </div>
+      </section>
+    </div>
+    <footer class="ajustes-pie">
+      <p class="nota" data-i18n="aj_pie">Se guardan en este navegador y se aplican en la próxima ejecución. Las poses afectadas se recalculan solas; los valores por defecto son los de configuracion.py.</p>
+      <button type="button" id="aj-restablecer" data-i18n="aj_restablecer">Restablecer valores por defecto</button>
+      <button value="cerrar" class="primario" data-i18n="cerrar">Cerrar</button>
+    </footer>
+  </form>
+</dialog>
+
+<div id="visor-img" class="visor-img" role="dialog" aria-modal="true" hidden>
+  <figure>
+    <img id="vi-img" alt="">
+    <figcaption><span id="vi-titulo"></span><small id="vi-contador"></small></figcaption>
+  </figure>
+  <button type="button" class="vi-nav vi-ant" id="vi-ant" data-i18n-aria="anterior" aria-label="Anterior">‹</button>
+  <button type="button" class="vi-nav vi-sig" id="vi-sig" data-i18n-aria="siguiente" aria-label="Siguiente">›</button>
+  <button type="button" class="vi-cerrar boton-icono" id="vi-cerrar" data-i18n-aria="cerrar" aria-label="Cerrar">✕</button>
+</div>
+
 <div id="burbuja" class="burbuja" role="tooltip" hidden></div>
 <script src="/estatico/nube.js"></script>
+<script src="/estatico/galeria.js"></script>
+<script src="/estatico/ajustes.js"></script>
+<script src="/estatico/archivos.js"></script>
 <script src="/estatico/calibracion.js"></script>
 <script src="/estatico/app.js"></script>
 </body>

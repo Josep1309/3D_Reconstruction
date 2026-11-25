@@ -458,6 +458,9 @@ def guardar_manifiesto(dir_salida: Path, manifiesto: dict) -> None:
 
 def _siguiente_pose(dir_salida: Path, categoria: str, manifiesto: dict) -> int:
     usados = {p["pose"] for p in manifiesto["poses"] if p["categoria"] == categoria}
+    # Índices de poses borradas desde la interfaz (archivos.py): no se reutilizan, para que una pose
+    # nueva nunca tome el nombre de una vieja (las calibraciones guardan los nombres de sus poses)
+    usados |= set(range(int(manifiesto.get("ultimo_indice", {}).get(categoria, -1)) + 1))
     existentes = {
         int(p.name[5:]) for p in (dir_salida / categoria).glob("pose_*") if p.name[5:].isdigit()
     } if (dir_salida / categoria).is_dir() else set()

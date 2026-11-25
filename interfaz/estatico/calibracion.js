@@ -2,7 +2,7 @@
 // Usa las utilidades globales de app.js ($, api, est, fmt) y t() de i18n.js.
 "use strict";
 
-const ec = { datos: null, clave: null, sel: null, error: null, lista: [] };
+const ec = { datos: null, clave: null, sel: null, error: null, lista: [], turno: 0 };
 
 const escHTML = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const mediana = (v) => { if (!v.length) return 0; const s = [...v].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
@@ -30,22 +30,35 @@ async function cargarErroresCalib(forzar = false) {
   const clave = `${est.calib?.fecha}/${variante}`;
   if (!forzar && ec.clave === clave && (ec.datos || ec.error)) return pintarErroresCalib();
   ec.clave = clave;
+  // Se borra lo anterior en el acto: nunca se muestran los errores de otra calibración mientras
+  // llegan los nuevos (la primera vez, una calibración antigua tarda unos segundos)
+  const turno = ++ec.turno;
+  ec.datos = null; ec.error = null;
+  pintarErroresCalib();
   cargarListaCalib();
   try {
-    ec.datos = await api(`/api/calibracion?variante=${encodeURIComponent(variante)}`);
-    ec.error = null;
+    const datos = await api(`/api/calibracion?variante=${encodeURIComponent(variante)}`);
+    if (turno !== ec.turno) return;  // llegó tarde: ya se pidió otra calibración
+    ec.datos = datos;
     const poses = ec.datos.poses;
     if (!poses.some((p) => p.pose === ec.sel)) {  // por defecto, la pose usada con más error
       const usadas = poses.filter((p) => p.usada), lista = usadas.length ? usadas : poses;
       ec.sel = lista.reduce((a, b) => (b.estereo_px > a.estereo_px ? b : a), lista[0])?.pose ?? null;
     }
-  } catch (err) { ec.datos = null; ec.error = err.message; }
+  } catch (err) {
+    if (turno !== ec.turno) return;
+    ec.datos = null; ec.error = err.message;
+  }
   pintarErroresCalib();
 }
 
 // ------------------------------------------------------------------ elegir la calibración en uso
 async function cargarListaCalib() {
-  try { ec.lista = await api("/api/calibraciones"); } catch (err) { ec.lista = []; }
+  const turno = ec.turnoLista = (ec.turnoLista || 0) + 1;
+  let lista;
+  try { lista = await api("/api/calibraciones"); } catch (err) { lista = []; }
+  if (turno !== ec.turnoLista) return;
+  ec.lista = lista;
   pintarListaCalib();
 }
 
@@ -72,12 +85,48 @@ function pintarListaCalib() {
 function actualizarBotonUsar() {
   const c = ec.lista.find((x) => x.id === $("#ec-elegir").value);
   $("#ec-usar").disabled = !c || c.activa || est.ejec.ejecutando;
+  pintarOrigenCalib(c);
+}
+
+// Imágenes del patrón de las que salió la calibración elegida en el selector
+function pintarOrigenCalib(c) {
+  const cont = $("#ec-origen");
+  const clave = c ? `${c.id}/${IDIOMA}` : "";
+  if (cont.dataset.clave === clave) return;
+  cont.dataset.clave = clave;
+  cont.innerHTML = "";
+  if (!c) return;
+  const titulo = document.createElement("p");
+  titulo.className = "nota";
+  titulo.textContent = t("ec_origen", { n: c.poses_info.length, f: c.proceso ? fechaCorta(c.proceso) : "—" });
+  cont.appendChild(titulo);
+  const tira = document.createElement("div");
+  tira.className = "miniaturas tira";
+  const url = (p, ancho) => `/api/imagen?cat=patron&pose=${p.pose}&tipo=textura&ancho=${ancho}`;
+  const lista = c.poses_info.filter((p) => p.existe).map((p) => ({
+    mini: url(p, 240), url: url(p, 1600),
+    titulo: `${p.pose}${p.hora ? " · " + fechaCorta(p.hora) : ""}${p.estereo_px != null ? ` · ${fmt(p.estereo_px, 2)} px` : ""}`,
+  }));
+  for (const p of c.poses_info) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "mini" + (p.existe ? "" : " borrada");
+    b.innerHTML = p.existe ? `<img loading="lazy" alt=""><span></span>` : `<i></i><span></span>`;
+    const i = lista.findIndex((x) => x.titulo.startsWith(p.pose + " ") || x.titulo === p.pose);
+    if (p.existe) { $("img", b).src = url(p, 240); $("img", b).alt = p.pose; b.addEventListener("click", () => abrirVisor(lista, i)); }
+    else { $("i", b).textContent = t("ec_pose_borrada"); b.disabled = true; }
+    $("span", b).textContent = p.pose;
+    tira.appendChild(b);
+  }
+  cont.appendChild(tira);
 }
 
 async function usarCalibracion() {
   const id = $("#ec-elegir").value;
   if (!id) return;
   $("#ec-usar").disabled = true;
+  ec.turno++; ec.datos = null; ec.error = null;  // fuera los errores de la anterior desde ya
+  pintarErroresCalib();
   try {
     await api("/api/calibraciones/activar", { id });
     ec.clave = null;  // fuerza a recargar errores y lista con la nueva calibración
@@ -132,6 +181,7 @@ function pintarErroresCalib() {
     if (malas.every((p) => !p.usada)) textos.push(t("ec_aviso_no_usadas"));
   }
   if (!d.completo) textos.push(t("ec_aviso_incompleto"));
+  if (d.faltan?.length) textos.push(t("ec_aviso_faltan", { n: d.faltan.length, l: d.faltan.join(", ") }));
   if (textos.length) { aviso.textContent = textos.join(" "); aviso.classList.remove("oculto"); }
   aviso.style.borderColor = calibMezclada(d.rms) || malas.some((p) => p.usada) ? "" : "var(--aviso)";
 

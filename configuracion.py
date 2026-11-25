@@ -118,3 +118,8 @@ CALIBRACION = "independiente"  # "independiente" (Estereo_TSC_0_2) o "conjunta" 
 Z_MIN_MM = 100.0
 Z_MAX_MM = 1500.0
 SALTO_MAX_MM = 5.0             # salto local máximo en Z (filtro de puntos atípicos)
+PLANO_UMBRAL_MM = 3.0          # distancia máxima al plano (RANSAC) para medir la planitud de `plano`
+
+# Valores tal como están en este archivo, antes de que la interfaz aplique sus ajustes (los usa
+# fase.py para saber con qué parámetros se calcularon los resultados anteriores a la «firma»)
+VALORES_ORIGINALES = {k: v for k, v in dict(globals()).items() if k.isupper()}

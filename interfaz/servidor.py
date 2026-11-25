@@ -58,6 +58,7 @@ DIR_RECONSTRUCCION = cfg.DIR_RESULTADOS / "reconstruccion"
 DIR_CALIBRACION = cfg.DIR_CALIBRACION
 ARCHIVO_VIVO = cfg.DIR_RESULTADOS / ".vivo" / "frame.jpg"
 RE_POSE = re.compile(r"^pose_\d+$")
+RE_ORDENADA = re.compile(r"^img_([HV])_(\d{1,2})$")
 RE_MARCA = re.compile(r"@@(vivo) (\d+) (\d+)|@@(previa) ([\d.]+)")
 PROMPTS = ("presiona Enter", "(q = terminar)", "¿Es plano (p), objeto (o)", "pulsa Enter para cerrar")
 
@@ -285,53 +286,94 @@ def resumen_calibracion() -> dict | None:
     return {k: info.get(k) for k in claves}
 
 
+def listado_archivos() -> dict:
+    """Todas las capturas agrupadas por proceso, con sus poses y lo calculado de cada una."""
+    import archivos
+    import calibracion_estereo as ce
+    import sesiones
+
+    lista = sesiones.procesos()
+    conf = sesiones.configuracion_vigente()
+    rangos = sesiones.configuraciones(lista)
+    calibs = ce.listar_calibraciones(DIR_CALIBRACION)
+    proceso_calib = {}
+    for c in calibs:
+        proceso_calib.setdefault(sesiones.proceso_de_poses("patron", c["poses"]), []).append(
+            {"id": c["id"], "activa": c["activa"], "rms_stereo_px": c["rms_stereo_px"]})
+    salida = []
+    for i, p in enumerate(lista):
+        config = next((lista[a]["id"] for a, b in rangos if a <= i < b), None)
+        items = []
+        for it in p["items"]:
+            poses = []
+            for pose in it["poses"]:
+                estado = {k: _mtime(r) is not None for k, r in _archivos_pose(it["cat"], pose).items()}
+                poses.append({"pose": pose, **estado})
+            items.append({"cat": it["cat"], "carpeta": it["carpeta"], "hora": it["hora"].isoformat(timespec="seconds"),
+                          "existe": it["existe"], "poses": poses})
+        salida.append({
+            "id": p["id"], "fin": p["fin"].isoformat(timespec="seconds"), "registrado": p["registrado"],
+            "patron": p["patron"], "configuracion": config, "vigente": bool(conf) and config == conf["proceso"],
+            "inicia_configuracion": config == p["id"], "calibraciones": proceso_calib.get(p["id"], []),
+            "items": items,
+        })
+    return {"procesos": salida, "vigente": sesiones.info_vigente(), "papelera": archivos.info_papelera()}
+
+
 _cache_errores: dict = {}
 _lock_errores = threading.Lock()
 
 
-def errores_calibracion(variante: str = "independiente") -> dict:
-    """Errores de reproyección por pose del patrón con la calibración en uso.
+def _puntos_calibracion(info: dict) -> dict:
+    """Correspondencias de la calibración en uso: las que guardó al calibrar
+    (`Estereo_TSC_0_2_puntos.npz`) o, si es anterior a ese archivo, las recalculadas una vez desde
+    las fases de sus poses (se guardan en resultados/calibracion/puntos_<fecha>.npz)."""
+    import calibracion_estereo as ce
 
-    Se evalúan TODAS las poses con círculos detectados en la última calibración (también las que
-    no entraron), para ver si las de otra sesión son coherentes con el montaje actual. Se recalcula
-    sólo cuando cambia la calibración o las correspondencias.
-    """
+    ruta = DIR_CALIBRACION / ce.ARCHIVO_PUNTOS
+    nuevo = ruta.exists()
+    if not nuevo:
+        ruta = cfg.DIR_RESULTADOS / "calibracion" / f"puntos_{re.sub(r'[^0-9T]', '', info.get('fecha') or 'sin_fecha')}.npz"
+        if not ruta.exists():
+            calc = ce.puntos_desde_fases(info)
+            if not calc["poses"]:
+                raise FileNotFoundError("no quedan fases de las poses de esta calibración (¿se borraron?)")
+            ruta.parent.mkdir(parents=True, exist_ok=True)
+            np.savez(ruta, poses=np.array(calc["poses"]), usadas=np.array(calc["usadas"]),
+                     cam=np.stack(calc["cam"]).astype(np.float32), proj=np.stack(calc["proj"]).astype(np.float32),
+                     worldPoints=calc["worldPoints"], faltan=np.array(calc["faltan"], dtype=str))
+    with np.load(ruta) as d:
+        return {"poses": [str(x) for x in d["poses"]], "usadas": {str(x) for x in d["usadas"]},
+                "cam": d["cam"], "proj": d["proj"], "mundo": d["worldPoints"],
+                "faltan": [str(x) for x in d["faltan"]] if "faltan" in d.files else [], "completo": nuevo}
+
+
+def errores_calibracion(variante: str = "independiente") -> dict:
+    """Errores de reproyección por pose con la calibración en uso, evaluada con SUS poses del
+    patrón (las usadas y, en las calibraciones nuevas, también las detectadas que no entraron).
+    Se recalcula solo cuando cambia la calibración en uso."""
     import calibracion_estereo as ce
 
     nombre = "Estereo_TSC_0_2_J.npz" if variante == "conjunta" else "Estereo_TSC_0_2.npz"
     ruta_cal = DIR_CALIBRACION / nombre
     ruta_json = DIR_CALIBRACION / "Estereo_TSC_0_2.json"
-    ruta_corr = cfg.DIR_RESULTADOS / "calibracion" / "patron_PhasesData.npz"
-    manifiesto = cfg.DIR_ORDENADAS / "manifiesto.json"
     if _mtime(ruta_cal) is None:
         raise FileNotFoundError("no hay calibración guardada")
-    if _mtime(ruta_corr) is None:
-        raise FileNotFoundError("faltan las correspondencias del patrón: ejecuta la etapa de calibración una vez")
-    clave = (variante, cfg.SOLO_CONFIGURACION_ACTUAL, *(_mtime(r) for r in (ruta_cal, ruta_json, ruta_corr, manifiesto)))
+    clave = (variante, *(_mtime(r) for r in (ruta_cal, ruta_json, DIR_CALIBRACION / ce.ARCHIVO_PUNTOS)))
     with _lock_errores:
         if clave in _cache_errores:
             return _cache_errores[clave]
         with np.load(ruta_cal) as d:
             calib = {k: d[k] for k in d.files}
-        with np.load(ruta_corr) as d:
-            completo = "M_detectadas" in d.files  # formato nuevo: incluye las poses no usadas
-            poses = [str(x) for x in d["poses_detectadas" if completo else "poses"]]
-            m = d["M_detectadas" if completo else "M"]
-            mundo = d["worldPoints"]
         try:
             info = json.loads(ruta_json.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             info = {}
-        usadas = set(info.get("poses") or poses)
-        import sesiones
-
-        vigentes = sesiones.poses_vigentes("patron")  # solo poses del montaje actual
-        if vigentes is not None:
-            indices = [i for i, n in enumerate(poses) if n in vigentes]
-            poses, m = [poses[i] for i in indices], m[:, :, indices, :]
+        pts = _puntos_calibracion(info)
+        poses = pts["poses"]
+        detalle = info.get("errores_por_pose", {})
         sesiones = ce.sesiones_patron()
-        errores = ce.errores_reproyeccion(calib, [m[:, :, i, 0] for i in range(len(poses))],
-                                          [m[:, :, i, 1] for i in range(len(poses))], mundo, residuos=True)
+        errores = ce.errores_reproyeccion(calib, list(pts["cam"]), list(pts["proj"]), pts["mundo"], residuos=True)
         datos = {
             "variante": variante,
             "fecha": info.get("fecha"),
@@ -340,8 +382,11 @@ def errores_calibracion(variante: str = "independiente") -> dict:
                     "estereo": float(calib["rms_stereo"]) if "rms_stereo" in calib else info.get("rms_stereo_indep_px")},
             "cam_wh": [int(v) for v in calib.get("cam_size_wh", (1280, 1024))],
             "proj_wh": [int(v) for v in calib.get("proj_size_wh", (cfg.PROYECTOR_ANCHO, cfg.PROYECTOR_ALTO))],
-            "completo": completo,
-            "poses": [{"pose": n, "usada": n in usadas, **sesiones.get(n, {}), **e} for n, e in zip(poses, errores)],
+            "completo": pts["completo"],
+            "faltan": pts["faltan"],
+            "poses": [{"pose": n, "usada": n in pts["usadas"], **sesiones.get(n, {}),
+                       **{k: detalle[n][k] for k in ("hora", "sesion") if k in detalle.get(n, {})}, **e}
+                      for n, e in zip(poses, errores)],
         }
         _cache_errores.clear()
         _cache_errores[clave] = datos
@@ -377,8 +422,12 @@ def vigilar() -> None:
                     m = _mtime(ruta)
                     if m is not None:
                         actual[(cat, pose, tipo)] = m
+        ahora = time.time()
         for clave, m in actual.items():
-            if primera:
+            # Un archivo viejo que «aparece» no es un resultado nuevo: es una pose que pasó a ser
+            # visible al cambiar de configuración. Se registra sin avisar (si no, «Seguir la
+            # última» movería la vista a ella)
+            if primera or (clave not in visto and m < ahora - 30):
                 visto[clave] = m
             elif visto.get(clave) != m:
                 if candidato.get(clave) == m:
@@ -443,6 +492,12 @@ def generar_imagen(cat: str, pose: str, tipo: str) -> tuple[np.ndarray, str]:
     """Devuelve (imagen BGR o gris, texto de escala) para un paso del proceso."""
     archivos = _archivos_pose(cat, pose)
     n, b = cfg.N_PASOS, cfg.N_BITS_GRAY
+    m = RE_ORDENADA.match(tipo)
+    if m:  # cualquier imagen organizada: img_V_03 = franja vertical, paso 3
+        indice = int(m.group(2))
+        if not 0 <= indice < cfg.IMAGENES_POR_ORIENTACION + 2:
+            raise ValueError("índice de imagen fuera de rango")
+        return _leer_ordenada(cat, pose, m.group(1), indice), "intensidad"
     if tipo in ("franja_V", "franja_H"):
         return _leer_ordenada(cat, pose, tipo[-1], 0), "intensidad"
     if tipo == "gray_V":
@@ -516,6 +571,7 @@ def configuracion_por_defecto() -> dict:
         "calib_poses": p.CALIBRACION_POSES,
         "parametros": {k: getattr(cfg, k) for k in (
             "PERIODO", "N_BITS_GRAY", "GAMMA_TH", "GAMMA_TH_Y", "SUAVIZADO_FASE_PX", "UMBRAL_INTENSIDAD",
+            "MED_FILT", "BORDE_MASCARA", "ORDEN_BITS_GRAY", "SALTO_MAX_MM", "PLANO_UMBRAL_MM",
             "CAM_EXPOSICION_US", "PATRON_COLUMNAS", "PATRON_FILAS", "PATRON_DISTANCIA_MM", "Z_MIN_MM", "Z_MAX_MM")},
         "fuentes_demo": fuentes_demo(),
         "datos": str(cfg.DATOS),
@@ -579,7 +635,22 @@ class Manejador(BaseHTTPRequestHandler):
                 return self._imagen(q)
             if url.path == "/api/calibraciones":
                 import calibracion_estereo as ce
-                return self._json(ce.listar_calibraciones(DIR_CALIBRACION))
+                import sesiones
+
+                lista = ce.listar_calibraciones(DIR_CALIBRACION)
+                for c in lista:
+                    c["proceso"] = sesiones.proceso_de_poses("patron", c["poses"])
+                return self._json(lista)
+            if url.path == "/api/archivos":
+                return self._json(listado_archivos())
+            if url.path == "/api/captura/lista":
+                import archivos
+
+                return self._json([p.name for p in archivos.frames_captura(q.get("carpeta", ""))])
+            if url.path == "/api/captura/imagen":
+                import archivos
+
+                return self._imagen(q, archivos.leer_frame(q.get("carpeta", ""), int(q.get("i", 0))), "intensidad")
             if url.path == "/api/calibracion":
                 return self._json(errores_calibracion(q.get("variante", "independiente")))
             if url.path == "/api/nube":
@@ -603,6 +674,10 @@ class Manejador(BaseHTTPRequestHandler):
             if url.path == "/api/detener":
                 ejecucion.detener()
                 return self._json({"ok": True})
+            if url.path in ("/api/archivos/borrar", "/api/archivos/vaciar_papelera", "/api/configuracion/elegir"):
+                if ejecucion.estado()["ejecutando"]:
+                    raise RuntimeError("hay un proceso en curso: espera a que termine")
+                return self._json(self._post_archivos(url.path, self._cuerpo()))
             if url.path == "/api/calibraciones/activar":
                 import calibracion_estereo as ce
                 if ejecucion.estado()["ejecutando"]:
@@ -613,7 +688,13 @@ class Manejador(BaseHTTPRequestHandler):
                         elegida = ce.activar_calibracion(ident, DIR_CALIBRACION)
                 except FileNotFoundError as exc:
                     return self._error(404, str(exc))
-                difusor.emitir("log", {"texto": f"[OK] Calibración en uso: {ident}. Las poses se "
+                # Se ven y procesan las poses de la configuración de la que salió esa calibración
+                import sesiones
+
+                proceso = sesiones.proceso_de_poses("patron", elegida["poses"])
+                sesiones.fijar_configuracion(proceso)
+                difusor.emitir("log", {"texto": f"[OK] Calibración en uso: {ident}. Configuración vigente: la "
+                                                f"del proceso {proceso or '(última)'}. Las poses se "
                                                 f"reconstruirán con ella en la próxima ejecución."})
                 return self._json(elegida)
             if url.path == "/api/entrada":
@@ -622,6 +703,52 @@ class Manejador(BaseHTTPRequestHandler):
             return self._error(404, "ruta desconocida")
         except RuntimeError as exc:
             return self._error(409, str(exc))
+        except FileNotFoundError as exc:
+            return self._error(404, str(exc))
+        except (ValueError, KeyError, OSError) as exc:
+            return self._error(400, str(exc))
+
+    def _post_archivos(self, ruta: str, cuerpo: dict) -> dict:
+        import archivos
+        import calibracion_estereo as ce
+        import sesiones
+
+        if ruta == "/api/archivos/borrar":
+            carpetas = [str(c) for c in cuerpo.get("carpetas", [])]
+            if not carpetas:
+                raise ValueError("no se indicó qué borrar")
+            with _lock_npz, _lock_errores:
+                res = archivos.mover_a_papelera(carpetas)
+                _npz.cache_clear()
+                _cache_errores.clear()
+            difusor.emitir("log", {"texto": f"[OK] {len(carpetas)} captura(s) movidas a la papelera "
+                                            f"({res['elementos']} elementos): {res['papelera']}"})
+            return res
+        if ruta == "/api/archivos/vaciar_papelera":
+            res = archivos.vaciar_papelera()
+            difusor.emitir("log", {"texto": f"[OK] Papelera vaciada ({res['bytes'] / 1e6:.0f} MB liberados)."})
+            return res
+        # Elegir configuración: None = la última. Si hay una calibración hecha con sus poses, se pone en uso
+        proceso = cuerpo.get("proceso") or None
+        sesiones.fijar_configuracion(proceso)
+        conf = sesiones.configuracion_vigente()
+        objetivo = conf["proceso"] if conf else None  # también al volver a la última
+        calib = None
+        if objetivo:
+            for c in ce.listar_calibraciones(DIR_CALIBRACION):  # de la más reciente a la más antigua
+                if sesiones.proceso_de_poses("patron", c["poses"]) == objetivo:
+                    calib = c["id"]
+                    if not c["activa"]:
+                        with _lock_errores:
+                            ce.activar_calibracion(calib, DIR_CALIBRACION)
+                    break
+        texto = f"[OK] Configuración vigente: {'la última' if not proceso else 'desde ' + proceso}"
+        if calib:
+            texto += f" · calibración en uso: {calib}"
+        elif objetivo:
+            texto += " · [AVISO] ninguna calibración del historial salió de este proceso: calibra con él"
+        difusor.emitir("log", {"texto": texto})
+        return {"proceso": conf and conf["proceso"], "calibracion": calib}
 
     def _cat_pose(self, q: dict) -> tuple[str, str]:
         cat, pose = q.get("cat", ""), q.get("pose", "")
@@ -635,10 +762,11 @@ class Manejador(BaseHTTPRequestHandler):
             return self._error(404, "no encontrado")
         self._enviar(200, ruta.read_bytes(), TIPOS_MIME.get(ruta.suffix, "application/octet-stream"))
 
-    def _imagen(self, q: dict) -> None:
-        cat, pose = self._cat_pose(q)
-        img, escala = generar_imagen(cat, pose, q.get("tipo", ""))
-        ancho = int(q.get("ancho", 900))
+    def _imagen(self, q: dict, img: np.ndarray | None = None, escala: str = "") -> None:
+        if img is None:
+            cat, pose = self._cat_pose(q)
+            img, escala = generar_imagen(cat, pose, q.get("tipo", ""))
+        ancho = max(64, min(int(q.get("ancho", 900)), 2000))
         if img.shape[1] > ancho:
             f = ancho / img.shape[1]
             img = cv2.resize(img, (0, 0), fx=f, fy=f, interpolation=cv2.INTER_AREA)

@@ -321,17 +321,45 @@ def listar_poses(directorio_categoria: Path) -> list[Path]:
 
     if not directorio_categoria.is_dir():
         return []
-    vigentes = sesiones.poses_vigentes(directorio_categoria.name, directorio_categoria.parent)
+    vigentes = sesiones.poses_vigentes(directorio_categoria.name)
     return sorted(
         p for p in directorio_categoria.iterdir()
         if p.is_dir() and p.name.startswith("pose_") and (vigentes is None or p.name in vigentes)
     )
 
 
-def _actualizado(salida: Path, entradas: Sequence[Path]) -> bool:
-    """True si `salida` existe y es más reciente que todos los archivos de `entradas` (carpetas o archivos)."""
+def _firma_guardada(ruta: Path) -> str | None:
+    """Parámetros con los que se calculó un `.npz` de fase (None en los anteriores a la firma)."""
+    try:
+        with np.load(ruta) as d:
+            return str(d["firma"]) if "firma" in d.files else None
+    except (OSError, ValueError, KeyError):
+        return ""
+
+
+def _firma_original(tipo: str) -> str:
+    """Firma con los valores de configuracion.py tal como están en el archivo: la de los
+    resultados calculados antes de que se guardara la firma."""
+    import configuracion as cfg
+
+    o = cfg.VALORES_ORIGINALES
+    if tipo == "rel":
+        return firma_relativa(o["N_PASOS"], o["SUAVIZADO_FASE_PX"])
+    return firma_absoluta(o["PERIODO"], o["N_BITS_GRAY"], o["GAMMA_TH"], o["GAMMA_TH_Y"], o["MED_FILT"],
+                          o["ORDEN_BITS_GRAY"], o["UMBRAL_INTENSIDAD"], o["BORDE_MASCARA"])
+
+
+def _actualizado(salida: Path, entradas: Sequence[Path], firma: str | None = None) -> bool:
+    """True si `salida` existe, es más reciente que todos los archivos de `entradas` (carpetas o
+    archivos) y se calculó con los mismos parámetros (`firma`)."""
     if not salida.exists():
         return False
+    if firma is not None:
+        guardada = _firma_guardada(salida)
+        if guardada is None:  # anterior a la firma: se calculó con los valores de configuracion.py
+            guardada = _firma_original(firma.split("|")[0])
+        if guardada != firma:
+            return False
     t_salida = salida.stat().st_mtime
     for entrada in entradas:
         archivos = entrada.rglob("*") if entrada.is_dir() else [entrada]
@@ -380,6 +408,7 @@ def etapa_fase_relativa(
     Las poses pendientes se procesan en paralelo (`_en_paralelo`).
     """
     gamma_th_y = gamma_th if gamma_th_y is None else gamma_th_y
+    firma = firma_relativa(n_step, suavizado)
     generados = []
     for categoria in categorias:
         poses = listar_poses(dir_ordenadas / categoria)
@@ -391,13 +420,13 @@ def etapa_fase_relativa(
         for dir_pose in poses:
             ruta = dir_salida / categoria / f"{dir_pose.name}_relativa.npz"
             generados.append(ruta)
-            if not rehacer and _actualizado(ruta, [dir_pose]):
+            if not rehacer and _actualizado(ruta, [dir_pose], firma):
                 print(f"  [{dir_pose.name}] sin cambios, se reutiliza '{ruta.name}'")
             else:
                 pendientes.append((dir_pose, ruta))
         for mensaje in _en_paralelo(
             _fase_relativa_pose,
-            [(d, r, n_step, gamma_th, gamma_th_y, prefijo, suavizado) for d, r in pendientes],
+            [(d, r, n_step, gamma_th, gamma_th_y, prefijo, suavizado, firma) for d, r in pendientes],
         ):
             print(mensaje)
     return generados
@@ -419,11 +448,23 @@ def _en_paralelo(funcion, argumentos: list[tuple], hilos: int | None = None):
         return list(ejecutor.map(lambda a: funcion(*a), argumentos))
 
 
+def firma_relativa(n_step: int, suavizado: float) -> str:
+    """Parámetros que determinan la fase envuelta (los umbrales solo afectan a la figura)."""
+    return f"rel|{n_step}|{float(suavizado):g}"
+
+
+def firma_absoluta(fringe_pitch, n_bits, gamma_th, gamma_th_y, med_filt_size, orden_bits,
+                   umbral_intensidad, borde) -> str:
+    """Parámetros que determinan la fase absoluta y sus máscaras."""
+    return (f"abs|{fringe_pitch}|{n_bits}|{float(gamma_th):g}|{float(gamma_th_y):g}|{int(med_filt_size)}|"
+            f"{orden_bits}|{float(umbral_intensidad):g}|{int(borde)}")
+
+
 def _fase_relativa_pose(
     dir_pose: Path, ruta: Path, n_step: int, gamma_th: float, gamma_th_y: float, prefijo: str,
-    suavizado: float = 0.0,
+    suavizado: float = 0.0, firma: str | None = None,
 ) -> str:
-    datos = {}
+    datos = {"firma": np.array(firma or firma_relativa(n_step, suavizado))}
     for orient, eje in (("V", "X"), ("H", "Y")):
         rel = fase_relativa(cargar_secuencia(dir_pose / orient / prefijo, n_step), gamma_th, suavizado)
         datos[f"phi{eje}"] = rel["phi"].astype(np.float32)
@@ -483,6 +524,8 @@ def etapa_fase_absoluta(
             print(f"[AVISO] No hay poses organizadas en '{dir_ordenadas / categoria}', se omite.")
             continue
         print(f"\n=== Fase absoluta: '{categoria}' ({len(poses)} poses) ===")
+        firma = firma_absoluta(fringe_pitch, n_bits, gamma_th, gamma_th_y, med_filt_size, orden_bits,
+                               umbral_intensidad, borde)
         pendientes = []
         for dir_pose in poses:
             ruta_rel = dir_salida / categoria / f"{dir_pose.name}_relativa.npz"
@@ -492,14 +535,14 @@ def etapa_fase_absoluta(
                 )
             ruta = dir_salida / categoria / f"{dir_pose.name}.npz"
             generados.append(ruta)
-            if not rehacer and _actualizado(ruta, [dir_pose, ruta_rel]):
+            if not rehacer and _actualizado(ruta, [dir_pose, ruta_rel], firma):
                 print(f"  [{dir_pose.name}] sin cambios, se reutiliza '{ruta.name}'")
             else:
                 pendientes.append((dir_pose, ruta_rel, ruta))
         parametros = dict(
             fringe_pitch=fringe_pitch, n_step=n_step, n_bits=n_bits, umbrales=(gamma_th, gamma_th_y),
             med_filt_size=med_filt_size, orden_bits=orden_bits, umbral_intensidad=umbral_intensidad,
-            borde=borde, prefijo=prefijo,
+            borde=borde, prefijo=prefijo, firma=firma,
         )
         for mensaje in _en_paralelo(
             lambda d, rr, r: _fase_absoluta_pose(d, rr, r, **parametros), pendientes
@@ -521,10 +564,11 @@ def _fase_absoluta_pose(
     umbral_intensidad: float,
     borde: int,
     prefijo: str,
+    firma: str = "",
 ) -> str:
     """Fase absoluta de una pose (V -> X, H -> Y). Devuelve la línea de resumen."""
     rel = cargar_fases_pose(ruta_rel)
-    datos: dict[str, np.ndarray] = {}
+    datos: dict[str, np.ndarray] = {"firma": np.array(firma)}
     # Textura = imagen blanca (último frame de la carpeta H); solo se leen las imágenes necesarias
     blanco = cargar_secuencia(dir_pose / "H" / prefijo, 1, inicio=n_step + n_bits + 1)[0]
     itex = np.clip(blanco, 0, 255).astype(np.uint8)

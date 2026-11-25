@@ -391,6 +391,84 @@ def errores_reproyeccion(calib: dict, pts_cam: list[np.ndarray], pts_proj: list[
     return salida
 
 
+def correspondencias_pose(
+    datos: dict, pattern_size: tuple[int, int], pattern_type: str, circle_color: str,
+    gamma_th: float, gamma_th_y: float, offset_mask: int = 10, borde: int = cfg.BORDE_MASCARA,
+    mapas_residuo: bool = False,
+) -> dict:
+    """Correspondencias cámara ↔ proyector de los círculos de una pose del patrón.
+
+    Detecta los círculos en la textura, ajusta el polinomio a u_p y v_p sobre el tablero y lo evalúa
+    en los centros. Devuelve {"cam", "proj" (ajustado), "crudo" (sin ajustar), "std" (u, v)} y, con
+    `mapas_residuo`, los mapas de residuo del ajuste. Lanza RuntimeError si no detecta el tablero.
+    """
+    itex = datos["Itex"]
+    alto, ancho = itex.shape
+    puntos_cam = detectar_puntos_tablero(itex, pattern_size, pattern_type, circle_color)
+    tablero = create_mask_cb(itex.shape, puntos_cam, offset=offset_mask)
+    if borde > 0:
+        tablero[:borde, :] = 0
+        tablero[-borde:, :] = 0
+        tablero[:, :borde] = 0
+        tablero[:, -borde:] = 0
+    proyectados = np.zeros_like(puntos_cam)
+    crudos = np.zeros_like(puntos_cam)
+    std, mapas = [], []
+    for dim, (clave, calidad, umbral) in enumerate((("up", "qFx", gamma_th), ("vp", "qFy", gamma_th_y))):
+        mapa = datos[clave]
+        m_fit = _mascara_ajuste(tablero, datos[calidad], umbral)
+        coef, norm_p, inliers = ajustar_polinomio_2d(mapa, m_fit)
+        proyectados[:, dim] = evaluar_polinomio_2d(coef, norm_p, puntos_cam[:, 0], puntos_cam[:, 1])
+        crudos[:, dim] = cv2.remap(
+            mapa.astype(np.float32),
+            puntos_cam[:, 0].astype(np.float32).reshape(-1, 1),
+            puntos_cam[:, 1].astype(np.float32).reshape(-1, 1),
+            cv2.INTER_LINEAR,
+        ).ravel()
+        # Residuo del ajuste solo en los inliers (no hace falta evaluar toda la imagen)
+        yi, xi = np.nonzero(inliers)
+        std.append(float(np.std(mapa[yi, xi] - evaluar_polinomio_2d(coef, norm_p, xi, yi))))
+        if mapas_residuo:
+            ajustado = evaluar_polinomio_2d_malla(coef, norm_p, ancho, alto)
+            mapas.append(np.where(inliers, mapa - ajustado, np.nan).astype(np.float32))
+    return {"cam": puntos_cam, "proj": proyectados, "crudo": crudos, "std": std, "mapas": mapas}
+
+
+ARCHIVO_PUNTOS = "Estereo_TSC_0_2_puntos.npz"
+
+
+def guardar_puntos(ruta: Path, poses: list[str], usadas: list[str], cam: list, proj: list,
+                   world_points: np.ndarray) -> None:
+    """Correspondencias de las poses de una calibración (las usadas y las detectadas no usadas).
+    Viajan con la calibración: con ellas se calculan sus errores por pose en la interfaz."""
+    np.savez(ruta, poses=np.array(poses), usadas=np.array(usadas), cam=np.stack(cam).astype(np.float32),
+             proj=np.stack(proj).astype(np.float32), worldPoints=world_points)
+
+
+def puntos_desde_fases(info: dict, dir_fases: Path = cfg.DIR_RESULTADOS / "fases") -> dict:
+    """Recalcula las correspondencias de una calibración que no las guardó (anteriores a
+    `ARCHIVO_PUNTOS`), desde las fases de sus poses. Las poses sin fase se omiten."""
+    size = tuple(info.get("pattern_size") or (cfg.PATRON_COLUMNAS, cfg.PATRON_FILAS))
+    distancia = info.get("center_distance_mm") or cfg.PATRON_DISTANCIA_MM
+    world = generar_puntos_mundo_circulos(size, tuple(distancia) if np.ndim(distancia) else distancia, cfg.PATRON_TIPO)
+    poses, cam, proj, faltan = [], [], [], []
+    for nombre in info.get("poses", []):
+        ruta = dir_fases / "patron" / f"{nombre}.npz"
+        if not ruta.exists():
+            faltan.append(nombre)
+            continue
+        try:
+            c = correspondencias_pose(fase.cargar_fases_pose(ruta), size, cfg.PATRON_TIPO, cfg.PATRON_COLOR_CIRCULOS,
+                                      cfg.GAMMA_TH, cfg.GAMMA_TH_Y)
+        except RuntimeError:
+            faltan.append(nombre)
+            continue
+        poses.append(nombre)
+        cam.append(c["cam"])
+        proj.append(c["proj"])
+    return {"poses": poses, "usadas": list(poses), "cam": cam, "proj": proj, "worldPoints": world, "faltan": faltan}
+
+
 def ejecutar_calibracion_estereo(
     dir_fases: Path = cfg.DIR_RESULTADOS / "fases",
     dir_salida: Path = cfg.DIR_CALIBRACION,
@@ -444,40 +522,13 @@ def ejecutar_calibracion_estereo(
     for nombre, datos in zip(nombres, poses):
         itex = datos["Itex"]
         try:
-            puntos_cam = detectar_puntos_tablero(itex, pattern_size, pattern_type, circle_color)
+            # Mapas de residuo completos solo para la figura de diagnóstico de la primera pose
+            c = correspondencias_pose(datos, pattern_size, pattern_type, circle_color, gamma_th, gamma_th_y,
+                                      offset_mask, borde, mapas_residuo=not residuos)
         except RuntimeError as exc:
             print(f"  [{nombre}] [AVISO] {exc}; se descarta la pose.")
             continue
-
-        tablero = create_mask_cb(itex.shape, puntos_cam, offset=offset_mask)
-        if borde > 0:
-            tablero[:borde, :] = 0
-            tablero[-borde:, :] = 0
-            tablero[:, :borde] = 0
-            tablero[:, -borde:] = 0
-
-        proyectados = np.zeros_like(puntos_cam)
-        crudos = np.zeros_like(puntos_cam)
-        res_pose = []
-        std_pose = []
-        for dim, (clave, calidad, umbral) in enumerate((("up", "qFx", gamma_th), ("vp", "qFy", gamma_th_y))):
-            mapa = datos[clave]
-            m_fit = _mascara_ajuste(tablero, datos[calidad], umbral)
-            coef, norm_p, inliers = ajustar_polinomio_2d(mapa, m_fit)
-            proyectados[:, dim] = evaluar_polinomio_2d(coef, norm_p, puntos_cam[:, 0], puntos_cam[:, 1])
-            crudos[:, dim] = cv2.remap(
-                mapa.astype(np.float32),
-                puntos_cam[:, 0].astype(np.float32).reshape(-1, 1),
-                puntos_cam[:, 1].astype(np.float32).reshape(-1, 1),
-                cv2.INTER_LINEAR,
-            ).ravel()
-            # Residuo del ajuste solo en los inliers (no hace falta evaluar toda la imagen)
-            yi, xi = np.nonzero(inliers)
-            residuo = mapa[yi, xi] - evaluar_polinomio_2d(coef, norm_p, xi, yi)
-            std_pose.append(float(np.std(residuo)))
-            if not residuos:  # mapa completo solo para la figura de diagnóstico de la primera pose
-                ajustado = evaluar_polinomio_2d_malla(coef, norm_p, ancho_cam, alto_cam)
-                res_pose.append(np.where(inliers, mapa - ajustado, np.nan).astype(np.float32))
+        puntos_cam, proyectados, crudos, std_pose, res_pose = c["cam"], c["proj"], c["crudo"], c["std"], c["mapas"]
 
         detectados.append(nombre)
         det_cam.append(puntos_cam)
@@ -634,13 +685,15 @@ def ejecutar_calibracion_estereo(
     }
     ruta_json = dir_salida / "Estereo_TSC_0_2.json"
     ruta_json.write_text(json.dumps(resumen, indent=2), encoding="utf-8")
+    ruta_puntos = dir_salida / ARCHIVO_PUNTOS
+    guardar_puntos(ruta_puntos, detectados, usados, det_cam, det_proj, world_points)
 
     _guardar_figura_diagnostico(dir_diagnostico, texturas[0], pts_cam[0], residuos[0], usados[0])
 
     # Copia en el historial: recalibrar no hace perder la calibración anterior
     historial = dir_salida / "historial" / datetime.now().strftime("%Y%m%d_%H%M%S")
     historial.mkdir(parents=True, exist_ok=True)
-    for ruta in (ruta_tsc, ruta_tsc_j, ruta_json):
+    for ruta in (ruta_tsc, ruta_tsc_j, ruta_json, ruta_puntos):
         shutil.copy2(ruta, historial / ruta.name)
     print(f"[OK] Calibración guardada en:\n  - {ruta_tsc}\n  - {ruta_tsc_j}\n  - {ruta_json}\n"
           f"  (copia en {historial}; diagnósticos en {dir_diagnostico})")
@@ -653,7 +706,8 @@ def ejecutar_calibracion_estereo(
 # Historial: elegir qué calibración usar
 # ------------------------------------------------------------------------------
 
-ARCHIVOS_CALIBRACION = ("Estereo_TSC_0_2.npz", "Estereo_TSC_0_2_J.npz", "Estereo_TSC_0_2.json")
+ARCHIVOS_CALIBRACION = ("Estereo_TSC_0_2.npz", "Estereo_TSC_0_2_J.npz", "Estereo_TSC_0_2.json",
+                        "Estereo_TSC_0_2_puntos.npz")
 
 
 def listar_calibraciones(dir_calibracion: Path = cfg.DIR_CALIBRACION) -> list[dict]:
@@ -682,8 +736,21 @@ def listar_calibraciones(dir_calibracion: Path = cfg.DIR_CALIBRACION) -> list[di
             "rms_proj_px": info.get("rms_proj_px"),
             "rms_stereo_px": info.get("rms_stereo_indep_px"),
             "linea_base_mm": info.get("linea_base_mm"),
+            "poses_info": _origen_poses(info),
             "activa": contenido_activo is not None and (carpeta / "Estereo_TSC_0_2.npz").read_bytes() == contenido_activo,
         })
+    return salida
+
+
+def _origen_poses(info: dict) -> list[dict]:
+    """De qué captura sale cada pose del patrón de una calibración (hora y si sigue organizada)."""
+    detalle = info.get("errores_por_pose", {})
+    salida = []
+    for nombre in info.get("poses", []):
+        d = detalle.get(nombre, {})
+        salida.append({"pose": nombre, "hora": d.get("hora"), "fuente": d.get("fuente"),
+                       "estereo_px": d.get("estereo_px"),
+                       "existe": (cfg.DIR_ORDENADAS / "patron" / nombre).is_dir()})
     return salida
 
 
@@ -711,6 +778,8 @@ def activar_calibracion(ident: str, dir_calibracion: Path = cfg.DIR_CALIBRACION)
             tmp = dir_calibracion / (nombre + ".tmp")
             shutil.copyfile(origen / nombre, tmp)
             tmp.replace(dir_calibracion / nombre)
+        else:  # p. ej. los puntos de una calibración anterior: no deben quedar los de otra
+            (dir_calibracion / nombre).unlink(missing_ok=True)
     print(f"[OK] Calibración en uso: {ident}")
     return next(c for c in listar_calibraciones(dir_calibracion) if c["id"] == ident)
 
@@ -801,7 +870,12 @@ def main() -> None:
         print("  (* = en uso; para cambiarla: --activar FECHA)")
         return
     if args.activar:
-        activar_calibracion(args.activar, args.salida)
+        elegida = activar_calibracion(args.activar, args.salida)
+        import sesiones
+
+        proceso = sesiones.proceso_de_poses("patron", elegida["poses"])
+        sesiones.fijar_configuracion(proceso)  # se ven y procesan las poses de esa configuración
+        print(f"[OK] Configuración vigente: la del proceso {proceso or '(última)'}")
         return
 
     ejecutar_calibracion_estereo(

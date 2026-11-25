@@ -111,8 +111,49 @@ class VistaEnVivo:
             sys.stdout.flush()
 
 
+# Ajustes de procesamiento que puede cambiar la interfaz, y el valor que los «desactiva»
+AJUSTES_NEUTROS = {
+    "SUAVIZADO_FASE_PX": 0.0,        # sin suavizado de S y C
+    "GAMMA_TH": 0.0,                 # sin máscara de modulación X
+    "GAMMA_TH_Y": 0.0,               # sin máscara de modulación Y
+    "UMBRAL_INTENSIDAD": -1.0,       # sin máscara de intensidad
+    "BORDE_MASCARA": 0,              # sin recorte de bordes
+    "MED_FILT": 0,                   # sin filtro de mediana del orden de franja
+    "SALTO_MAX_MM": float("inf"),    # sin filtro de saltos
+    "Z_MIN_MM": float("-inf"),       # sin límite de Z (se envía junto con Z_MAX_MM)
+    "Z_MAX_MM": float("inf"),
+    "PLANO_UMBRAL_MM": 3.0,
+}
+ENTEROS = {"BORDE_MASCARA", "MED_FILT"}
+
+
+def aplicar_ajustes(ajustes: dict) -> list[str]:
+    """Aplica a `configuracion` los ajustes de la interfaz: número = activo con ese valor,
+    null = desactivado. Devuelve la lista de cambios respecto a configuracion.py (para el registro)."""
+    cambios = []
+    for clave, valor in ajustes.items():
+        if clave == "ORDEN_BITS_GRAY":
+            if valor in ("auto", "lsb", "msb"):
+                nuevo = valor
+            else:
+                continue
+        elif clave in AJUSTES_NEUTROS:
+            nuevo = AJUSTES_NEUTROS[clave] if valor is None else float(valor)
+            if clave in ENTEROS and np.isfinite(nuevo):
+                nuevo = int(nuevo)
+        else:
+            continue
+        if getattr(cfg, clave) != nuevo:
+            cambios.append(f"{clave}={'desactivado' if valor is None else nuevo}")
+        setattr(cfg, clave, nuevo)
+    return cambios
+
+
 def configurar(conf: dict) -> None:
     p = pipeline
+    cambios = aplicar_ajustes(conf.get("ajustes") or {})
+    if cambios:
+        print(f"[AJUSTES] Distintos de configuracion.py: {', '.join(cambios)}", flush=True)
     for etapa, activa in conf.get("etapas", {}).items():
         if etapa in p.ETAPAS:
             p.ETAPAS[etapa] = bool(activa)

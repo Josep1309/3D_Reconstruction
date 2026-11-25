@@ -292,10 +292,12 @@ def _guardar_figura(
 # ==============================================================================
 
 
-def _id_reconstruccion(ruta_calibracion: Path, fd: str, z_min: float, z_max: float, salto_max: float) -> str:
+def _id_reconstruccion(ruta_calibracion: Path, fd: str, z_min: float, z_max: float, salto_max: float,
+                       plano_umbral: float = cfg.PLANO_UMBRAL_MM) -> str:
     """Identifica todo lo que, además de la fase de la pose, determina su reconstrucción."""
     st = ruta_calibracion.resolve().stat()
-    return f"{ruta_calibracion.resolve()}|{st.st_mtime_ns}|{fd}|{z_min}|{z_max}|{salto_max}"
+    extra = "" if plano_umbral == 3.0 else f"|{plano_umbral}"  # sin cambiar el id de lo ya calculado
+    return f"{ruta_calibracion.resolve()}|{st.st_mtime_ns}|{fd}|{z_min}|{z_max}|{salto_max}{extra}"
 
 
 def cargar_reconstruccion_pose(ruta: Path) -> dict[str, np.ndarray]:
@@ -314,6 +316,7 @@ def procesar_reconstruccion(
     z_max: float = cfg.Z_MAX_MM,
     salto_max: float = cfg.SALTO_MAX_MM,
     rehacer: bool = False,
+    plano_umbral: float = cfg.PLANO_UMBRAL_MM,
 ) -> dict[str, list[Path]]:
     """Reconstruye todas las poses de las categorías indicadas.
 
@@ -330,7 +333,7 @@ def procesar_reconstruccion(
         )
     stereo_params = dict(np.load(ruta_calibracion))
     fd_usada = elegir_fase(fd, stereo_params)
-    ident = _id_reconstruccion(ruta_calibracion, fd_usada, z_min, z_max, salto_max)
+    ident = _id_reconstruccion(ruta_calibracion, fd_usada, z_min, z_max, salto_max, plano_umbral)
     print(f"[INFO] Calibración: '{ruta_calibracion}' | triangulación con: {fd_usada}"
           f"{' (auto)' if fd.lower() == 'auto' else ''}")
     for clave in ("cobertura_up", "cobertura_vp"):
@@ -384,7 +387,7 @@ def procesar_reconstruccion(
             texto = ""
             info = {"id": ident, "puntos": int(len(pts)), "fuera_de_cobertura": round(fuera, 4)}
             if categoria == "plano" and np.count_nonzero(m) > 100:
-                e_map, erms, coef = plane_fitting(x, y, z, m)
+                e_map, erms, coef = plane_fitting(x, y, z, m, umbral_mm=plano_umbral)
                 cobertura = 100.0 * np.count_nonzero(np.isfinite(e_map)) / np.count_nonzero(m)
                 texto = f" | error RMS plano = {erms:.4f} mm ({cobertura:.0f}% de los puntos)"
                 info.update(erms_mm=erms, plano_ABC=[float(c) for c in coef], fraccion_en_plano=cobertura / 100)
@@ -432,7 +435,7 @@ def main() -> None:
     parser.add_argument("--rehacer", action="store_true", help="Ignora la caché y reconstruye todo")
     args = parser.parse_args()
     procesar_reconstruccion(args.fases, args.calibracion, args.salida, args.categorias, args.fase,
-                            rehacer=args.rehacer)
+                            rehacer=args.rehacer)  # z, salto y plano: los de configuracion.py
 
 
 if __name__ == "__main__":

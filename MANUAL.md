@@ -191,7 +191,7 @@ Tesis/
 ├── instalar.sh, verificar.py, requirements.txt, instalacion/  ← instalación (§20)
 ├── interfaz/                 ← interfaz web (§19)
 ├── patterns/secuencia_completa_bmp/   f_00.bmp … f_49.bmp
-├── capturas/                 ← CRUDAS: nunca se modifican ni se borran
+├── capturas/                 ← CRUDAS: el código no las modifica; solo tú desde «Archivos» (a la papelera)
 │   └── <categoria>/<AAAAMMDD_HHMMSS>/ *_frame_XXX.tiff + captura_50_frames.avi
 ├── capturas_ordenadas/       ← DERIVADAS (se pueden borrar y regenerar)
 │   ├── manifiesto.json
@@ -428,7 +428,7 @@ cruda de `capturas/`, borra `capturas_ordenadas/` y vuelve a organizar.
 
 ---
 
-### 9.1 Configuración vigente: solo el último proceso — `sesiones.py`
+### 9.1 Configuración vigente: un solo montaje a la vez — `sesiones.py`
 
 `capturas_ordenadas/` acumula todo lo capturado: poses de montajes anteriores, pruebas sueltas,
 corridas repetidas. Con la calibración actual, las poses de otro montaje darían resultados falsos.
@@ -439,12 +439,23 @@ interfaz solo usan y muestran la configuración vigente**:
   `etapa_captura` lo registra en `procesos_captura.json`, en la carpeta de datos, junto con sus
   carpetas de `capturas/`. Las capturas anteriores a ese registro se agrupan por tiempo: una
   pausa de más de `MINUTOS_ENTRE_PROCESOS` (3 min) empieza otro proceso.
-- La **configuración vigente** empieza en el **último proceso que capturó el patrón** e incluye
-  todo lo capturado después. Así, un objeto medido mañana sin recalibrar sigue viéndose junto a
-  su calibración, pero al capturar un patrón nuevo, lo anterior desaparece de la vista y del
-  proceso.
-- Lo anterior **no se borra**: sigue en `capturas/`, `capturas_ordenadas/` y `resultados/`. Para
-  usar todo otra vez, pon `SOLO_CONFIGURACION_ACTUAL = False`.
+  Si el patrón sigue capturándose después de una pausa (menos de 2 h), es el mismo proceso.
+- Una **configuración** empieza en un proceso que capturó el patrón e incluye los procesos
+  siguientes hasta el próximo patrón. Así, un objeto medido mañana sin recalibrar sigue viéndose
+  junto a su calibración.
+- La **configuración vigente** es, por defecto, **la última**. Al capturar un patrón nuevo, lo
+  anterior desaparece de la vista y del proceso.
+- **Se puede elegir otra** en la pestaña **Archivos** (*Usar esta configuración*). Si en el
+  historial hay una calibración hecha con sus poses, se pone en uso también. Lo mismo ocurre al
+  revés: al elegir una calibración en la pestaña **Calibración**, la vigente pasa a ser la
+  configuración de la que salió. La elección se guarda en `configuracion_elegida.json`, en la
+  carpeta de datos. *Volver a la última* la borra, y capturar un patrón nuevo también.
+- Calibrar con la etapa *Calibración* usa solo las poses del patrón de la configuración vigente.
+  Por eso, después de un proceso completo (patrón + plano + objeto), basta marcar *Calibración*
+  para calibrar solo con ese proceso.
+- Lo anterior **no se borra**: sigue en `capturas/`, `capturas_ordenadas/` y `resultados/`, y se
+  ve en la pestaña *Archivos*, donde se puede mover a la papelera (§19.2). Para usar todo otra
+  vez, pon `SOLO_CONFIGURACION_ACTUAL = False`.
 - El pipeline la indica al empezar:
   `Configuración vigente desde 2026-11-24 13:02 (patron 8, plano 3, objeto 1; se ignoran 9 proceso(s) anteriores)`.
   La interfaz la muestra en la tarjeta *Poses*.
@@ -966,7 +977,9 @@ corresponde. Cada subsección es una tabla de **síntoma → causa probable → 
 |---|---|---|
 | `No existe la calibración …` | Falta `calibraciones/Estereo_TSC_0_2.npz` | §20.5 |
 | `% de los puntos fuera del rango calibrado` | El objeto está en una zona del proyector que la calibración no cubrió | Recalibra con más cobertura (§16.6) |
-| No aparecen poses que capturé antes | Son de un proceso anterior al último con patrón (§9.1) | Es intencional. Para verlas: `SOLO_CONFIGURACION_ACTUAL = False` |
+| No aparecen poses que capturé antes | Son de otra configuración (§9.1) | Están en la pestaña *Archivos*; ahí se puede elegir esa configuración. Para ver todo a la vez: `SOLO_CONFIGURACION_ACTUAL = False` |
+| Cambié un ajuste y no veo diferencia | La ejecución no incluyó las etapas afectadas | Las máscaras y el suavizado requieren *Fase envuelta*/*desenvuelta* y *Reconstrucción*; los filtros de Z, solo *Reconstrucción* |
+| Borré algo por error | — | Muévelo de vuelta desde `papelera/<fecha>/` a la misma ruta (antes de vaciarla) y ejecuta *Organizar* si era una captura |
 | Planos curvos en todas las poses (≈1.5 mm) justo después de recalibrar | La calibración mezcló poses de dos montajes | §16.6, primera fila |
 | Los planos antiguos salen curvos con la calibración nueva | Se capturaron con el montaje anterior | Pon en uso la calibración de entonces (pestaña **Calibración**, §20.5), reconstruye y vuelve a la actual |
 | Error de planitud en forma de cuenco (±1–2 mm en las esquinas) | Calibración con pocas poses, poca inclinación o poca cobertura | 10–15 poses con ±20–30°; confirma que la superficie sea realmente plana |
@@ -1120,7 +1133,8 @@ está escrito en WebGL puro, así que funciona sin internet.
      descripción breve y una etiqueta: *hardware* si necesita el montaje, *opcional* para la
      calibración, *ocasional* para la generación de patrones. Durante la ejecución se resalta la
      etapa en curso.
-  3. **Opciones.** Triangulación, calibración usada y *Recalcular todo* (`REHACER`).
+  3. **Opciones.** *Recalcular todo* (`REHACER`). Triangulación, calibración, máscaras y filtros
+     están en **Ajustes** (⚙).
 
   Ejemplo de una sesión completa en un solo paso: activa las tres categorías (patrón × 12,
   plano × 3, objeto × 1) y marca todas las etapas de *Captura* a *Reconstrucción*.
@@ -1147,7 +1161,16 @@ cuando **Seguir la última** está activo:
    - **Sin actividad:** el botón **Ver cámara** abre la vista previa sin capturar nada, para
      encuadrar, enfocar o ajustar la exposición. Se cierra con *Cerrar vista previa*. En modo
      demo muestra la captura elegida.
-2. **Imágenes.** Las imágenes capturadas de la pose: franjas V y H, primer bit Gray y textura.
+2. **Imágenes.** Las 50 imágenes del ciclo de la pose, en carpetas:
+   - franjas verticales (18 pasos, con su desfase);
+   - franjas horizontales (18);
+   - código Gray vertical (6 bits);
+   - código Gray horizontal (6);
+   - negro y blanco (2). Hay uno de cada uno por ciclo; `organizar` los copia en `H/` y en `V/`
+     (`P18_F24` y `F25`) para que cada orientación quede completa como en `savePatterns.m`.
+
+   Un clic en una carpeta muestra todas sus miniaturas. Un clic en una miniatura la abre a
+   pantalla completa, donde se pasa de una a otra con ← →, y `Esc` cierra.
 3. **Fase envuelta.** φ de X e Y en [−π, π] y la modulación γ de cada una.
 4. **Fase desenvuelta.** Fx y Fy, el orden de franja k del código Gray y el mapa de píxeles
    válidos.
@@ -1176,6 +1199,50 @@ Si el error estéreo de la calibración es muy alto, el chip de calibración de 
 el ícono de la pestaña se ponen en rojo, y la pestaña explica qué hacer (§16.6). Para ver también
 las poses no usadas, la calibración tiene que haberse hecho con esta versión.
 
+**Archivos** (pestaña aparte). Navegador de todo lo capturado, agrupado por **configuración**
+(desde cada patrón, §9.1) y por **proceso**. Cada captura muestra su categoría, hora, carpeta y
+las poses que salieron de ella, con cuatro puntos: organizada · fase envuelta · fase desenvuelta
+· reconstruida.
+- **Ver** abre las imágenes crudas de la captura (las 50 o más que guardó la cámara), con el mismo
+  visor.
+- **Usar esta configuración** la pone en uso, junto con su calibración si existe. **Volver a la
+  última** regresa a la más reciente.
+- **Borrar:** marca capturas, un proceso o una configuración entera (*Seleccionar todo*) y pulsa
+  **Mover a la papelera**. Se mueve la captura cruda y todo lo que depende de ella: poses
+  organizadas, fases y reconstrucciones. También se quitan sus entradas del manifiesto, del
+  resumen y del registro.
+  - Antes de borrar se pide confirmación, con un aviso si hay poses del patrón usadas por la
+    calibración en uso o capturas de la configuración vigente.
+  - Lo borrado va a `papelera/<fecha>/` en la carpeta de datos, con las mismas rutas, y se
+    restaura moviéndolo de vuelta. **Vaciar papelera** lo elimina definitivamente.
+  - Los números de pose borrados no se reutilizan (`ultimo_indice` en el manifiesto), así que
+    una calibración nunca apunta a una pose distinta de la que usó.
+
+**Ajustes** (botón ⚙ de la barra superior). Un punto naranja indica que hay valores distintos de
+los de `configuracion.py`. Se guardan en el navegador y se envían con cada ejecución; el registro
+lo indica con `[AJUSTES] Distintos de configuracion.py: …`.
+
+| Ajuste | Variable | Por defecto | Desactivado = |
+|---|---|---|---|
+| Tema | — | automático | claro u oscuro fijo |
+| Suavizado de la fase (σ) | `SUAVIZADO_FASE_PX` | 1.5 px | fase sin suavizar |
+| Máscara de modulación X | `GAMMA_TH` | γ ≥ 0.15 | todos los píxeles |
+| Máscara de modulación Y | `GAMMA_TH_Y` | γ ≥ 0.03 | todos los píxeles |
+| Máscara de intensidad | `UMBRAL_INTENSIDAD` | > 25 | también los oscuros |
+| Recorte del borde | `BORDE_MASCARA` | 15 px | sin recorte |
+| Filtro de mediana del orden de franja | `MED_FILT` | 5 | sin filtro |
+| Orden de los bits Gray | `ORDEN_BITS_GRAY` | automático | (LSB / MSB fijo) |
+| Fase para triangular | `FASE_TRIANGULACION` | auto | (Fy / Fx / ambas) |
+| Filtro de saltos en Z | `SALTO_MAX_MM` | 5 mm | sin filtro |
+| Rango de Z válido | `Z_MIN_MM`, `Z_MAX_MM` | 100–1500 mm | sin límite |
+| Tolerancia del plano (RANSAC) | `PLANO_UMBRAL_MM` | 3 mm | — |
+| Calibración / poses del patrón | `CALIBRACION`, `CALIBRACION_POSES` | independiente / última sesión | — |
+
+Cada fase guarda con qué parámetros se calculó (`firma` en el `.npz`), y la reconstrucción guarda
+los suyos en su id. Al cambiar un ajuste, la próxima ejecución recalcula solo lo afectado; al
+volver al valor anterior, recalcula otra vez. Ejemplo con los planos 17–19: sin suavizado ni
+máscara X, 0.78 mm de planitud; con los valores por defecto, 0.62 mm.
+
 **Idioma.** El selector **ES | EN** de la barra superior cambia toda la interfaz entre español e
 inglés al instante, sin perder lo que estás viendo. La elección se recuerda en el navegador; por
 defecto está en español. El **registro del proceso** sigue en español porque es la salida directa
@@ -1191,7 +1258,7 @@ proceso.
 
 Enlace directo a una pose y un paso: `http://127.0.0.1:8000/#paso=desenvuelta&cat=plano&pose=pose_03`
 (pasos: `camara`, `captura` (imágenes), `envuelta`, `desenvuelta`, `profundidad`, `nube`,
-`calibracion`).
+`archivos`, `calibracion`).
 
 ### 19.3 Vista previa para encuadrar el objeto
 
@@ -1264,10 +1331,15 @@ API, por si se quiere automatizar algo:
 | `POST /api/detener` | Detiene el proceso |
 | `POST /api/entrada` | `{"texto": ""}` = Enter, `{"texto": "q"}` = terminar |
 | `GET /api/eventos` | Flujo SSE: `log`, `estado`, `vivo`, `cambio` |
-| `GET /api/imagen?cat=&pose=&tipo=` | Imagen de un paso. `tipo`: `franja_V`, `franja_H`, `gray_V`, `textura`, `phiX`, `phiY`, `qX`, `qY`, `Fx`, `Fy`, `kX`, `kY`, `mascara`, `Z`, `error` |
+| `GET /api/imagen?cat=&pose=&tipo=` | Imagen de un paso. `tipo`: `img_V_03` (cualquier imagen organizada: orientación e índice 0–25), `franja_V`, `franja_H`, `gray_V`, `textura`, `phiX`, `phiY`, `qX`, `qY`, `Fx`, `Fy`, `kX`, `kY`, `mascara`, `Z`, `error` |
 | `GET /api/nube?cat=&pose=&max=` | Nube binaria: `uint32 N`, `float32 xyz·N`, `uint8 gris·N` |
 | `GET /api/vivo.jpg` | Último frame de la cámara |
-| `GET /api/calibraciones` | Calibraciones del historial y cuál está en uso |
+| `GET /api/calibraciones` | Calibraciones del historial, cuál está en uso, sus poses de origen y su proceso |
+| `GET /api/archivos` | Capturas por proceso y configuración, configuración vigente y papelera |
+| `POST /api/archivos/borrar` | `{"carpetas": ["patron/2026…", …]}`: a la papelera, con todo lo derivado |
+| `POST /api/archivos/vaciar_papelera` | Borra definitivamente la papelera |
+| `POST /api/configuracion/elegir` | `{"proceso": "<id>" | null}`: configuración vigente (null = la última) y su calibración |
+| `GET /api/captura/lista?carpeta=` · `GET /api/captura/imagen?carpeta=&i=&ancho=` | Imágenes crudas de una captura |
 | `POST /api/calibraciones/activar` | `{"id": "<fecha>"}`: pone en uso esa calibración (no durante una ejecución) |
 | `GET /api/calibracion?variante=` | Errores de reproyección por pose con la calibración en uso (`independiente` o `conjunta`), con los vectores de error |
 

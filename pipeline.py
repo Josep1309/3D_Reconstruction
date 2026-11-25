@@ -211,7 +211,8 @@ def etapa_fase_absoluta() -> None:
 def etapa_calibracion() -> None:
     import calibracion_estereo as ce
 
-    ce.ejecutar_calibracion_estereo(DIR_FASES, DIR_CALIBRACION, poses_calibracion=CALIBRACION_POSES)
+    ce.ejecutar_calibracion_estereo(DIR_FASES, DIR_CALIBRACION, poses_calibracion=CALIBRACION_POSES,
+                                    gamma_th=cfg.GAMMA_TH, gamma_th_y=cfg.GAMMA_TH_Y, borde=cfg.BORDE_MASCARA)
 
 
 def etapa_reconstruccion() -> None:
@@ -219,7 +220,9 @@ def etapa_reconstruccion() -> None:
 
     categorias = [c for c in CATEGORIAS if c != "patron"] or ["objeto"]
     r3d.procesar_reconstruccion(DIR_FASES, ruta_calibracion(), DIR_RECONSTRUCCION, categorias,
-                                FASE_TRIANGULACION, rehacer=REHACER)
+                                FASE_TRIANGULACION, z_min=cfg.Z_MIN_MM, z_max=cfg.Z_MAX_MM,
+                                salto_max=cfg.SALTO_MAX_MM, rehacer=REHACER,
+                                plano_umbral=cfg.PLANO_UMBRAL_MM)
 
 
 def etapa_visualizacion() -> None:
