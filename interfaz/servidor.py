@@ -37,6 +37,7 @@ import tempfile
 import threading
 import time
 import webbrowser
+import zipfile
 from functools import lru_cache
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -57,7 +58,8 @@ DIR_RECONSTRUCCION = cfg.DIR_RESULTADOS / "reconstruccion"
 DIR_CALIBRACION = cfg.DIR_CALIBRACION
 ARCHIVO_VIVO = cfg.DIR_RESULTADOS / ".vivo" / "frame.jpg"
 RE_POSE = re.compile(r"^pose_\d+$")
-PROMPTS = ("presiona Enter", "(q = terminar)", "¿Es plano (p), objeto (o)")
+RE_MARCA = re.compile(r"@@(vivo) (\d+) (\d+)|@@(previa) ([\d.]+)")
+PROMPTS = ("presiona Enter", "(q = terminar)", "¿Es plano (p), objeto (o)", "pulsa Enter para cerrar")
 
 
 # ==============================================================================
@@ -109,6 +111,7 @@ class Ejecucion:
         self.proc: subprocess.Popen | None = None
         self.etapa: str | None = None
         self.esperando = False
+        self.pregunta = ""
         self.inicio: float | None = None
         self.ultimo_codigo: int | None = None
         self.lock = threading.Lock()
@@ -120,6 +123,7 @@ class Ejecucion:
     def estado(self) -> dict:
         return {
             "ejecutando": self.activa, "etapa": self.etapa, "esperando": self.esperando,
+            "pregunta": self.pregunta if self.esperando else "",
             "codigo": self.ultimo_codigo,
             "segundos": round(time.time() - self.inicio, 1) if self.inicio and self.activa else None,
         }
@@ -144,9 +148,15 @@ class Ejecucion:
         threading.Thread(target=self._leer_salida, args=(self.proc, ruta), daemon=True).start()
 
     def _linea(self, linea: str) -> None:
-        if linea.startswith("@@vivo"):
-            _, i, n = linea.split()
-            difusor.emitir("vivo", {"i": int(i), "n": int(n)})
+        # Mensajes internos de la vista en vivo: se extraen aunque otro hilo los haya pegado a
+        # una línea del registro
+        for m in RE_MARCA.finditer(linea):
+            if m.group(1):
+                difusor.emitir("vivo", {"i": int(m.group(2)), "n": int(m.group(3))})
+            else:
+                difusor.emitir("vivo", {"previa": True, "saturacion": float(m.group(5))})
+        linea = RE_MARCA.sub("", linea)
+        if not linea.strip():
             return
         m = re.match(r"# ETAPA: (\w+)", linea)
         if m:
@@ -171,6 +181,7 @@ class Ejecucion:
             # Las preguntas de input() no terminan en salto de línea
             if pendiente and any(p in pendiente for p in PROMPTS):
                 difusor.emitir("log", {"texto": pendiente})
+                self.pregunta = pendiente.strip()
                 pendiente = ""
                 self.esperando = True
                 self._emitir_estado()
@@ -227,12 +238,16 @@ def _archivos_pose(cat: str, pose: str) -> dict[str, Path]:
 
 
 def listar_poses(cat: str) -> list[str]:
+    """Poses de la categoría en la configuración vigente del montaje (sesiones.py)."""
+    import sesiones
+
+    vigentes = sesiones.poses_vigentes(cat)
     nombres = set()
     for carpeta in (cfg.DIR_ORDENADAS / cat, DIR_FASES / cat):
         if carpeta.is_dir():
             for p in carpeta.iterdir():
                 nombre = p.name.split("_relativa")[0].removesuffix(".npz").removesuffix(".png")
-                if RE_POSE.match(nombre):
+                if RE_POSE.match(nombre) and (vigentes is None or nombre in vigentes):
                     nombres.add(nombre)
     return sorted(nombres, key=lambda n: int(n[5:]))
 
@@ -270,14 +285,79 @@ def resumen_calibracion() -> dict | None:
     return {k: info.get(k) for k in claves}
 
 
+_cache_errores: dict = {}
+_lock_errores = threading.Lock()
+
+
+def errores_calibracion(variante: str = "independiente") -> dict:
+    """Errores de reproyección por pose del patrón con la calibración en uso.
+
+    Se evalúan TODAS las poses con círculos detectados en la última calibración (también las que
+    no entraron), para ver si las de otra sesión son coherentes con el montaje actual. Se recalcula
+    sólo cuando cambia la calibración o las correspondencias.
+    """
+    import calibracion_estereo as ce
+
+    nombre = "Estereo_TSC_0_2_J.npz" if variante == "conjunta" else "Estereo_TSC_0_2.npz"
+    ruta_cal = DIR_CALIBRACION / nombre
+    ruta_json = DIR_CALIBRACION / "Estereo_TSC_0_2.json"
+    ruta_corr = cfg.DIR_RESULTADOS / "calibracion" / "patron_PhasesData.npz"
+    manifiesto = cfg.DIR_ORDENADAS / "manifiesto.json"
+    if _mtime(ruta_cal) is None:
+        raise FileNotFoundError("no hay calibración guardada")
+    if _mtime(ruta_corr) is None:
+        raise FileNotFoundError("faltan las correspondencias del patrón: ejecuta la etapa de calibración una vez")
+    clave = (variante, cfg.SOLO_CONFIGURACION_ACTUAL, *(_mtime(r) for r in (ruta_cal, ruta_json, ruta_corr, manifiesto)))
+    with _lock_errores:
+        if clave in _cache_errores:
+            return _cache_errores[clave]
+        with np.load(ruta_cal) as d:
+            calib = {k: d[k] for k in d.files}
+        with np.load(ruta_corr) as d:
+            completo = "M_detectadas" in d.files  # formato nuevo: incluye las poses no usadas
+            poses = [str(x) for x in d["poses_detectadas" if completo else "poses"]]
+            m = d["M_detectadas" if completo else "M"]
+            mundo = d["worldPoints"]
+        try:
+            info = json.loads(ruta_json.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            info = {}
+        usadas = set(info.get("poses") or poses)
+        import sesiones
+
+        vigentes = sesiones.poses_vigentes("patron")  # solo poses del montaje actual
+        if vigentes is not None:
+            indices = [i for i, n in enumerate(poses) if n in vigentes]
+            poses, m = [poses[i] for i in indices], m[:, :, indices, :]
+        sesiones = ce.sesiones_patron()
+        errores = ce.errores_reproyeccion(calib, [m[:, :, i, 0] for i in range(len(poses))],
+                                          [m[:, :, i, 1] for i in range(len(poses))], mundo, residuos=True)
+        datos = {
+            "variante": variante,
+            "fecha": info.get("fecha"),
+            "criterio": info.get("poses_criterio", "todas"),
+            "rms": {"cam": info.get("rms_cam_px"), "proj": info.get("rms_proj_px"),
+                    "estereo": float(calib["rms_stereo"]) if "rms_stereo" in calib else info.get("rms_stereo_indep_px")},
+            "cam_wh": [int(v) for v in calib.get("cam_size_wh", (1280, 1024))],
+            "proj_wh": [int(v) for v in calib.get("proj_size_wh", (cfg.PROYECTOR_ANCHO, cfg.PROYECTOR_ALTO))],
+            "completo": completo,
+            "poses": [{"pose": n, "usada": n in usadas, **sesiones.get(n, {}), **e} for n, e in zip(poses, errores)],
+        }
+        _cache_errores.clear()
+        _cache_errores[clave] = datos
+        return datos
+
+
 def fuentes_demo() -> list[str]:
-    """Capturas existentes que puede reproducir la cámara simulada."""
+    """Capturas existentes que puede reproducir la cámara simulada (solo del montaje vigente)."""
+    import sesiones
+
     salida = []
     for cat in cfg.CATEGORIAS:
         carpeta = cfg.DIR_CAPTURAS / cat
         if carpeta.is_dir():
             salida += [str(p.relative_to(cfg.DIR_CAPTURAS)) for p in sorted(carpeta.iterdir())
-                       if p.is_dir() and not p.name.endswith("_simulada")]
+                       if p.is_dir() and not p.name.endswith("_simulada") and sesiones.captura_vigente(p)]
     return salida
 
 
@@ -433,6 +513,7 @@ def configuracion_por_defecto() -> dict:
         "captura": {"categoria": p.CAPTURA_CATEGORIA, "poses": p.CAPTURA_POSES,
                     "ciclos": p.CAPTURA_CICLOS, "esperar_enter": p.CAPTURA_ESPERAR_ENTER},
         "rehacer": p.REHACER, "fase": p.FASE_TRIANGULACION, "calibracion": p.CALIBRACION_USADA,
+        "calib_poses": p.CALIBRACION_POSES,
         "parametros": {k: getattr(cfg, k) for k in (
             "PERIODO", "N_BITS_GRAY", "GAMMA_TH", "GAMMA_TH_Y", "SUAVIZADO_FASE_PX", "UMBRAL_INTENSIDAD",
             "CAM_EXPOSICION_US", "PATRON_COLUMNAS", "PATRON_FILAS", "PATRON_DISTANCIA_MM", "Z_MIN_MM", "Z_MAX_MM")},
@@ -484,8 +565,10 @@ class Manejador(BaseHTTPRequestHandler):
             if url.path == "/api/config":
                 return self._json(configuracion_por_defecto())
             if url.path == "/api/estado":
+                import sesiones
+
                 return self._json({"ejecucion": ejecucion.estado(), "calibracion": resumen_calibracion(),
-                                   "poses": inventario()})
+                                   "poses": inventario(), "vigente": sesiones.info_vigente()})
             if url.path == "/api/eventos":
                 return self._eventos()
             if url.path == "/api/vivo.jpg":
@@ -494,6 +577,11 @@ class Manejador(BaseHTTPRequestHandler):
                 return self._enviar(200, ARCHIVO_VIVO.read_bytes(), "image/jpeg")
             if url.path == "/api/imagen":
                 return self._imagen(q)
+            if url.path == "/api/calibraciones":
+                import calibracion_estereo as ce
+                return self._json(ce.listar_calibraciones(DIR_CALIBRACION))
+            if url.path == "/api/calibracion":
+                return self._json(errores_calibracion(q.get("variante", "independiente")))
             if url.path == "/api/nube":
                 cat, pose = self._cat_pose(q)
                 datos = generar_nube(cat, pose, int(q.get("max", 400_000)))
@@ -503,7 +591,7 @@ class Manejador(BaseHTTPRequestHandler):
             return self._error(404, f"no disponible todavía: {exc}")
         except (ValueError, KeyError) as exc:
             return self._error(400, str(exc))
-        except (OSError, EOFError) as exc:  # p. ej. archivo a medio escribir
+        except (OSError, EOFError, zipfile.BadZipFile) as exc:  # p. ej. .npz a medio escribir (versión vieja)
             return self._error(503, f"reintentar: {exc}")
 
     def do_POST(self) -> None:
@@ -515,6 +603,19 @@ class Manejador(BaseHTTPRequestHandler):
             if url.path == "/api/detener":
                 ejecucion.detener()
                 return self._json({"ok": True})
+            if url.path == "/api/calibraciones/activar":
+                import calibracion_estereo as ce
+                if ejecucion.estado()["ejecutando"]:
+                    raise RuntimeError("hay un proceso en curso: espera a que termine para cambiar de calibración")
+                ident = str(self._cuerpo().get("id", ""))
+                try:
+                    with _lock_errores:
+                        elegida = ce.activar_calibracion(ident, DIR_CALIBRACION)
+                except FileNotFoundError as exc:
+                    return self._error(404, str(exc))
+                difusor.emitir("log", {"texto": f"[OK] Calibración en uso: {ident}. Las poses se "
+                                                f"reconstruirán con ella en la próxima ejecución."})
+                return self._json(elegida)
             if url.path == "/api/entrada":
                 ejecucion.entrada(str(self._cuerpo().get("texto", "")))
                 return self._json({"ok": True})

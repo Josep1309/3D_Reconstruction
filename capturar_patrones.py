@@ -15,10 +15,10 @@ Ejemplos:
 from __future__ import annotations
 
 import argparse
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
-
 from typing import Callable
 
 import cv2
@@ -27,6 +27,7 @@ import numpy as np
 import configuracion as cfg
 
 AlFrame = Callable[[int, np.ndarray], None]
+AlPrevia = Callable[[np.ndarray], None]
 
 
 class CamaraFLIR:
@@ -51,6 +52,8 @@ class CamaraFLIR:
         self.system = None
         self.cameras = None
         self.camera = None
+        self._hilo_previa: threading.Thread | None = None
+        self._previa_activa = False
 
     def __enter__(self) -> CamaraFLIR:
         ps = self.ps
@@ -65,6 +68,7 @@ class CamaraFLIR:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
+        self.detener_vista_previa()
         if self.camera is not None:
             try:
                 if self.camera.IsStreaming():
@@ -162,6 +166,61 @@ class CamaraFLIR:
         _reportar_tiempos(tiempos)
         return frames
 
+    # ------------------------------------------------------------------ vista previa
+    def iniciar_vista_previa(self, al_frame: AlPrevia, fps: float = 15.0) -> None:
+        """Adquisición continua SIN trigger mientras se encuadra el objeto (no depende del Arduino).
+
+        Cada frame se entrega a `al_frame(frame)` desde un hilo. `detener_vista_previa()` vuelve a
+        dejar la cámara con el trigger externo, lista para `capturar()`.
+        """
+        if self._hilo_previa is not None:
+            return
+        ps, cam = self.ps, self.camera
+        cam.TriggerMode.SetValue(ps.TriggerMode_Off)
+        try:  # limitar la cadencia: no hace falta más para encuadrar
+            if cam.AcquisitionFrameRateEnable.GetAccessMode() == ps.RW:
+                cam.AcquisitionFrameRateEnable.SetValue(True)
+                cam.AcquisitionFrameRate.SetValue(
+                    min(max(fps, cam.AcquisitionFrameRate.GetMin()), cam.AcquisitionFrameRate.GetMax())
+                )
+        except ps.SpinnakerException:
+            pass
+        cam.BeginAcquisition()
+        self._previa_activa = True
+
+        def bucle() -> None:
+            while self._previa_activa:
+                try:
+                    imagen = cam.GetNextImage(300)
+                except ps.SpinnakerException:
+                    continue
+                try:
+                    if not imagen.IsIncomplete():
+                        al_frame(np.array(imagen.GetNDArray(), copy=True))
+                finally:
+                    imagen.Release()
+
+        self._hilo_previa = threading.Thread(target=bucle, daemon=True)
+        self._hilo_previa.start()
+
+    def detener_vista_previa(self) -> None:
+        """Detiene la vista previa y restaura el trigger externo (y la cadencia libre)."""
+        if self._hilo_previa is None:
+            return
+        ps, cam = self.ps, self.camera
+        self._previa_activa = False
+        self._hilo_previa.join(timeout=2.0)
+        self._hilo_previa = None
+        try:
+            if cam.IsStreaming():
+                cam.EndAcquisition()
+            # Con la cadencia limitada a 15 fps se perderían triggers del Arduino (20 Hz)
+            if cam.AcquisitionFrameRateEnable.GetAccessMode() == ps.RW:
+                cam.AcquisitionFrameRateEnable.SetValue(False)
+        except ps.SpinnakerException:
+            pass
+        cam.TriggerMode.SetValue(ps.TriggerMode_On)
+
 
 def _reportar_tiempos(tiempos: list[float]) -> None:
     if len(tiempos) > 2:
@@ -207,6 +266,25 @@ class CamaraSimulada:
         _reportar_tiempos(tiempos)
         return frames
 
+    def iniciar_vista_previa(self, al_frame: AlPrevia, fps: float = 15.0) -> None:
+        self._previa_activa = True
+
+        def bucle() -> None:
+            i = self.inicio
+            while self._previa_activa:
+                time.sleep(1.0 / fps)
+                al_frame(self.frames[i % len(self.frames)])
+                i += 1
+
+        self._hilo_previa = threading.Thread(target=bucle, daemon=True)
+        self._hilo_previa.start()
+
+    def detener_vista_previa(self) -> None:
+        if getattr(self, "_hilo_previa", None) is not None:
+            self._previa_activa = False
+            self._hilo_previa.join(timeout=2.0)
+            self._hilo_previa = None
+
 
 def escribir_video(frames: list[np.ndarray], ruta: Path, fps: float = 20.0) -> bool:
     """Escribe un AVI sin pérdida (FFV1). Devuelve False si el códec no está disponible."""
@@ -248,20 +326,30 @@ def capturar_poses(
     camara: object | None = None,
     al_frame: AlFrame | None = None,
     sufijo: str = "",
+    al_previa: AlPrevia | None = None,
 ) -> list[Path]:
     """Captura `poses` secuencias de la categoría indicada, pidiendo confirmación entre poses.
 
     `camara`: objeto con `__enter__` y `capturar` (por defecto `CamaraFLIR()`; `CamaraSimulada`
     para el modo demo). `sufijo` se añade al nombre de la carpeta (p. ej. "_simulada").
+    `al_previa(frame)`: si se da, durante cada pausa la cámara transmite una vista previa
+    continua (sin trigger) para encuadrar el objeto; se detiene al confirmar la pose.
     """
     cantidad = cfg.IMAGENES_POR_CICLO * max(ciclos, 1)
     carpetas: list[Path] = []
     with (camara if camara is not None else CamaraFLIR()) as camara:
         for pose in range(poses):
             if esperar_enter:
-                resp = input(
-                    f"\n[{categoria}] Prepara la pose {pose + 1}/{poses} y presiona Enter (q = terminar): "
-                ).strip().lower()
+                previa = al_previa is not None and hasattr(camara, "iniciar_vista_previa")
+                if previa:
+                    camara.iniciar_vista_previa(al_previa)
+                try:
+                    resp = input(
+                        f"\n[{categoria}] Prepara la pose {pose + 1}/{poses} y presiona Enter (q = terminar): "
+                    ).strip().lower()
+                finally:
+                    if previa:
+                        camara.detener_vista_previa()
                 if resp == "q":
                     break
             print(f"    Capturando {cantidad} frames...", flush=True)

@@ -312,11 +312,19 @@ def mascara_valida(
 
 
 def listar_poses(directorio_categoria: Path) -> list[Path]:
-    """Carpetas `pose_XX` de una categoría organizada, en orden."""
+    """Carpetas `pose_XX` de una categoría organizada, en orden.
+
+    Solo las de la configuración vigente del montaje (`sesiones.py`), salvo que
+    `SOLO_CONFIGURACION_ACTUAL = False`.
+    """
+    import sesiones
+
     if not directorio_categoria.is_dir():
         return []
+    vigentes = sesiones.poses_vigentes(directorio_categoria.name, directorio_categoria.parent)
     return sorted(
-        p for p in directorio_categoria.iterdir() if p.is_dir() and p.name.startswith("pose_")
+        p for p in directorio_categoria.iterdir()
+        if p.is_dir() and p.name.startswith("pose_") and (vigentes is None or p.name in vigentes)
     )
 
 
@@ -557,10 +565,25 @@ def _fase_absoluta_pose(
     )
 
 
+def guardar_npz_atomico(ruta: Path, **datos) -> None:
+    """`np.savez_compressed` a un temporal y luego renombrado atómico.
+
+    Así quien lea el archivo mientras se escribe (la interfaz web) ve la versión anterior completa
+    o la nueva completa, nunca un zip a medias (`BadZipFile`).
+    """
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    tmp = ruta.with_name(ruta.name + ".tmp")  # no termina en .npz: nadie lo confunde con un resultado
+    try:
+        with open(tmp, "wb") as f:
+            np.savez_compressed(f, **datos)
+        os.replace(tmp, ruta)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def guardar_fases_pose(ruta: Path, datos: dict) -> None:
     """Guarda un diccionario de mapas en un `.npz` comprimido."""
-    ruta.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(ruta, **{k: np.asarray(v) for k, v in datos.items()})
+    guardar_npz_atomico(ruta, **{k: np.asarray(v) for k, v in datos.items()})
 
 
 def cargar_fases_pose(ruta: Path) -> dict[str, np.ndarray]:
@@ -569,8 +592,12 @@ def cargar_fases_pose(ruta: Path) -> dict[str, np.ndarray]:
 
 
 def cargar_fases_categoria(dir_fases: Path, categoria: str) -> tuple[list[str], list[dict[str, np.ndarray]]]:
-    """Carga todos los `pose_XX.npz` (fase absoluta) de una categoría."""
-    rutas = sorted((dir_fases / categoria).glob("pose_??.npz"))
+    """Carga los `pose_XX.npz` (fase absoluta) de una categoría (de la configuración vigente)."""
+    import sesiones
+
+    vigentes = sesiones.poses_vigentes(categoria)
+    rutas = [r for r in sorted((dir_fases / categoria).glob("pose_??.npz"))
+             if vigentes is None or r.stem in vigentes]
     if not rutas:
         raise FileNotFoundError(
             f"No hay fases absolutas en '{dir_fases / categoria}'. Ejecuta antes 'fase_absoluta'."

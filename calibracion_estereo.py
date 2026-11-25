@@ -250,6 +250,147 @@ def _mascara_ajuste(mascara_tablero: np.ndarray, calidad: np.ndarray, gamma_th: 
     return mascara
 
 
+# ------------------------------------------------------------------------------
+# Sesiones de captura: todas las poses de una calibración deben ser del mismo montaje
+# ------------------------------------------------------------------------------
+
+
+def sesiones_patron(dir_ordenadas: Path = cfg.DIR_ORDENADAS,
+                    horas: float = cfg.HORAS_ENTRE_SESIONES) -> dict[str, dict]:
+    """Agrupa las poses del patrón en sesiones según la hora de su captura original.
+
+    La hora sale del nombre de la carpeta de `capturas/` (AAAAMMDD_HHMMSS) que registra el
+    manifiesto. Dos capturas separadas por más de `horas` son sesiones distintas: entre ellas el
+    montaje pudo moverse. Devuelve {"pose_XX": {"fuente", "hora" (ISO), "sesion" (0, 1, ...)}}.
+    """
+    try:
+        manifiesto = json.loads((dir_ordenadas / "manifiesto.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    horas_pose: dict[str, datetime] = {}
+    fuentes: dict[str, str] = {}
+    for entrada in manifiesto.get("poses", []):
+        if entrada.get("categoria") != "patron":
+            continue
+        nombre = f"pose_{int(entrada['pose']):02d}"
+        fuente = str(entrada.get("fuente", ""))
+        fuentes[nombre] = fuente
+        for parte in reversed(Path(fuente).parts):
+            try:
+                horas_pose[nombre] = datetime.strptime(parte[:15], "%Y%m%d_%H%M%S")
+                break
+            except ValueError:
+                continue
+    salida: dict[str, dict] = {}
+    sesion, anterior = -1, None
+    for nombre, hora in sorted(horas_pose.items(), key=lambda kv: kv[1]):
+        if anterior is None or (hora - anterior).total_seconds() > horas * 3600:
+            sesion += 1
+        anterior = hora
+        salida[nombre] = {"fuente": fuentes[nombre], "hora": hora.isoformat(timespec="seconds"), "sesion": sesion}
+    return salida
+
+
+def seleccionar_poses(nombres: list[str], criterio: str | list[str], sesiones: dict[str, dict]) -> list[str]:
+    """Poses del patrón que entran a la calibración (`cfg.CALIBRACION_POSES`)."""
+    if isinstance(criterio, (list, tuple)):
+        faltan = [n for n in criterio if n not in nombres]
+        if faltan:
+            print(f"  [AVISO] Poses pedidas sin datos (se ignoran): {', '.join(faltan)}")
+        return [n for n in nombres if n in criterio]
+    if criterio == "todas":
+        return list(nombres)
+    if criterio != "ultima_sesion":
+        raise ValueError(f"CALIBRACION_POSES desconocido: {criterio!r} (usa 'ultima_sesion', 'todas' o una lista)")
+    conocidas = [sesiones[n]["sesion"] for n in nombres if n in sesiones]
+    if not conocidas:
+        return list(nombres)  # sin manifiesto no se sabe: se usan todas
+    ultima = max(conocidas)
+    return [n for n in nombres if sesiones.get(n, {}).get("sesion") == ultima]
+
+
+def _rms(residuo: np.ndarray) -> float:
+    return float(np.sqrt(np.mean(np.sum(residuo ** 2, axis=-1))))
+
+
+def _pose_estereo(obj, p_cam, p_proj, calib: dict, iteraciones: int = 15):
+    """Pose del tablero que mejor explica A LA VEZ cámara y proyector con R, T fijos.
+
+    Es el mismo criterio que minimiza `cv2.stereoCalibrate`, pero para una sola pose: Gauss-Newton
+    sobre (rvec, tvec) de la cámara, partiendo de `solvePnP` en la cámara. Devuelve los residuos
+    (n, 2) en la cámara y en el proyector.
+    """
+    ac, dc, ap, dp = calib["Ac"], calib["dist_cam"], calib["Ap"], calib["dist_proj"]
+    r_rig, _ = cv2.Rodrigues(np.asarray(calib["R"], np.float64))
+    t_rig = np.asarray(calib["T"], np.float64).reshape(3, 1)
+    _, rv, tv = cv2.solvePnP(obj, p_cam, ac, dc, flags=cv2.SOLVEPNP_ITERATIVE)
+    rv, tv = rv.astype(np.float64), tv.astype(np.float64)
+    medido = np.vstack([p_cam.reshape(-1, 2), p_proj.reshape(-1, 2)])
+    for _ in range(iteraciones):
+        pc, jc = cv2.projectPoints(obj, rv, tv, ac, dc)
+        rv_p, tv_p, dr3dr1, dr3dt1, _, _, dt3dr1, dt3dt1, _, _ = cv2.composeRT(rv, tv, r_rig, t_rig)
+        pp, jp = cv2.projectPoints(obj, rv_p, tv_p, ap, dp)
+        # Regla de la cadena: (rv_p, tv_p) dependen de (rv, tv)
+        j_proj = np.hstack([jp[:, :3] @ dr3dr1 + jp[:, 3:6] @ dt3dr1, jp[:, :3] @ dr3dt1 + jp[:, 3:6] @ dt3dt1])
+        jac = np.vstack([jc[:, :6], j_proj])
+        res = medido - np.vstack([pc.reshape(-1, 2), pp.reshape(-1, 2)])
+        paso = np.linalg.lstsq(jac, res.reshape(-1), rcond=None)[0]
+        rv += paso[:3].reshape(3, 1)
+        tv += paso[3:].reshape(3, 1)
+        if np.linalg.norm(paso) < 1e-10:
+            break
+    pc, _ = cv2.projectPoints(obj, rv, tv, ac, dc)
+    rv_p, tv_p = cv2.composeRT(rv, tv, r_rig, t_rig)[:2]
+    pp, _ = cv2.projectPoints(obj, rv_p, tv_p, ap, dp)
+    return p_cam.reshape(-1, 2) - pc.reshape(-1, 2), p_proj.reshape(-1, 2) - pp.reshape(-1, 2), tv
+
+
+def errores_reproyeccion(calib: dict, pts_cam: list[np.ndarray], pts_proj: list[np.ndarray],
+                         world_points: np.ndarray, residuos: bool = False) -> list[dict]:
+    """Errores de reproyección de cada pose con una calibración dada (usada o no al calibrar).
+
+    - `cam_px`, `proj_px`: cámara y proyector por separado (cada uno con su propia pose del
+      tablero). Miden la calidad de los intrínsecos y de las correspondencias.
+    - `estereo_cam_px`, `estereo_proj_px`, `estereo_px`: con una sola pose del tablero vista por
+      los dos y la R, T de la calibración. Es lo que importa para reconstruir: si son mucho
+      mayores que los independientes, esa pose no es coherente con la línea base (el montaje se
+      movió, o la pose tiene malas correspondencias).
+    - `delta_R_grados`, `delta_T_mm`: diferencia entre la R, T de la calibración y la que se
+      deduce sólo de esa pose.
+    Con `residuos=True` agrega los vectores de error (para graficarlos).
+    """
+    obj = world_points.astype(np.float64).reshape(-1, 1, 3)
+    r_rig = np.asarray(calib["R"], np.float64)
+    t_rig = np.asarray(calib["T"], np.float64).reshape(3)
+    salida = []
+    for pc, pp in zip(pts_cam, pts_proj):
+        pc = pc.astype(np.float64).reshape(-1, 1, 2)
+        pp = pp.astype(np.float64).reshape(-1, 1, 2)
+        _, rvc, tvc = cv2.solvePnP(obj, pc, calib["Ac"], calib["dist_cam"])
+        _, rvp, tvp = cv2.solvePnP(obj, pp, calib["Ap"], calib["dist_proj"])
+        res_c = pc.reshape(-1, 2) - cv2.projectPoints(obj, rvc, tvc, calib["Ac"], calib["dist_cam"])[0].reshape(-1, 2)
+        res_p = pp.reshape(-1, 2) - cv2.projectPoints(obj, rvp, tvp, calib["Ap"], calib["dist_proj"])[0].reshape(-1, 2)
+        rc, _ = cv2.Rodrigues(rvc)
+        rp, _ = cv2.Rodrigues(rvp)
+        r_i = rp @ rc.T
+        t_i = tvp.ravel() - r_i @ tvc.ravel()
+        est_c, est_p, tv = _pose_estereo(obj, pc, pp, calib)
+        info = {
+            "cam_px": _rms(res_c), "proj_px": _rms(res_p),
+            "estereo_cam_px": _rms(est_c), "estereo_proj_px": _rms(est_p),
+            "estereo_px": _rms(np.vstack([est_c, est_p])),
+            "delta_R_grados": float(np.degrees(np.linalg.norm(cv2.Rodrigues(r_i @ r_rig.T)[0]))),
+            "delta_T_mm": float(np.linalg.norm(t_i - t_rig)),
+            "T_pose_mm": t_i.tolist(),
+            "distancia_mm": float(np.linalg.norm(tv)),
+        }
+        if residuos:
+            info.update(puntos_cam=pc.reshape(-1, 2).round(2).tolist(), puntos_proj=pp.reshape(-1, 2).round(2).tolist(),
+                        res_cam=est_c.round(3).tolist(), res_proj=est_p.round(3).tolist())
+        salida.append(info)
+    return salida
+
+
 def ejecutar_calibracion_estereo(
     dir_fases: Path = cfg.DIR_RESULTADOS / "fases",
     dir_salida: Path = cfg.DIR_CALIBRACION,
@@ -264,9 +405,24 @@ def ejecutar_calibracion_estereo(
     gamma_th_y: float = cfg.GAMMA_TH_Y,
     guardar_mapas: bool = False,
     dir_diagnostico: Path = cfg.DIR_RESULTADOS / "calibracion",
+    poses_calibracion: str | list[str] = cfg.CALIBRACION_POSES,
 ) -> dict:
-    """Ejecuta el flujo de `Traditional_StereoCalib.m` sobre las fases del patrón de calibración."""
+    """Ejecuta el flujo de `Traditional_StereoCalib.m` sobre las fases del patrón de calibración.
+
+    Se detectan los círculos en todas las poses, pero sólo calibran las que elige
+    `poses_calibracion` (por defecto la última sesión de captura). Los errores de reproyección se
+    calculan para todas, así se ve si las poses de otra sesión son coherentes con el montaje actual.
+    """
     nombres, poses = fase.cargar_fases_categoria(dir_fases, "patron")
+    sesiones = sesiones_patron()
+    elegidas = set(seleccionar_poses(nombres, poses_calibracion, sesiones))
+    n_sesiones = len({v["sesion"] for v in sesiones.values()})
+    if n_sesiones > 1:
+        for k in sorted({v["sesion"] for v in sesiones.values()}):
+            miembros = [n for n in nombres if sesiones.get(n, {}).get("sesion") == k]
+            if miembros:
+                print(f"  Sesión {k + 1}: {sesiones[miembros[0]]['hora'][:16].replace('T', ' ')} · "
+                      f"{', '.join(miembros)}{'  <- se usa' if set(miembros) <= elegidas else ''}")
     alto_cam, ancho_cam = poses[0]["Itex"].shape
     cam_size_wh = (ancho_cam, alto_cam)
     world_points = generar_puntos_mundo_circulos(pattern_size, center_distance, pattern_type)
@@ -282,6 +438,9 @@ def ejecutar_calibracion_estereo(
     residuos: list[tuple[np.ndarray, np.ndarray]] = []
     texturas: list[np.ndarray] = []
 
+    detectados: list[str] = []
+    det_cam: list[np.ndarray] = []
+    det_proj: list[np.ndarray] = []
     for nombre, datos in zip(nombres, poses):
         itex = datos["Itex"]
         try:
@@ -320,6 +479,12 @@ def ejecutar_calibracion_estereo(
                 ajustado = evaluar_polinomio_2d_malla(coef, norm_p, ancho_cam, alto_cam)
                 res_pose.append(np.where(inliers, mapa - ajustado, np.nan).astype(np.float32))
 
+        detectados.append(nombre)
+        det_cam.append(puntos_cam)
+        det_proj.append(proyectados)
+        if nombre not in elegidas:
+            print(f"  [{nombre}] detectada, pero no entra a la calibración (otra sesión o fuera de CALIBRACION_POSES)")
+            continue
         usados.append(nombre)
         pts_cam.append(puntos_cam)
         pts_proj.append(proyectados)
@@ -335,7 +500,8 @@ def ejecutar_calibracion_estereo(
         )
 
     if len(usados) < 3:
-        raise RuntimeError(f"Solo {len(usados)} poses válidas; se necesitan al menos 3 para calibrar.")
+        raise RuntimeError(f"Solo {len(usados)} poses válidas en la selección ({poses_calibracion!r}); "
+                           f"se necesitan al menos 3 para calibrar.")
 
     obj_pts = [world_points.astype(np.float32) for _ in usados]
     cam_pts = [p.reshape(-1, 1, 2).astype(np.float32) for p in pts_cam]
@@ -369,9 +535,21 @@ def ejecutar_calibracion_estereo(
     print(f"  Error RMS Proyector (independiente): {rms_proj:.4f} px")
     print(f"  Error RMS Estéreo (fijo, TSC_0_2)  : {rms_st:.4f} px")
     print(f"  Error RMS Estéreo (conjunto, _J)   : {rms_st_j:.4f} px")
-    for nombre, ec, ep in zip(usados, err_cam, err_proj):
-        aviso = "  <-- revisar" if ec > 2 * np.median(err_cam) or ep > 2 * np.median(err_proj) else ""
-        print(f"    {nombre}: cámara {ec:.3f} px | proyector {ep:.3f} px{aviso}")
+    calib_tsc = _parametros(k_cam_1, dist_cam_1, k_proj_1, dist_proj_1, r_mat, t_vec, e_mat, f_mat)
+    por_pose = dict(zip(detectados, errores_reproyeccion(calib_tsc, det_cam, det_proj, world_points)))
+    mediana = float(np.median([por_pose[n]["estereo_px"] for n in usados]))
+    print("  Por pose (px)      cámara  proyector  estéreo   ΔR      ΔT")
+    for nombre in detectados:
+        e = por_pose[nombre]
+        marca = "" if nombre in usados else "  (no usada)"
+        if e["estereo_px"] > max(3 * mediana, 2.0):
+            marca += "  <-- no coherente con la línea base"
+        print(f"    {nombre}:        {e['cam_px']:6.3f}  {e['proj_px']:8.3f}  {e['estereo_px']:7.3f}  "
+              f"{e['delta_R_grados']:5.2f}°  {e['delta_T_mm']:5.1f} mm{marca}")
+    if rms_st > 3 * max(rms_cam, rms_proj, 0.3):
+        print(f"  [AVISO] El error estéreo ({rms_st:.2f} px) es muy superior a los independientes: las poses "
+              f"no son coherentes entre sí. Casi siempre es porque la cámara o el proyector se movieron entre "
+              f"capturas: calibra solo con poses de la misma sesión (CALIBRACION_POSES). MANUAL.md §16.6")
     print("\nMatriz Intrínseca Cámara (Ac):\n", k_cam_1)
     print("Distorsión Cámara [k1, k2, p1, p2, k3]:", dist_cam_1.ravel())
     print("\nMatriz Intrínseca Proyector (Ap):\n", k_proj_1)
@@ -401,7 +579,7 @@ def ejecutar_calibracion_estereo(
     )
     ruta_tsc = dir_salida / "Estereo_TSC_0_2.npz"
     np.savez(
-        ruta_tsc, **_parametros(k_cam_1, dist_cam_1, k_proj_1, dist_proj_1, r_mat, t_vec, e_mat, f_mat),
+        ruta_tsc, **calib_tsc,
         rms_stereo=rms_st, rvecs_cam=np.array(rvecs_cam), tvecs_cam=np.array(tvecs_cam), **comunes,
     )
     ruta_tsc_j = dir_salida / "Estereo_TSC_0_2_J.npz"
@@ -413,6 +591,8 @@ def ejecutar_calibracion_estereo(
     # Datos de correspondencias (equivalente a Estereo_PhasesData.mat). M: (n_puntos, 2, P, 2)
     m_corr = np.stack([np.stack(pts_cam, axis=-1), np.stack(pts_proj, axis=-1)], axis=-1)
     m_raw = np.stack([np.stack(pts_cam, axis=-1), np.stack(pts_proj_raw, axis=-1)], axis=-1)
+    # Todas las poses detectadas (también las no usadas), para los errores de la interfaz
+    m_todas = np.stack([np.stack(det_cam, axis=-1), np.stack(det_proj, axis=-1)], axis=-1)
     # `Maps` (RegWcordtoImage.m) solo lo usan las calibraciones híbridas de MATLAB: es opcional
     # porque son 2 mapas de imagen completa por pose (~10 MB por pose).
     extra_mapas = (
@@ -422,6 +602,7 @@ def ejecutar_calibracion_estereo(
     np.savez_compressed(
         dir_diagnostico / "patron_PhasesData.npz",
         poses=np.array(usados), M=m_corr, M_raw=m_raw, worldPoints=world_points,
+        poses_detectadas=np.array(detectados), M_detectadas=m_todas,
         Images=np.stack(texturas, axis=-1), **extra_mapas,
     )
 
@@ -437,8 +618,10 @@ def ejecutar_calibracion_estereo(
         "rms_proj_px": float(rms_proj),
         "rms_stereo_indep_px": float(rms_st),
         "rms_stereo_joint_px": float(rms_st_j),
+        "poses_criterio": poses_calibracion,
         "error_por_pose_cam_px": dict(zip(usados, map(float, err_cam))),
         "error_por_pose_proj_px": dict(zip(usados, map(float, err_proj))),
+        "errores_por_pose": {n: {**por_pose[n], "usada": n in usados, **sesiones.get(n, {})} for n in detectados},
         "Ac": k_cam_1.tolist(),
         "dist_cam": dist_cam_1.ravel().tolist(),
         "Ap": k_proj_1.tolist(),
@@ -464,6 +647,72 @@ def ejecutar_calibracion_estereo(
     print("     Para volver a una calibración anterior, copia sus 3 archivos desde historial/ a "
           f"'{dir_salida}'. Recuerda hacer commit de calibraciones/ para que viaje con el código.")
     return resumen
+
+
+# ------------------------------------------------------------------------------
+# Historial: elegir qué calibración usar
+# ------------------------------------------------------------------------------
+
+ARCHIVOS_CALIBRACION = ("Estereo_TSC_0_2.npz", "Estereo_TSC_0_2_J.npz", "Estereo_TSC_0_2.json")
+
+
+def listar_calibraciones(dir_calibracion: Path = cfg.DIR_CALIBRACION) -> list[dict]:
+    """Calibraciones de `historial/` (la más reciente primero), marcando la que está en uso.
+
+    La calibración en uso es la de `dir_calibracion/`; cada recalibración deja además una copia en
+    `historial/<fecha>/`, así que la vigente se reconoce comparando el contenido de los archivos.
+    """
+    activa = dir_calibracion / "Estereo_TSC_0_2.npz"
+    contenido_activo = activa.read_bytes() if activa.exists() else None
+    salida = []
+    carpetas = sorted((dir_calibracion / "historial").glob("*/"), reverse=True)
+    for carpeta in carpetas:
+        if not (carpeta / "Estereo_TSC_0_2.npz").exists():
+            continue
+        try:
+            info = json.loads((carpeta / "Estereo_TSC_0_2.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            info = {}
+        salida.append({
+            "id": carpeta.name,
+            "fecha": info.get("fecha"),
+            "poses": info.get("poses", []),
+            "criterio": info.get("poses_criterio", "todas"),
+            "rms_cam_px": info.get("rms_cam_px"),
+            "rms_proj_px": info.get("rms_proj_px"),
+            "rms_stereo_px": info.get("rms_stereo_indep_px"),
+            "linea_base_mm": info.get("linea_base_mm"),
+            "activa": contenido_activo is not None and (carpeta / "Estereo_TSC_0_2.npz").read_bytes() == contenido_activo,
+        })
+    return salida
+
+
+def activar_calibracion(ident: str, dir_calibracion: Path = cfg.DIR_CALIBRACION) -> dict:
+    """Pone en uso la calibración `historial/<ident>/` (copia sus 3 archivos a `dir_calibracion/`).
+
+    Si la calibración en uso no está en el historial (p. ej. copiada a mano), antes se respalda en
+    `historial/<fecha>_respaldo/` para no perderla. La reconstrucción detecta el cambio (su caché
+    depende de la fecha del archivo) y recalcula las poses en la siguiente ejecución.
+    """
+    origen = dir_calibracion / "historial" / ident
+    if "/" in ident or ident.startswith(".") or not (origen / "Estereo_TSC_0_2.npz").exists():
+        raise FileNotFoundError(f"No existe la calibración '{ident}' en {dir_calibracion / 'historial'}")
+    lista = listar_calibraciones(dir_calibracion)
+    if (dir_calibracion / "Estereo_TSC_0_2.npz").exists() and not any(c["activa"] for c in lista):
+        respaldo = dir_calibracion / "historial" / (datetime.now().strftime("%Y%m%d_%H%M%S") + "_respaldo")
+        respaldo.mkdir(parents=True, exist_ok=True)
+        for nombre in ARCHIVOS_CALIBRACION:
+            if (dir_calibracion / nombre).exists():
+                shutil.copy2(dir_calibracion / nombre, respaldo / nombre)
+        print(f"[OK] La calibración en uso no estaba en el historial: respaldada en {respaldo}")
+    for nombre in ARCHIVOS_CALIBRACION:
+        if (origen / nombre).exists():
+            # copyfile (no copy2): fecha nueva, para que la caché de la reconstrucción la vea cambiar
+            tmp = dir_calibracion / (nombre + ".tmp")
+            shutil.copyfile(origen / nombre, tmp)
+            tmp.replace(dir_calibracion / nombre)
+    print(f"[OK] Calibración en uso: {ident}")
+    return next(c for c in listar_calibraciones(dir_calibracion) if c["id"] == ident)
 
 
 def _parametros(k_cam, dist_cam, k_proj, dist_proj, r_mat, t_vec, e_mat, f_mat) -> dict:
@@ -538,8 +787,22 @@ def main() -> None:
                         help="Distancia entre centros en mm: un valor, o dos (entre columnas, entre filas)")
     parser.add_argument("--mapas", action="store_true",
                         help="Guarda también los mapas RegWcordtoImage (para las calibraciones híbridas)")
+    parser.add_argument("--poses", nargs="+", default=None,
+                        help="Poses a usar: 'ultima_sesion' (defecto), 'todas' o nombres como pose_08 pose_09 ...")
+    parser.add_argument("--listar", action="store_true", help="Lista las calibraciones del historial y sale")
+    parser.add_argument("--activar", metavar="FECHA",
+                        help="Pone en uso la calibración historial/FECHA (p. ej. 20261124_122125) y sale")
     parser.add_argument("--tipo-patron", default=cfg.PATRON_TIPO, choices=["symmetric", "asymmetric"])
     args = parser.parse_args()
+    if args.listar:
+        for c in listar_calibraciones(args.salida):
+            print(f"  {'*' if c['activa'] else ' '} {c['id']}  {len(c['poses']):2d} poses  "
+                  f"estéreo {c['rms_stereo_px'] or float('nan'):6.3f} px  ({c['criterio']})")
+        print("  (* = en uso; para cambiarla: --activar FECHA)")
+        return
+    if args.activar:
+        activar_calibracion(args.activar, args.salida)
+        return
 
     ejecutar_calibracion_estereo(
         dir_fases=args.fases,
@@ -549,6 +812,9 @@ def main() -> None:
                          else args.distancia[0] if len(args.distancia) == 1 else tuple(args.distancia[:2])),
         pattern_type=args.tipo_patron,
         guardar_mapas=args.mapas,
+        poses_calibracion=(cfg.CALIBRACION_POSES if not args.poses
+                           else args.poses[0] if len(args.poses) == 1 and not args.poses[0].startswith("pose_")
+                           else args.poses),
     )
 
 

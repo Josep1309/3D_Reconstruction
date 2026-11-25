@@ -28,7 +28,9 @@ de `Matlab_Codes/Codes/`, que son solo referencia y no se ejecutan. El manual co
   documéntalo en la tabla de su etapa.
 - No hay tests automáticos. La verificación se hace corriendo el pipeline sobre las capturas
   existentes y mirando:
-  - el error de planitud de `plano`, que hoy da ≈ 0.50 mm de media
+  - el error de planitud de `plano`, que da ≈ 0.5 mm con la calibración de la misma sesión
+    (planos `pose_08`–`15` del 24-nov: 0.45–0.79 mm; los `00`–`07` son del montaje del 30-oct y
+    dan ~1.3 mm con la calibración actual)
     (`resultados/reconstruccion/plano/plano_resumen.json`);
   - las figuras de `resultados/`.
 - Para correr sin ventanas: `matplotlib.use("Agg")` y `visualizar_pose(..., mostrar=False)`.
@@ -54,9 +56,19 @@ Las etapas corren en un orden fijo desde `pipeline.py` (`ETAPAS`):
 - La **calibración es opcional**: con `calibracion = False` la reconstrucción usa
   `calibraciones/Estereo_TSC_0_2.npz` (`cfg.DIR_CALIBRACION`), y `pipeline.main()` verifica que
   exista antes de empezar.
-  - `calibraciones/` está **versionada**: viaja con el código. Cada recalibración copia a
-    `calibraciones/historial/<fecha>/`.
+  - Solo calibran poses del **mismo montaje**: `CALIBRACION_POSES = "ultima_sesion"` (sesiones
+    = capturas separadas por > 2 h). Mezclar sesiones del 30-oct y 24-nov dio 12.8 px de RMS estéreo
+    y planos curvos (1.5 mm). Los errores por pose independientes no lo delatan, el estéreo sí
+    (`errores_reproyeccion`, pestaña Calibración de la interfaz).
+  - `calibraciones/` está **versionada**: viaja con el código. Cada recalibración queda en uso y
+    copia a `calibraciones/historial/<fecha>/`. Para usar otra:
+    `calibracion_estereo.py --listar` / `--activar <fecha>`, o la pestaña Calibración de la
+    interfaz (`POST /api/calibraciones/activar`).
   - Los diagnósticos pesados van a `resultados/calibracion/`. Las fases de `patron` solo se calculan si se calibra.
+- **Solo la configuración vigente** (`sesiones.py`, `SOLO_CONFIGURACION_ACTUAL = True`):
+  `fase.listar_poses`, `fase.cargar_fases_categoria`, la reconstrucción y la interfaz filtran a
+  las poses desde el último proceso de captura con patrón. `etapa_captura` registra cada proceso
+  en `<DATOS>/procesos_captura.json`; sin registro, una pausa > 3 min separa procesos.
 - **Caché en todas las etapas de proceso:**
   - las de fase omiten las poses cuyo `.npz` es más reciente que sus imágenes
     (`fase._actualizado`);

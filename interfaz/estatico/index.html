@@ -67,7 +67,7 @@
     </section>
 
     <section id="pausa" class="tarjeta pausa oculto" role="alert">
-      <p><b data-i18n="pausa_titulo">La captura está en pausa.</b><br><span data-i18n="pausa_texto">Prepara la pose y continúa.</span></p>
+      <p><b data-i18n="pausa_titulo">La captura está en pausa.</b> <span id="pausa-pose" class="pausa-pose"></span><br><span data-i18n="pausa_texto">Prepara la pose y continúa.</span></p>
       <div class="botones">
         <button id="b-continuar" class="primario" data-i18n="continuar">Continuar ⏎</button>
         <button id="b-terminar" data-i18n="terminar">Terminar (q)</button>
@@ -76,18 +76,41 @@
 
     <details class="tarjeta" id="avanzado">
       <summary><h2 data-i18n="proceso">Proceso por etapas</h2></summary>
+      <h3 class="subtitulo primero"><span data-i18n="plan_titulo">Categorías y poses</span>
+        <button type="button" class="ayuda" data-i18n-ayuda="ayuda_plan" data-i18n-etiqueta="plan_titulo">?</button></h3>
+      <div class="plan" id="plan">
+        <div class="plan-fila">
+          <label class="casilla"><input type="checkbox" name="cat" value="patron"> <span data-i18n="plan_patron">Patrón (calibración)</span></label>
+          <input type="number" class="plan-poses" data-cat="patron" min="1" max="60" value="12" data-i18n-aria="poses">
+          <span class="plan-unidad" data-i18n="poses_min">poses</span>
+        </div>
+        <div class="plan-fila">
+          <label class="casilla"><input type="checkbox" name="cat" value="plano" checked> <span data-i18n="plan_plano">Plano de referencia</span></label>
+          <input type="number" class="plan-poses" data-cat="plano" min="1" max="60" value="1" data-i18n-aria="poses">
+          <span class="plan-unidad" data-i18n="poses_min">poses</span>
+        </div>
+        <div class="plan-fila">
+          <label class="casilla"><input type="checkbox" name="cat" value="objeto" checked> <span data-i18n="plan_objeto">Objeto</span></label>
+          <input type="number" class="plan-poses" data-cat="objeto" min="1" max="60" value="1" data-i18n-aria="poses">
+          <span class="plan-unidad" data-i18n="poses_min">poses</span>
+        </div>
+      </div>
+      <div class="campos">
+        <div class="campo">
+          <span class="etiqueta"><label for="a-ciclos" data-i18n="ciclos">Ciclos</label>
+            <button type="button" class="ayuda" data-i18n-ayuda="ayuda_ciclos" data-i18n-etiqueta="ciclos">?</button></span>
+          <input id="a-ciclos" type="number" min="1" max="8" value="1">
+        </div>
+      </div>
+      <div class="fila-casilla">
+        <label class="casilla"><input id="a-pausa" type="checkbox" checked> <span data-i18n="pausa">Pausa antes de cada pose</span></label>
+        <button type="button" class="ayuda" data-i18n-ayuda="ayuda_pausa" data-i18n-etiqueta="pausa">?</button>
+      </div>
+      <h3 class="subtitulo"><span data-i18n="etapas_titulo">Etapas</span></h3>
       <p class="nota" data-i18n="proceso_nota">Las etapas siempre se ejecutan en este orden. Marca las que quieras correr.</p>
       <ol id="etapas" class="secuencia"></ol>
       <h3 class="subtitulo" data-i18n="opciones">Opciones</h3>
       <div class="campos">
-        <div class="campo ancho">
-          <span class="etiqueta"><span data-i18n="cats_procesar">Categorías a procesar</span>
-            <button type="button" class="ayuda" data-i18n-ayuda="ayuda_cats" data-i18n-etiqueta="cats_procesar">?</button></span>
-          <span class="grupo">
-            <label class="casilla"><input type="checkbox" name="cat" value="plano" checked> <span data-i18n="cat_nombre_plano">plano</span></label>
-            <label class="casilla"><input type="checkbox" name="cat" value="objeto" checked> <span data-i18n="cat_nombre_objeto">objeto</span></label>
-          </span>
-        </div>
         <div class="campo">
           <span class="etiqueta"><label for="a-fase" data-i18n="triangulacion">Triangulación</label>
             <button type="button" class="ayuda" data-i18n-ayuda="ayuda_triangulacion" data-i18n-etiqueta="triangulacion">?</button></span>
@@ -95,6 +118,14 @@
             <option value="auto" data-i18n="fase_auto">auto (línea base)</option>
             <option value="Fy">Fy</option><option value="Fx">Fx</option>
             <option value="ambas" data-i18n="fase_ambas">ambas</option>
+          </select>
+        </div>
+        <div class="campo">
+          <span class="etiqueta"><label for="a-calib-poses" data-i18n="calib_poses">Poses del patrón</label>
+            <button type="button" class="ayuda" data-i18n-ayuda="ayuda_calib_poses" data-i18n-etiqueta="calib_poses">?</button></span>
+          <select id="a-calib-poses">
+            <option value="ultima_sesion" data-i18n="calib_poses_ultima">última sesión</option>
+            <option value="todas" data-i18n="calib_poses_todas">todas</option>
           </select>
         </div>
         <div class="campo">
@@ -110,6 +141,7 @@
         <label class="casilla"><input id="a-rehacer" type="checkbox"> <span data-i18n="rehacer">Recalcular todo</span></label>
         <button type="button" class="ayuda" data-i18n-ayuda="ayuda_rehacer" data-i18n-etiqueta="rehacer">?</button>
       </div>
+      <p id="a-nota" class="nota"></p>
       <button id="b-ejecutar" data-i18n="b_ejecutar">Ejecutar etapas seleccionadas</button>
     </details>
 
@@ -123,6 +155,7 @@
     <details class="tarjeta">
       <summary><h2 data-i18n="calib_titulo">Calibración</h2></summary>
       <dl id="calib-detalle" class="detalle"></dl>
+      <button id="b-ver-calib" type="button" data-i18n="ver_calib">Ver errores o cambiar de calibración</button>
     </details>
   </aside>
 
@@ -138,18 +171,44 @@
     </div>
 
     <nav class="pasos" id="pasos" role="tablist">
-      <button role="tab" data-paso="captura"><span>1</span><b data-i18n="paso_captura">Captura</b></button>
-      <button role="tab" data-paso="envuelta"><span>2</span><b data-i18n="paso_envuelta">Fase envuelta</b></button>
-      <button role="tab" data-paso="desenvuelta"><span>3</span><b data-i18n="paso_desenvuelta">Fase desenvuelta</b></button>
-      <button role="tab" data-paso="profundidad"><span>4</span><b data-i18n="paso_profundidad">Profundidad</b></button>
-      <button role="tab" data-paso="nube"><span>5</span><b data-i18n="paso_nube">Nube de puntos</b></button>
+      <button role="tab" data-paso="camara"><span>1</span><b data-i18n="paso_camara">Cámara</b></button>
+      <button role="tab" data-paso="captura"><span>2</span><b data-i18n="paso_captura">Imágenes</b></button>
+      <button role="tab" data-paso="envuelta"><span>3</span><b data-i18n="paso_envuelta">Fase envuelta</b></button>
+      <button role="tab" data-paso="desenvuelta"><span>4</span><b data-i18n="paso_desenvuelta">Fase desenvuelta</b></button>
+      <button role="tab" data-paso="profundidad"><span>5</span><b data-i18n="paso_profundidad">Profundidad</b></button>
+      <button role="tab" data-paso="nube"><span>6</span><b data-i18n="paso_nube">Nube de puntos</b></button>
+      <button role="tab" data-paso="calibracion" class="paso-aparte"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Zm0 2.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z"/></svg><b data-i18n="paso_calibracion">Calibración</b></button>
     </nav>
 
-    <section class="panel" data-panel="captura">
-      <div class="vivo oculto" id="vivo">
-        <img id="vivo-img" data-i18n-alt="vivo_alt" alt="Vista en vivo de la cámara">
-        <div class="vivo-barra"><span id="vivo-texto">Esperando frames…</span><progress id="vivo-progreso" max="50" value="0"></progress></div>
+    <section class="panel" data-panel="camara">
+      <div class="camara-inactiva" id="camara-inactiva">
+        <p data-i18n="camara_inactiva">La cámara no está activa. Se muestra sola al capturar, o ábrela ahora para encuadrar y revisar el enfoque o la exposición.</p>
+        <div class="fila-casilla">
+          <button id="b-previa" class="primario" data-i18n="ver_camara">Ver cámara</button>
+          <button type="button" class="ayuda" data-i18n-ayuda="ayuda_ver_camara" data-i18n-etiqueta="ver_camara">?</button>
+        </div>
       </div>
+      <div class="vivo oculto" id="vivo">
+        <div class="vivo-marco">
+          <img id="vivo-img" data-i18n-alt="vivo_alt" alt="Vista en vivo de la cámara">
+          <div class="reticula" aria-hidden="true"></div>
+        </div>
+        <div class="vivo-barra">
+          <span id="vivo-texto">Esperando frames…</span>
+          <progress id="vivo-progreso" max="50" value="0"></progress>
+          <label class="casilla"><input id="v-reticula" type="checkbox" checked> <span data-i18n="reticula">Retícula</span></label>
+        </div>
+        <div class="vivo-acciones">
+          <span id="vivo-pausa" class="botones oculto">
+            <button id="b-continuar2" class="primario" data-i18n="continuar">Continuar ⏎</button>
+            <button id="b-terminar2" data-i18n="terminar">Terminar (q)</button>
+          </span>
+          <button id="b-cerrar-previa" class="oculto" data-i18n="cerrar_previa">Cerrar vista previa</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" data-panel="captura">
       <div class="rejilla">
         <figure data-tipo="franja_V"><figcaption><span data-i18n="fig_franja_V">Franjas verticales (paso 0)</span></figcaption></figure>
         <figure data-tipo="franja_H"><figcaption><span data-i18n="fig_franja_H">Franjas horizontales (paso 0)</span></figcaption></figure>
@@ -202,6 +261,35 @@
       </div>
     </section>
 
+    <section class="panel" data-panel="calibracion">
+      <p class="explica" data-i18n="explica_calib">Error de reproyección de cada pose del tablero con la calibración en uso: cuántos píxeles separan los círculos medidos de los que predice el modelo. «Cámara» y «proyector» evalúan cada uno por separado; «estéreo» usa una sola pose del tablero vista por los dos a través de la línea base R, T, y es el que importa para reconstruir. Si el estéreo es mucho mayor que los otros dos, esa pose no es coherente con el montaje (casi siempre porque la cámara o el proyector se movieron).</p>
+      <div class="ec-elegir">
+        <span class="etiqueta"><label for="ec-elegir" data-i18n="ec_en_uso">Calibración en uso</label>
+          <button type="button" class="ayuda" data-i18n-ayuda="ayuda_ec_elegir" data-i18n-etiqueta="ec_en_uso">?</button></span>
+        <select id="ec-elegir"></select>
+        <button id="ec-usar" class="primario" data-i18n="ec_usar">Usar esta calibración</button>
+      </div>
+      <div id="ec-resumen" class="ec-resumen"></div>
+      <p id="ec-aviso" class="ec-aviso oculto" role="alert"></p>
+      <figure class="ec-figura">
+        <figcaption>
+          <span data-i18n="ec_barras">Error RMS por pose (px)</span>
+          <span class="ec-leyenda">
+            <i class="s-cam"></i><span data-i18n="ec_cam">Cámara</span>
+            <i class="s-proj"></i><span data-i18n="ec_proj">Proyector</span>
+            <i class="s-est"></i><span data-i18n="ec_est">Estéreo</span>
+          </span>
+        </figcaption>
+        <div id="ec-barras" class="ec-barras"></div>
+      </figure>
+      <div class="ec-tabla-marco"><table id="ec-tabla" class="ec-tabla"></table></div>
+      <div class="rejilla dos">
+        <figure class="ec-figura"><figcaption><span id="ec-tit-cam"></span> <small id="ec-esc-cam"></small></figcaption><div id="ec-res-cam" class="ec-residuos"></div></figure>
+        <figure class="ec-figura"><figcaption><span id="ec-tit-proj"></span> <small id="ec-esc-proj"></small></figcaption><div id="ec-res-proj" class="ec-residuos"></div></figure>
+      </div>
+      <p class="nota" data-i18n="ec_nota_vectores">Las flechas son el error de cada círculo (medido − modelo), ampliado para que se vea. Un patrón ordenado (todas hacia un lado o en remolino) indica un error del modelo; flechas al azar, ruido de medición. En gris, los círculos de las demás poses: muestran qué parte del sensor y del proyector cubre la calibración.</p>
+    </section>
+
     <details class="registro" id="registro" open>
       <summary data-i18n="registro">Registro del proceso</summary>
       <pre id="log" aria-live="polite"></pre>
@@ -211,6 +299,7 @@
 
 <div id="burbuja" class="burbuja" role="tooltip" hidden></div>
 <script src="/estatico/nube.js"></script>
+<script src="/estatico/calibracion.js"></script>
 <script src="/estatico/app.js"></script>
 </body>
 </html>

@@ -57,6 +57,10 @@ CATEGORIAS = ["plano", "objeto"]
 # --- Captura ---
 CAPTURA_CATEGORIA = "objeto"           # "patron", "plano" u "objeto"
 CAPTURA_POSES = 1                      # poses a capturar (pide Enter antes de cada una)
+# Plan de captura de varias categorías en una misma sesión. Si se define, reemplaza a
+# CAPTURA_CATEGORIA/CAPTURA_POSES. Se captura TODO el plan antes de procesar, siempre en el orden
+# patrón -> plano -> objeto. Ejemplo: {"patron": 12, "plano": 3, "objeto": 1}
+CAPTURA_PLAN: dict[str, int] | None = None
 CAPTURA_CICLOS = cfg.CICLOS_POR_CAPTURA  # ciclos de 50 patrones por pose (se promedian)
 CAPTURA_ESPERAR_ENTER = True
 
@@ -69,6 +73,11 @@ ORGANIZAR_REHACER = False                # True = reorganiza todo desde cero
 # Las fases y la reconstrucción de cada pose se reutilizan si sus entradas no cambiaron.
 # True = recalcula fases y reconstrucción de todas las poses (p. ej. tras cambiar un umbral).
 REHACER = False
+
+# --- Calibración ---
+# Poses del patrón que entran a la calibración: "ultima_sesion", "todas" o ["pose_08", ...].
+# Todas deben ser del mismo montaje (si algo se movió entre sesiones, los planos salen curvos).
+CALIBRACION_POSES = cfg.CALIBRACION_POSES
 
 # --- Reconstrucción ---
 FASE_TRIANGULACION = cfg.FASE_TRIANGULACION  # "auto", "ambas", "Fx" o "Fy"
@@ -99,10 +108,36 @@ def etapa_lightcrafter() -> None:
     lcr.main(cfg.LCR_EXPOSICION_US, cfg.LCR_PERIODO_US, reiniciar=True, solo_leer=False)
 
 
+def plan_de_captura() -> list[tuple[str, int]]:
+    """[(categoria, poses)] en el orden de captura: patrón, plano, objeto."""
+    plan = CAPTURA_PLAN if CAPTURA_PLAN else {CAPTURA_CATEGORIA: CAPTURA_POSES}
+    desconocidas = set(plan) - set(cfg.CATEGORIAS)
+    if desconocidas:
+        raise ValueError(f"Categorías desconocidas en el plan de captura: {sorted(desconocidas)}")
+    return [(c, int(plan[c])) for c in cfg.CATEGORIAS if int(plan.get(c, 0)) > 0]
+
+
 def etapa_captura() -> None:
     import capturar_patrones as cp
 
-    cp.capturar_poses(CAPTURA_CATEGORIA, CAPTURA_POSES, CAPTURA_CICLOS, cfg.DIR_CAPTURAS, CAPTURA_ESPERAR_ENTER)
+    plan = plan_de_captura()
+    if not plan:
+        raise ValueError("El plan de captura está vacío: indica al menos una categoría con poses.")
+    if len(plan) > 1:
+        print("[INFO] Plan de captura: " + ", ".join(f"{c} × {n}" for c, n in plan)
+              + "  (con «q» se termina la categoría actual y se pasa a la siguiente)")
+    import sesiones
+
+    todas: list[Path] = []
+    try:
+        for categoria, poses in plan:
+            print(f"\n=== Captura: {categoria} ({poses} poses) ===", flush=True)
+            carpetas = cp.capturar_poses(categoria, poses, CAPTURA_CICLOS, cfg.DIR_CAPTURAS, CAPTURA_ESPERAR_ENTER)
+            todas += carpetas
+            print(f"[OK] {categoria}: {len(carpetas)} de {poses} poses capturadas.")
+    finally:
+        # Registro del proceso: define la configuración vigente (sesiones.py), aun si se interrumpe
+        sesiones.registrar_proceso(todas, plan)
 
 
 def etapa_organizar() -> None:
@@ -114,6 +149,10 @@ def etapa_organizar() -> None:
     )
     total = sum(len(v) for v in nuevas.values())
     print(f"[OK] {total} poses nuevas organizadas en '{cfg.DIR_ORDENADAS}'.")
+    import sesiones
+
+    if sesiones.resumen_texto():
+        print(f"[PIPELINE] {sesiones.resumen_texto()}")
 
 
 def _categorias_fase() -> list[str]:
@@ -172,7 +211,7 @@ def etapa_fase_absoluta() -> None:
 def etapa_calibracion() -> None:
     import calibracion_estereo as ce
 
-    ce.ejecutar_calibracion_estereo(DIR_FASES, DIR_CALIBRACION)
+    ce.ejecutar_calibracion_estereo(DIR_FASES, DIR_CALIBRACION, poses_calibracion=CALIBRACION_POSES)
 
 
 def etapa_reconstruccion() -> None:
@@ -222,6 +261,10 @@ def main() -> None:
         print("[AVISO] 'captura' activa sin 'organizar': las capturas nuevas no se procesarán.")
     if ETAPAS.get("reconstruccion") and not ETAPAS.get("calibracion"):
         _verificar_calibracion_existente()
+    import sesiones
+
+    if sesiones.resumen_texto():
+        print(f"[PIPELINE] {sesiones.resumen_texto()}")
     t_total = time.perf_counter()
     for etapa in elegidas:
         print(f"\n{'#' * 78}\n# ETAPA: {etapa}\n{'#' * 78}")

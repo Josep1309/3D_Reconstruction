@@ -35,6 +35,7 @@ import numpy as np
 
 import configuracion as cfg
 import fase
+import sesiones
 from calibracion_estereo import normalizar_mapa_color
 
 
@@ -339,7 +340,9 @@ def procesar_reconstruccion(
 
     salidas: dict[str, list[Path]] = {}
     for categoria in categorias:
-        rutas_fase = sorted((dir_fases / categoria).glob("pose_??.npz"))
+        vigentes = sesiones.poses_vigentes(categoria)  # solo el montaje actual (sesiones.py)
+        rutas_fase = [r for r in sorted((dir_fases / categoria).glob("pose_??.npz"))
+                      if vigentes is None or r.stem in vigentes]
         if not rutas_fase:
             print(f"[AVISO] No hay fases absolutas en '{dir_fases / categoria}'. Ejecuta antes 'fase_absoluta'.")
             continue
@@ -398,7 +401,7 @@ def procesar_reconstruccion(
             _guardar_figura(dir_cat / f"reconstruccion_{categoria}_{nombre}.png", f"{categoria} {nombre}",
                             itex, z, m, e_map, erms)
             extra = {"E": e_map.astype(np.float32)} if e_map is not None else {}
-            np.savez_compressed(
+            fase.guardar_npz_atomico(
                 ruta_xyz, X=x.astype(np.float32), Y=y.astype(np.float32), Z=z.astype(np.float32),
                 Mask=m, fase=fd_usada, **extra,
             )

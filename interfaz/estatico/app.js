@@ -18,7 +18,7 @@ const FUENTE_TIPO = {
 };
 // Pestaña a mostrar cuando aparece un resultado nuevo, y pestaña de cada etapa en curso
 const PASO_DE_CAMBIO = { organizada: "captura", relativa: "envuelta", absoluta: "desenvuelta", reconstruida: "nube" };
-const PASO_DE_ETAPA = { captura: "captura", organizar: "captura", fase_relativa: "envuelta", fase_absoluta: "desenvuelta", reconstruccion: "profundidad" };
+const PASO_DE_ETAPA = { previa: "camara", captura: "camara", organizar: "captura", fase_relativa: "envuelta", fase_absoluta: "desenvuelta", calibracion: "calibracion", reconstruccion: "profundidad" };
 
 const est = {
   config: null,
@@ -67,29 +67,42 @@ function pintarEjecucion(e) {
   est.ejec = e;
   const chip = $("#chip-estado");
   let clase = "chip-inactivo", texto = t("estado_inactivo");
-  if (e.ejecutando && e.esperando) { clase = "chip-espera"; texto = t("estado_esperando"); }
+  if (e.ejecutando && e.etapa === "previa") { clase = "chip-activo"; texto = t("estado_previa"); }
+  else if (e.ejecutando && e.esperando) { clase = "chip-espera"; texto = t("estado_esperando"); }
   else if (e.ejecutando) { clase = "chip-activo"; texto = e.etapa ? t("estado_ejecutando", { etapa: nombreEtapa(e.etapa) }) : t("estado_iniciando"); }
   else if (e.codigo === 0) { clase = "chip-ok"; texto = t("estado_terminado"); }
   else if (e.codigo !== null && e.codigo !== undefined) { clase = "chip-error"; texto = t("estado_error", { c: e.codigo }); }
   chip.className = `chip ${clase}`;
   $("b", chip).textContent = texto;
 
+  const previa = e.ejecutando && e.etapa === "previa";
+  const capturando = e.ejecutando && (e.etapa === "captura" || previa);
+  const pausaCaptura = e.ejecutando && e.esperando && !previa;
   $("#b-medir").disabled = e.ejecutando;
   $("#b-ejecutar").disabled = e.ejecutando;
-  $("#b-detener").classList.toggle("oculto", !e.ejecutando);
-  $("#pausa").classList.toggle("oculto", !(e.ejecutando && e.esperando));
-  if (e.ejecutando && e.esperando) $("#b-continuar").focus();
+  $("#b-previa").disabled = e.ejecutando;
+  $("#b-detener").classList.toggle("oculto", !e.ejecutando || previa);
+  $("#pausa").classList.toggle("oculto", !pausaCaptura);
+  $("#vivo-pausa").classList.toggle("oculto", !pausaCaptura);
+  $("#b-cerrar-previa").classList.toggle("oculto", !previa);
+  if (pausaCaptura) $("#b-continuar").focus();
+  $("#pausa-pose").textContent = pausaCaptura ? poseEnPausa() : "";
+  pintarTextoVivo();
 
-  const capturando = e.ejecutando && e.etapa === "captura";
   $("#vivo").classList.toggle("oculto", !capturando);
-  if (capturando && e.esperando) {  // entre poses: se limpia la vista hasta que lleguen frames nuevos
-    $("#vivo-img").removeAttribute("src");
+  $("#camara-inactiva").classList.toggle("oculto", capturando);
+  if (!capturando) { est.vivo = null; $("#vivo").classList.remove("previa"); $("#vivo-img").removeAttribute("src"); }
+  if (capturando && e.esperando && !est.vivo?.previa) {
+    // Entre poses: se limpia la vista hasta que llegue la vista previa de la cámara
     est.vivo = null;
-    $("#vivo-texto").textContent = t("vivo_pausa");
+    $("#vivo-img").removeAttribute("src");
     $("#vivo-progreso").value = 0;
+    pintarTextoVivo();
   }
-  if (capturando && $("#v-seguir").checked) mostrarPaso("captura");
+  // Mientras la cámara está activa se muestra su pestaña (aunque «seguir» esté desactivado)
+  if (capturando) mostrarPaso("camara");
   marcarEtapaEnCurso(e.ejecutando ? e.etapa : null);
+  actualizarBotonUsar();
   pintarPasos();
   if (!e.ejecutando) refrescarEstado();
 }
@@ -103,6 +116,7 @@ function refrescarEstado() {
       const d = await api("/api/estado");
       est.poses = d.poses;
       est.calib = d.calibracion;
+      est.vigente = d.vigente;
       pintarCalibracion(d.calibracion);
       pintarListaPoses();
       pintarSelectores();
@@ -115,6 +129,7 @@ function refrescarEstado() {
 function pintarCalibracion(c) {
   const chip = $("#chip-calib"), dl = $("#calib-detalle");
   if (!c) {
+    chip.classList.remove("chip-error");
     chip.textContent = t("sin_calib"); chip.title = t("sin_calib_title");
     dl.innerHTML = "";
     const dt = document.createElement("dt"); dt.textContent = t("estado");
@@ -124,6 +139,12 @@ function pintarCalibracion(c) {
   }
   chip.textContent = t("chip_calib", { n: c.poses?.length ?? "?", rms: fmt(c.rms_stereo_indep_px, 2) });
   chip.title = t("fecha_title", { f: c.fecha || "?" });
+  // Estéreo muy por encima de cámara y proyector: poses de montajes distintos (planos curvos)
+  const mezclada = calibMezclada({ cam: c.rms_cam_px, proj: c.rms_proj_px, estereo: c.rms_stereo_indep_px });
+  chip.classList.toggle("chip-error", mezclada);
+  if (mezclada) chip.title += " · " + t("chip_calib_mal");
+  $('#pasos [data-paso="calibracion"]').classList.toggle("alerta", mezclada);
+  if (est.paso === "calibracion") cargarErroresCalib();
   const filas = [
     [t("fecha"), (c.fecha || "—").replace("T", " ")],
     [t("poses"), c.poses?.length],
@@ -148,6 +169,15 @@ function pintarListaPoses() {
   const cont = $("#lista-poses");
   cont.innerHTML = "";
   let alguna = false;
+  const v = est.vigente;
+  if (v) {  // solo se muestran (y procesan) las poses del último proceso con patrón en adelante
+    const nota = document.createElement("p");
+    nota.className = "nota vigente";
+    const desde = new Date(v.desde).toLocaleString(locale(), { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+    nota.textContent = t("vigente_nota", { f: desde }) + (v.procesos_ocultos ? " " + t("vigente_ocultos", { n: v.procesos_ocultos }) : "");
+    nota.title = t("vigente_title");
+    cont.appendChild(nota);
+  }
   for (const [cat, poses] of Object.entries(est.poses)) {
     if (!poses.length) continue;
     alguna = true;
@@ -234,6 +264,7 @@ function cargarPanel() {
   const panel = $(`.panel[data-panel="${est.paso}"]`);
   if (!panel) return;
   if (est.paso === "nube") return cargarNube();
+  if (est.paso === "calibracion") return cargarErroresCalib();
   for (const fig of $$("figure[data-tipo]", panel)) cargarFigura(fig);
 }
 
@@ -305,6 +336,28 @@ async function cargarNube() {
   }
 }
 
+// Texto bajo la vista en vivo: vista previa (encuadre) o número de frame durante la captura
+// «[patron] Prepara la pose 3/12 …» -> "Patrón · pose 3 de 12"
+function poseEnPausa() {
+  const m = /\[(\w+)\] Prepara la pose (\d+)\/(\d+)/.exec(est.ejec.pregunta || "");
+  if (!m) return "";
+  const cat = nombreCat(m[1]);
+  return t("pausa_pose", { cat: cat.charAt(0).toUpperCase() + cat.slice(1), i: m[2], n: m[3] });
+}
+
+function pintarTextoVivo() {
+  const v = est.vivo, txt = $("#vivo-texto");
+  const pose = est.ejec.esperando && est.ejec.etapa === "captura" ? poseEnPausa() : "";
+  const saturado = !!(v?.previa && v.saturacion > 0.005);
+  txt.classList.toggle("saturado", saturado);
+  if (!v) txt.textContent = est.ejec.etapa === "previa" ? t("vivo_iniciando")
+    : est.ejec.esperando ? t("vivo_pausa") : t("vivo_esperando");
+  else if (v.previa) txt.textContent = (pose ? pose + " — " : "") +
+    t(est.ejec.etapa === "previa" ? "vivo_previa_sola" : "vivo_previa") +
+    (saturado ? " · " + t("vivo_saturados", { p: (100 * v.saturacion).toFixed(1) }) : "");
+  else txt.textContent = t("vivo_frame", v);
+}
+
 // Texto bajo el visor: puntos mostrados y controles (se redibuja al cambiar de idioma)
 function textoNube() {
   const info = $("#n-info");
@@ -320,14 +373,25 @@ function conectarEventos() {
   es.addEventListener("log", (e) => agregarLog(JSON.parse(e.data).texto));
   es.addEventListener("estado", (e) => pintarEjecucion(JSON.parse(e.data)));
   es.addEventListener("vivo", (e) => {
-    const { i, n } = JSON.parse(e.data);
-    est.vivo = { i, n };
-    $("#vivo-texto").textContent = t("vivo_frame", { i, n });
-    const prog = $("#vivo-progreso"); prog.max = n; prog.value = i;
+    const d = JSON.parse(e.data);
+    const vivo = $("#vivo");
+    if (d.previa) {
+      est.vivo = { previa: true, saturacion: d.saturacion };
+      vivo.classList.add("previa");
+    } else {
+      est.vivo = { i: d.i, n: d.n };
+      vivo.classList.remove("previa");
+      const prog = $("#vivo-progreso"); prog.max = d.n; prog.value = d.i;
+    }
+    pintarTextoVivo();
     const img = $("#vivo-img");
     if (!img.dataset.cargando) {
       img.dataset.cargando = "1";
-      img.onload = img.onerror = () => delete img.dataset.cargando;
+      img.onload = () => {
+        delete img.dataset.cargando;
+        if (img.naturalHeight) $(".vivo-marco").style.setProperty("--ar", img.naturalWidth / img.naturalHeight);
+      };
+      img.onerror = () => delete img.dataset.cargando;
       img.src = `/api/vivo.jpg?t=${Date.now()}`;
     }
   });
@@ -430,7 +494,7 @@ function iniciarAyudas() {
 // ============================== acciones ==============================
 async function ejecutar(conf) {
   try {
-    if ($("#v-seguir").checked && conf.captura?.categoria && conf.etapas.captura) {
+    if ($("#v-seguir").checked && conf.captura?.categoria && conf.etapas?.captura && !conf.captura.plan) {
       est.cat = conf.captura.categoria === "patron" ? "patron" : conf.captura.categoria;
     }
     $("#registro").open = true;
@@ -449,21 +513,62 @@ function confMedir() {
     // Tras recalibrar se reconstruyen planos y objetos (cambia la calibración); si no, solo lo medido
     categorias: calibrar ? ["plano", "objeto"] : [cat],
     captura: { categoria: cat, poses: +$("#m-poses").value || 1, ciclos: +$("#m-ciclos").value || 1, esperar_enter: $("#m-pausa").checked },
-    rehacer: false, fase: $("#a-fase").value, calibracion: $("#a-calib").value,
+    rehacer: false, fase: $("#a-fase").value, calibracion: $("#a-calib").value, ...posesCalib(),
     simular: $("#m-demo").checked ? $("#m-fuente").value : null,
   };
+}
+
+// Poses del patrón para calibrar; «lista» = la lista fija de pipeline.py (no se envía)
+const posesCalib = () => ($("#a-calib-poses").value === "lista" ? {} : { calib_poses: $("#a-calib-poses").value });
+
+// Plan de captura del «Proceso por etapas»: {categoria: poses} de las categorías activas
+function planAvanzado() {
+  const plan = {};
+  for (const c of $$("#plan input[name=cat]:checked")) {
+    plan[c.value] = Math.max(1, +$(`#plan .plan-poses[data-cat=${c.value}]`).value || 1);
+  }
+  return plan;
 }
 
 function confAvanzada() {
   const etapas = {};
   for (const c of $$("#etapas input")) etapas[c.value] = c.checked;
+  const plan = planAvanzado();
+  const categorias = Object.keys(plan);
   return {
     etapas,
-    categorias: $$("input[name=cat]:checked").map((c) => c.value),
-    captura: { categoria: $("#m-categoria").value, poses: +$("#m-poses").value || 1, ciclos: +$("#m-ciclos").value || 1, esperar_enter: $("#m-pausa").checked },
-    rehacer: $("#a-rehacer").checked, fase: $("#a-fase").value, calibracion: $("#a-calib").value,
+    categorias,  // también deciden qué se procesa (el patrón solo se procesa si se calibra)
+    captura: {
+      plan, categoria: categorias.find((c) => c !== "patron") || categorias[0],
+      ciclos: +$("#a-ciclos").value || 1, esperar_enter: $("#a-pausa").checked,
+    },
+    rehacer: $("#a-rehacer").checked, fase: $("#a-fase").value, calibracion: $("#a-calib").value, ...posesCalib(),
     simular: $("#m-demo").checked ? $("#m-fuente").value : null,
   };
+}
+
+// Avisos del «Proceso por etapas» según las categorías y etapas marcadas. Devuelve false si no
+// se puede ejecutar.
+function notaAvanzada() {
+  const plan = planAvanzado(), cats = Object.keys(plan);
+  const etapa = (e) => $(`#etapas input[value=${e}]`)?.checked;
+  for (const i of $$("#plan .plan-poses")) i.disabled = !plan[i.dataset.cat];
+  const avisos = [];
+  let valido = true;
+  if (!cats.length) { avisos.push(t("aviso_sin_categorias")); valido = false; }
+  else {
+    if (etapa("captura")) {
+      avisos.push(t("aviso_plan", { plan: cats.map((c) => `${nombreCat(c)} × ${plan[c]}`).join(" → ") }));
+      if (plan.patron && !etapa("calibracion")) avisos.push(t("aviso_patron_sin_calib"));
+    }
+    if (etapa("calibracion") && !plan.patron && etapa("captura")) avisos.push(t("aviso_calib_sin_patron"));
+    if (etapa("calibracion")) avisos.push(t("aviso_calib_en_uso"));
+    if (etapa("reconstruccion") && !cats.some((c) => c !== "patron")) avisos.push(t("aviso_sin_reconstruir"));
+  }
+  const nota = $("#a-nota");
+  nota.textContent = avisos.join(" ");
+  nota.classList.toggle("aviso", !valido || avisos.length > 1);
+  return valido;
 }
 
 function notaMedir() {
@@ -480,9 +585,9 @@ function notaMedir() {
 function redibujarTextos() {
   pintarEjecucion(est.ejec);
   pintarCalibracion(est.calib);
-  pintarListaPoses(); pintarSelectores(); pintarMetricas(); notaMedir(); textoNube();
-  if (est.vivo) $("#vivo-texto").textContent = t("vivo_frame", est.vivo);
-  else if (!est.ejec.esperando) $("#vivo-texto").textContent = t("vivo_esperando");
+  pintarListaPoses(); pintarSelectores(); pintarMetricas(); notaMedir(); notaAvanzada(); textoNube();
+  pintarTextoVivo();
+  if (est.paso === "calibracion") { pintarErroresCalib(); pintarListaCalib(); }
   if (!$("#n-vacio").classList.contains("oculto") && !est.visor?.n) $("#n-vacio").textContent = t("sin_nube");
   cargarPanel();  // recarga las figuras visibles (textos de escala y avisos en el nuevo idioma)
 }
@@ -495,18 +600,39 @@ async function iniciar() {
   catch (err) { agregarLog(`[ERROR] ${t("error_config", { m: err.message })}`); return; }
   const c = est.config;
   construirSecuencia(c.etapas);
-  for (const i of $$("input[name=cat]")) i.checked = c.categorias.includes(i.value);
+  for (const i of $$("#plan input[name=cat]")) i.checked = c.categorias.includes(i.value);
+  $("#a-ciclos").value = c.captura.ciclos;
+  $("#avanzado").addEventListener("change", notaAvanzada);
+  $("#avanzado").addEventListener("input", notaAvanzada);
+  notaAvanzada();
   $("#a-fase").value = c.fase; $("#a-calib").value = c.calibracion; $("#a-rehacer").checked = c.rehacer;
+  if (Array.isArray(c.calib_poses)) {  // lista explícita en pipeline.py
+    const o = document.createElement("option");
+    o.value = "lista"; o.dataset.i18n = "calib_poses_lista"; o.textContent = t("calib_poses_lista");
+    o.title = c.calib_poses.join(", ");
+    $("#a-calib-poses").appendChild(o);
+    $("#a-calib-poses").value = "lista";
+  } else if (c.calib_poses) $("#a-calib-poses").value = c.calib_poses;
+  $("#a-calib").addEventListener("change", () => { if (est.paso === "calibracion") cargarErroresCalib(); });
+  $("#ec-elegir").addEventListener("change", actualizarBotonUsar);
+  $("#ec-usar").addEventListener("click", usarCalibracion);
+  $("#b-ver-calib").addEventListener("click", () => mostrarPaso("calibracion"));
   $("#m-ciclos").value = c.captura.ciclos;
   const fuentes = c.fuentes_demo;
   $("#m-fuente").innerHTML = fuentes.map((f) => `<option>${f}</option>`).join("") || `<option value=''>${t("sin_capturas")}</option>`;
   const preferida = fuentes.find((f) => f.startsWith("objeto/")); if (preferida) $("#m-fuente").value = preferida;
 
   $("#b-medir").addEventListener("click", () => ejecutar(confMedir()));
-  $("#b-ejecutar").addEventListener("click", () => ejecutar(confAvanzada()));
+  $("#b-ejecutar").addEventListener("click", () => {
+    if (!notaAvanzada()) { $("#a-nota").scrollIntoView({ block: "nearest" }); return; }
+    ejecutar(confAvanzada());
+  });
   $("#b-detener").addEventListener("click", () => api("/api/detener", {}).catch((e) => agregarLog(`[ERROR] ${e.message}`)));
-  $("#b-continuar").addEventListener("click", () => api("/api/entrada", { texto: "" }).catch((e) => agregarLog(`[ERROR] ${e.message}`)));
-  $("#b-terminar").addEventListener("click", () => api("/api/entrada", { texto: "q" }).catch((e) => agregarLog(`[ERROR] ${e.message}`)));
+  const responder = (texto) => api("/api/entrada", { texto }).catch((e) => agregarLog(`[ERROR] ${e.message}`));
+  for (const id of ["#b-continuar", "#b-continuar2", "#b-cerrar-previa"]) $(id).addEventListener("click", () => responder(""));
+  for (const id of ["#b-terminar", "#b-terminar2"]) $(id).addEventListener("click", () => responder("q"));
+  $("#b-previa").addEventListener("click", () =>
+    ejecutar({ solo_previa: true, simular: $("#m-demo").checked ? $("#m-fuente").value : null }));
   for (const id of ["#m-categoria", "#m-demo"]) $(id).addEventListener("change", notaMedir);
   $("#v-categoria").addEventListener("change", (e) => { $("#v-seguir").checked = false; const ps = est.poses[e.target.value] || []; seleccionar(e.target.value, ps.length ? ps[ps.length - 1].pose : null); });
   $("#v-pose").addEventListener("change", (e) => { $("#v-seguir").checked = false; seleccionar(est.cat, e.target.value); });
@@ -526,6 +652,9 @@ async function iniciar() {
   aplicarIdioma();
   textoNube();
   $("#vivo-texto").textContent = t("vivo_esperando");
+  const reticula = () => $("#vivo").classList.toggle("con-reticula", $("#v-reticula").checked);
+  $("#v-reticula").addEventListener("change", reticula);
+  reticula();
   notaMedir();
   iniciarAyudas();
 
@@ -534,6 +663,7 @@ async function iniciar() {
   const d = await api("/api/estado");
   est.poses = d.poses;
   est.calib = d.calibracion;
+  est.vigente = d.vigente;
   pintarCalibracion(d.calibracion);
   if (!(est.poses.objeto || []).length) est.cat = Object.keys(est.poses).find((k) => est.poses[k].length) || "objeto";
   // Enlace directo: #paso=envuelta&cat=plano&pose=pose_03 (fija la pose y desactiva «seguir»)

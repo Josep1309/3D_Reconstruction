@@ -90,6 +90,19 @@ PATRON_FILAS = 12
 PATRON_DISTANCIA_MM = 15.0
 PATRON_TIPO = "symmetric"
 PATRON_COLOR_CIRCULOS = "white"
+# Qué poses del patrón entran a la calibración. Todas deben ser del MISMO montaje: si la cámara o
+# el proyector se movieron entre sesiones, mezclarlas da un error estéreo enorme y planos curvos.
+#   "ultima_sesion" -> solo la última sesión de captura (capturas separadas por > 2 h son otra sesión)
+#   "todas"         -> todas las poses de capturas_ordenadas/patron
+#   ["pose_08", ...] -> una lista explícita
+CALIBRACION_POSES: str | list[str] = "ultima_sesion"
+HORAS_ENTRE_SESIONES = 2.0
+# True: las etapas de proceso y la interfaz solo usan y muestran las poses de la configuración
+# vigente: desde el último proceso de captura que incluyó el patrón hasta hoy (ver sesiones.py).
+# Lo anterior queda en disco pero se ignora. False: se usa todo.
+SOLO_CONFIGURACION_ACTUAL = True
+# Capturas antiguas sin registro de proceso: una pausa mayor que esto separa dos procesos
+MINUTOS_ENTRE_PROCESOS = 3.0
 
 # ==============================================================================
 # --- RECONSTRUCCIÓN 3D ---

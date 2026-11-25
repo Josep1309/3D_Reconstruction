@@ -239,6 +239,10 @@ Tesis/
 | Patrón | `PATRON_COLUMNAS/FILAS` | 9 / 12 | Círculos por fila / columna |
 | | `PATRON_DISTANCIA_MM` | 15.0 | Número o par `(dx, dy)` (§12.6) |
 | | `PATRON_TIPO`, `PATRON_COLOR_CIRCULOS` | symmetric / white | |
+| | `CALIBRACION_POSES` | `"ultima_sesion"` | Poses que calibran: `"ultima_sesion"`, `"todas"` o lista (§12.4) |
+| | `HORAS_ENTRE_SESIONES` | 2 | Capturas separadas por más que esto son sesiones distintas |
+| Datos | `SOLO_CONFIGURACION_ACTUAL` | `True` | Solo se procesan y muestran las poses del último proceso con patrón en adelante (§9.1) |
+| | `MINUTOS_ENTRE_PROCESOS` | 3 | Capturas sin registro: una pausa mayor separa dos procesos |
 | 3D | `FASE_TRIANGULACION` | `"auto"` | §13.3 |
 | | `CALIBRACION` | `"independiente"` | o `"conjunta"` (archivo `_J`) |
 | | `Z_MIN_MM`, `Z_MAX_MM` | 100 / 1500 | Rango físico válido de Z |
@@ -250,6 +254,10 @@ Tesis/
 - `CATEGORIAS`: categorías a procesar en fase y reconstrucción. `patron` se agrega solo si
   `calibracion` está activa.
 - `CAPTURA_*`: categoría, número de poses, ciclos por pose y si se espera Enter.
+- `CAPTURA_PLAN`: varias categorías en una sola sesión, por ejemplo
+  `{"patron": 12, "plano": 3, "objeto": 1}`. Reemplaza a `CAPTURA_CATEGORIA` y `CAPTURA_POSES`.
+  Se captura todo el plan (patrón → plano → objeto) antes de las demás etapas; con `q` se pasa
+  a la siguiente categoría.
 - `ORGANIZAR_*`: carpetas de entrada, categoría forzada y reorganización total.
 - `REHACER`: ignora la caché y recalcula las fases y la reconstrucción de todas las poses.
 - `FASE_TRIANGULACION`, `CALIBRACION_USADA`: sobrescriben los de `configuracion.py`.
@@ -420,6 +428,27 @@ cruda de `capturas/`, borra `capturas_ordenadas/` y vuelve a organizar.
 
 ---
 
+### 9.1 Configuración vigente: solo el último proceso — `sesiones.py`
+
+`capturas_ordenadas/` acumula todo lo capturado: poses de montajes anteriores, pruebas sueltas,
+corridas repetidas. Con la calibración actual, las poses de otro montaje darían resultados falsos.
+Por eso, con `SOLO_CONFIGURACION_ACTUAL = True` (por defecto), **las etapas de proceso y la
+interfaz solo usan y muestran la configuración vigente**:
+
+- Un **proceso** es una ejecución de la captura, por ejemplo patrón × 8 + plano × 3 + objeto × 1.
+  `etapa_captura` lo registra en `procesos_captura.json`, en la carpeta de datos, junto con sus
+  carpetas de `capturas/`. Las capturas anteriores a ese registro se agrupan por tiempo: una
+  pausa de más de `MINUTOS_ENTRE_PROCESOS` (3 min) empieza otro proceso.
+- La **configuración vigente** empieza en el **último proceso que capturó el patrón** e incluye
+  todo lo capturado después. Así, un objeto medido mañana sin recalibrar sigue viéndose junto a
+  su calibración, pero al capturar un patrón nuevo, lo anterior desaparece de la vista y del
+  proceso.
+- Lo anterior **no se borra**: sigue en `capturas/`, `capturas_ordenadas/` y `resultados/`. Para
+  usar todo otra vez, pon `SOLO_CONFIGURACION_ACTUAL = False`.
+- El pipeline la indica al empezar:
+  `Configuración vigente desde 2026-11-24 13:02 (patron 8, plano 3, objeto 1; se ignoran 9 proceso(s) anteriores)`.
+  La interfaz la muestra en la tarjeta *Poses*.
+
 ## 10. Etapa `fase_relativa`: phase shifting
 
 ### 10.1 Teoría
@@ -584,6 +613,13 @@ correspondencias entre:
 Si el montaje no cambió, no hace falta: la etapa queda desactivada y la reconstrucción usa la
 calibración guardada.
 
+**Todas las poses de una calibración deben ser del mismo montaje.** Si capturas poses nuevas del
+tablero otro día, las anteriores siguen en `capturas_ordenadas/patron/`. Basta un movimiento de
+1–2° de la cámara o el proyector para que las sesiones sean incompatibles. Mezclarlas da un error
+estéreo enorme (12.8 px en vez de 0.6), aunque cada cámara por separado siga dando ~0.5 px, y los
+planos salen **curvos** (1.5 mm de error de planitud en vez de 0.5). Por eso, por defecto, solo
+calibra la **última sesión** (`CALIBRACION_POSES`, §12.4).
+
 ### 12.1 Detección del tablero — `detectar_puntos_tablero(...)`
 
 - Suaviza la imagen blanca (gaussiana 5×5) y la **invierte**: `findCirclesGrid` busca blobs
@@ -621,12 +657,35 @@ fase es ~0.05 px en u y ~0.1–0.3 px en v.
 
 Igual que `Traditional_StereoCalib.m` (2 coeficientes radiales y tangencial, sin skew):
 
+0. **Selección de poses** (`sesiones_patron`, `seleccionar_poses`). Agrupa las poses en sesiones
+   según la hora de su carpeta en `capturas/` (la registra el manifiesto). Dos capturas separadas
+   por más de `HORAS_ENTRE_SESIONES` (2 h) son sesiones distintas. Se detectan los círculos en
+   todas las poses, pero solo calibran las que elige `CALIBRACION_POSES`:
+   - `"ultima_sesion"` (por defecto): la sesión más reciente;
+   - `"todas"`;
+   - una lista, por ejemplo `["pose_08", "pose_09", ...]`.
+
+   En la interfaz es la opción **Poses del patrón** de *Proceso por etapas*. Por línea de
+   comandos: `calibracion_estereo.py --poses todas` o `--poses pose_08 pose_09 …`.
 1. `calibrateCamera` de la cámara y del proyector **por separado** (`CALIB_FIX_K3` → k1, k2, p1,
    p2).
 2. `stereoCalibrate` con los intrínsecos fijos → **`Estereo_TSC_0_2.npz`** (equivale a
    `estimateStereoBaseline`).
 3. `stereoCalibrate` refinando todo junto → **`Estereo_TSC_0_2_J.npz`**.
-4. Error RMS **por pose** (`_errores_por_pose`), marcando las que superan 2× la mediana.
+4. **Errores de reproyección por pose** (`errores_reproyeccion`), para todas las poses detectadas,
+   también las que no se usaron:
+   - **cámara** y **proyector**: cada uno con su propia pose del tablero (`solvePnP`). Miden los
+     intrínsecos y las correspondencias, pero **no** delatan un montaje que se movió;
+   - **estéreo**: una sola pose del tablero vista por los dos a través de R, T. Es el mismo
+     criterio que minimiza `stereoCalibrate` (Gauss-Newton por pose con `composeRT`) y es el que
+     importa para reconstruir;
+   - **ΔR** y **ΔT**: diferencia entre la R, T de la calibración y la que se deduce solo de esa
+     pose.
+
+   Se marcan con `<-- no coherente con la línea base` las poses cuyo error estéreo supera 3× la
+   mediana (mínimo 2 px). Si el RMS estéreo supera 3× el de cámara y proyector, se avisa de que
+   las poses vienen de montajes distintos. Todo queda en el `.json` (`errores_por_pose`) y en la
+   pestaña **Calibración** de la interfaz (§19.2).
 5. **Cobertura del proyector:** el rango de u_p y v_p que cubren los círculos de todas las poses.
    Fuera de ese rango el modelo, sobre todo la distorsión, **se extrapola**. Si cubre menos del
    70 % en algún eje, se avisa. El rango se guarda en el `.npz` y la reconstrucción avisa cuando
@@ -641,10 +700,13 @@ Igual que `Traditional_StereoCalib.m` (2 coeficientes radiales y tangencial, sin
   - `R, T`: pose del proyector respecto a la cámara, `X_p = R·X_c + T`, en mm;
   - `E, F`;
   - errores RMS, `cobertura_up`, `cobertura_vp`.
-- `Estereo_TSC_0_2.json`: resumen legible con fecha, poses, errores por pose, parámetros y
-  cobertura.
-- `patron_PhasesData.npz`: correspondencias `M` (ajustadas) y `M_raw` (sin ajustar), puntos del
-  mundo e imágenes; equivale a `Estereo_PhasesData.mat`. Los mapas de `RegWcordtoImage.m`
+- `Estereo_TSC_0_2.json`: resumen legible con fecha, poses, criterio de selección
+  (`poses_criterio`), errores por pose (`errores_por_pose`, con sesión y hora de cada una),
+  parámetros y cobertura.
+- `patron_PhasesData.npz`: correspondencias `M` (ajustadas) y `M_raw` (sin ajustar) de las poses
+  usadas, puntos del mundo e imágenes; equivale a `Estereo_PhasesData.mat`. Además,
+  `poses_detectadas` y `M_detectadas` traen todas las poses con el tablero detectado, para evaluar
+  también las no usadas. Los mapas de `RegWcordtoImage.m`
   (`Maps`) solo se guardan con `--mapas`, porque solo los usan las calibraciones híbridas de
   MATLAB y ocupan ~10 MB por pose.
 - `diagnostico_calibracion_pose_00.png`: círculos detectados y residuos del ajuste polinomial.
@@ -893,9 +955,10 @@ corresponde. Cada subsección es una tabla de **síntoma → causa probable → 
 | `[AVISO] … se descarta la pose` | No se detectaron los 9 × 12 círculos | Tablero completo en la imagen, sin reflejos y bien iluminado; revisa la imagen blanca de esa pose |
 | `Solo N poses válidas` | Menos de 3 poses con el tablero detectado | Captura más poses (10–15 recomendadas) |
 | `Cobertura del proyector … [AVISO]` | Las poses no cubren todo el campo del proyector | Agrega poses con el tablero en los bordes y esquinas, inclinado ±20–30° |
-| Una pose marcada `<-- revisar` | Mala detección o fase ruidosa en esa pose | Quítala (§9, cómo excluir) y recalibra |
+| RMS estéreo muy superior al de cámara y proyector (p. ej. 12 px contra 0.5), `[AVISO] … las poses no son coherentes entre sí`, planos curvos | Poses de sesiones distintas y el montaje se movió entre ellas | Calibra solo con una sesión: `CALIBRACION_POSES = "ultima_sesion"` (por defecto), o **Poses del patrón: última sesión** en la interfaz. Revisa la pestaña **Calibración** (§19.2) |
+| Una pose marcada `<-- no coherente con la línea base` | Esa pose es de otro montaje, o tiene malas correspondencias | Si no se usó (otra sesión), es lo esperado. Si se usó, quítala (§9, cómo excluir) y recalibra |
 | Escala global incorrecta (objetos más grandes o más pequeños) | Tamaño real del tablero distinto de 15 mm | Mide el tablero y ajusta `PATRON_DISTANCIA_MM` (§12.6) |
-| Quiero volver a la calibración anterior | — | Copia sus 3 archivos desde `calibraciones/historial/<fecha>/` a `calibraciones/` (§20.5) |
+| Quiero volver a la calibración anterior o usar otra | — | Pestaña **Calibración** → *Usar esta calibración*, o `calibracion_estereo.py --activar <fecha>` (§20.5) |
 
 ### 16.7 Reconstrucción y precisión
 
@@ -903,6 +966,9 @@ corresponde. Cada subsección es una tabla de **síntoma → causa probable → 
 |---|---|---|
 | `No existe la calibración …` | Falta `calibraciones/Estereo_TSC_0_2.npz` | §20.5 |
 | `% de los puntos fuera del rango calibrado` | El objeto está en una zona del proyector que la calibración no cubrió | Recalibra con más cobertura (§16.6) |
+| No aparecen poses que capturé antes | Son de un proceso anterior al último con patrón (§9.1) | Es intencional. Para verlas: `SOLO_CONFIGURACION_ACTUAL = False` |
+| Planos curvos en todas las poses (≈1.5 mm) justo después de recalibrar | La calibración mezcló poses de dos montajes | §16.6, primera fila |
+| Los planos antiguos salen curvos con la calibración nueva | Se capturaron con el montaje anterior | Pon en uso la calibración de entonces (pestaña **Calibración**, §20.5), reconstruye y vuelve a la actual |
 | Error de planitud en forma de cuenco (±1–2 mm en las esquinas) | Calibración con pocas poses, poca inclinación o poca cobertura | 10–15 poses con ±20–30°; confirma que la superficie sea realmente plana |
 | Error sistemático cerca del borde izquierdo de la imagen | Zona del proyector (u_p alto) no cubierta por la calibración | Igual que el anterior: poses del tablero desplazadas a esa zona |
 | Huecos o estrías horizontales en superficies oscuras | Poco contraste de las franjas H (DMD en diamante) | Más ciclos por captura; mejor iluminación; ver el último punto de §16.9 |
@@ -916,6 +982,9 @@ corresponde. Cada subsección es una tabla de **síntoma → causa probable → 
 | `Address already in use` | El puerto 8000 está ocupado (¿otra interfaz abierta?) | `interfaz/servidor.py --puerto 8001` |
 | "Sin conexión con el servidor…" | Se cerró el servidor | Vuelve a ejecutar `interfaz/servidor.py` y recarga la página |
 | El visor 3D no muestra nada | El navegador no tiene WebGL, o la pose no está reconstruida | Prueba con Chrome o Firefox actualizados; revisa que la pose tenga los 4 puntos verdes |
+| No aparece la vista previa / la cámara "no carga" | El **servidor se inició antes de actualizar el código** (el servidor no recarga sus archivos solo) | Detén el servidor (Ctrl+C) y vuelve a lanzar `interfaz/servidor.py`; recarga la página |
+| La vista previa no aparece durante la pausa | La pausa está desactivada, o la cámara no entrega imágenes en modo libre | Activa «Pausa antes de cada pose»; prueba «Ver cámara»; revisa el registro y `verificar.py` (§16.3) |
+| La vista previa avisa de píxeles saturados | Exposición o brillos excesivos | Baja `CAM_EXPOSICION_US` o la luz, o cambia el ángulo (§19.3) |
 | Las capturas del modo demo aparecen como poses reales | Se guardan en `capturas/` con sufijo `_simulada` | Borra esas carpetas y las poses que generaron (§19.1) |
 | No se puede abrir desde otra PC | El servidor escucha solo en el equipo local | `--host 0.0.0.0` (sin contraseña: solo en redes de confianza) |
 
@@ -1037,33 +1106,75 @@ está escrito en WebGL puro, así que funciona sin internet.
   para probar o enseñar la interfaz sin el montaje (clase `CamaraSimulada` de
   `capturar_patrones.py`). Las capturas simuladas se guardan en `capturas/<cat>/<fecha>_simulada`;
   **bórralas** al terminar, o se procesarán como poses reales.
-- **Proceso por etapas.** El equivalente a `ETAPAS` de `pipeline.py`. Muestra las 8 etapas
-  **numeradas en su orden de ejecución**, cada una con una descripción breve y una etiqueta:
-  *hardware* si necesita el montaje, *opcional* para la calibración, *ocasional* para la
-  generación de patrones. Debajo están las opciones: categorías, triangulación, calibración usada
-  y *Recalcular todo* (`REHACER`). Durante la ejecución se resalta la etapa en curso.
+- **Proceso por etapas.** El equivalente a `ETAPAS` de `pipeline.py`, en tres bloques:
+  1. **Categorías y poses.** Casillas para activar *Patrón*, *Plano* y *Objeto* (cualquier
+     combinación), con el número de poses de cada una, los ciclos y la pausa.
+     - Con la etapa *Captura* marcada se capturan **todas** las poses de las categorías activas,
+       siempre en el orden patrón → plano → objeto, y recién después se procesa.
+     - Las categorías activas son también las que se procesan. El patrón se procesa cuando
+       *Calibración* está marcada.
+     - En una pausa, *Terminar (q)* salta a la siguiente categoría.
+     - Debajo aparece un resumen ("Se capturará: patrón × 12 → plano × 3 → objeto × 1") y avisos,
+       por ejemplo si capturas el patrón sin marcar *Calibración*.
+  2. **Etapas.** Las 8 etapas **numeradas en su orden de ejecución**, cada una con una
+     descripción breve y una etiqueta: *hardware* si necesita el montaje, *opcional* para la
+     calibración, *ocasional* para la generación de patrones. Durante la ejecución se resalta la
+     etapa en curso.
+  3. **Opciones.** Triangulación, calibración usada y *Recalcular todo* (`REHACER`).
+
+  Ejemplo de una sesión completa en un solo paso: activa las tres categorías (patrón × 12,
+  plano × 3, objeto × 1) y marca todas las etapas de *Captura* a *Reconstrucción*.
+- **Pausas.** En cada pausa, la tarjeta de pausa y la pestaña *Cámara* indican qué toca, por
+  ejemplo "Patrón · pose 3 de 12".
 - **Detener proceso.** Termina el subproceso del pipeline.
-- **Poses.** Todas las poses por categoría. Los cuatro puntos indican, en orden:
+- **Poses.** Las poses de la configuración vigente (§9.1), es decir, del último proceso que
+  capturó el patrón en adelante. Arriba se indica desde cuándo y cuántos procesos anteriores están
+  ocultos. Los cuatro puntos indican, en orden:
   organizada · fase envuelta · fase desenvuelta · reconstruida. Un clic la abre.
 - **Calibración.** Resumen de la calibración en uso: fecha, errores RMS, línea base y cobertura
   del proyector.
 
 ### 19.2 Visualización (derecha)
 
-Cinco pasos, que siguen solos al proceso en curso cuando **Seguir la última** está activo:
+Seis pestañas de pasos y una de calibración. Las de resultados siguen solas al proceso en curso
+cuando **Seguir la última** está activo:
 
-1. **Captura.** Mientras se captura, **vista en vivo** de la cámara (~6 imágenes/s) con el
-   avance de los 50 patrones. Después: franjas V y H, primer bit Gray y textura.
-2. **Fase envuelta.** φ de X e Y en [−π, π] y la modulación γ de cada una.
-3. **Fase desenvuelta.** Fx y Fy, el orden de franja k del código Gray y el mapa de píxeles
+1. **Cámara.** Todo lo de la cámara en un solo lugar. Se abre sola cuando la cámara se activa,
+   aunque estés en otra pestaña.
+   - **Vista previa para encuadrar** (marco verde): en cada pausa antes de una pose, con los
+     botones *Continuar* y *Terminar* ahí mismo. Detalles en §19.3.
+   - **Captura en vivo** (marco naranja, ~6 imágenes/s), con el avance de los 50 patrones.
+   - **Sin actividad:** el botón **Ver cámara** abre la vista previa sin capturar nada, para
+     encuadrar, enfocar o ajustar la exposición. Se cierra con *Cerrar vista previa*. En modo
+     demo muestra la captura elegida.
+2. **Imágenes.** Las imágenes capturadas de la pose: franjas V y H, primer bit Gray y textura.
+3. **Fase envuelta.** φ de X e Y en [−π, π] y la modulación γ de cada una.
+4. **Fase desenvuelta.** Fx y Fy, el orden de franja k del código Gray y el mapa de píxeles
    válidos.
-4. **Profundidad.** Mapa Z y, en los planos, el error respecto al plano ajustado.
-5. **Nube de puntos.** Visor 3D interactivo con hasta 400 000 puntos, coloreados por profundidad
+5. **Profundidad.** Mapa Z y, en los planos, el error respecto al plano ajustado.
+6. **Nube de puntos.** Visor 3D interactivo con hasta 400 000 puntos, coloreados por profundidad
    o por textura:
    - arrastrar = girar;
    - clic derecho o Shift + arrastrar = desplazar;
    - rueda = acercar;
    - doble clic = vista inicial.
+
+**Calibración** (pestaña aparte, a la derecha). Arriba, **Calibración en uso** permite elegir
+cualquier calibración del historial (fecha, poses y error estéreo; ⚠ = error estéreo muy alto) y
+ponerla en uso con **Usar esta calibración** (§20.5). Al calibrar en *Proceso por etapas*, la
+nueva queda en uso sola. Debajo, los errores de reproyección de cada pose del tablero con la
+calibración en uso (*independiente* o *conjunta*, según la opción **Calibración**):
+- resumen: fecha, poses usadas, criterio y RMS de cámara, proyector y estéreo;
+- gráfico de barras por pose, con cámara, proyector y estéreo, separado por sesiones. Las poses
+  no usadas salen atenuadas, y las que se salen de escala llevan su valor encima (▲);
+- tabla con los mismos errores, más ΔR, ΔT y la distancia al tablero;
+- al hacer clic en una pose, los **vectores de error** de cada círculo en la cámara y en el
+  proyector, ampliados. En gris se ven los círculos de las demás poses, que muestran la
+  cobertura.
+
+Si el error estéreo de la calibración es muy alto, el chip de calibración de la barra superior y
+el ícono de la pestaña se ponen en rojo, y la pestaña explica qué hacer (§16.6). Para ver también
+las poses no usadas, la calibración tiene que haberse hecho con esta versión.
 
 **Idioma.** El selector **ES | EN** de la barra superior cambia toda la interfaz entre español e
 inglés al instante, sin perder lo que estás viendo. La elección se recuerda en el navegador; por
@@ -1079,9 +1190,40 @@ el rango de Z y, en los planos, el error de planitud. Abajo está el **registro*
 proceso.
 
 Enlace directo a una pose y un paso: `http://127.0.0.1:8000/#paso=desenvuelta&cat=plano&pose=pose_03`
-(pasos: `captura`, `envuelta`, `desenvuelta`, `profundidad`, `nube`).
+(pasos: `camara`, `captura` (imágenes), `envuelta`, `desenvuelta`, `profundidad`, `nube`,
+`calibracion`).
 
-### 19.3 Cómo funciona
+### 19.3 Vista previa para encuadrar el objeto
+
+Con **Pausa antes de cada pose** activada (por defecto), en cada pausa la pestaña **Cámara**
+muestra lo que ve la cámara **en tiempo real**, para acomodar el objeto antes de capturar. El botón
+**Ver cámara** abre la misma vista en cualquier momento, sin capturar.
+
+Se verificó con la cámara FLIR real: vista previa a ~15 imágenes/s, cierre limpio, y captura
+posterior con el trigger del Arduino sin pérdidas (Δt 49.9 ms) y secuencia válida.
+
+
+- **No depende del Arduino.** Durante la pausa la cámara pasa a adquisición libre (~15
+  imágenes/s, sin trigger). Al pulsar *Continuar* vuelve al trigger externo y empieza la captura
+  de los 50 patrones.
+- **Imagen estable.** El proyector sigue ciclando patrones, así que cada imagen tiene franjas
+  distintas. La vista previa muestra un **promedio móvil** de las últimas imágenes: el objeto
+  aparece estable y uniformemente iluminado.
+- **Retícula.** Cruz central y líneas de tercios para centrar el objeto. Se desactiva con la
+  casilla *Retícula*.
+- **Aviso de saturación.** Muestra el porcentaje de píxeles saturados (≥ 250) en el último ciclo
+  completo de patrones. Por encima de 0.5 % aparece en naranja. Los píxeles saturados distorsionan
+  la fase: baja `CAM_EXPOSICION_US`, la intensidad del proyector o la luz ambiente, o cambia el
+  ángulo para evitar brillos. Con las capturas de referencia el objeto tenía ~4.5 % de píxeles
+  saturados en alguna imagen de franjas (el brillo de la madera), y eso se ve como una mancha
+  ruidosa en los mapas de fase.
+- Con *Terminar (q)* se sale sin capturar, así que la vista previa también sirve solo para
+  revisar el encuadre o el enfoque.
+
+Funciona igual en el modo demo, que reproduce la captura elegida. Solo está disponible desde la
+interfaz web: `pipeline.py` en la terminal sigue pidiendo Enter sin vista previa.
+
+### 19.4 Cómo funciona
 
 ```
 navegador ──HTTP/SSE──► interfaz/servidor.py ──subproceso──► interfaz/ejecutor.py ──► pipeline.main()
@@ -1105,6 +1247,9 @@ navegador ──HTTP/SSE──► interfaz/servidor.py ──subproceso──►
   - conecta la vista en vivo (`VistaEnVivo`): la captura solo guarda una referencia al último
     frame, y un hilo aparte lo escribe como JPEG cada 0.15 s, así que la adquisición no se
     retrasa ni se pierden triggers;
+  - durante las pausas recibe la **vista previa** (`VistaEnVivo.previa`): promedio móvil y
+    saturación. La genera `CamaraFLIR.iniciar_vista_previa()` / `detener_vista_previa()` en
+    `capturar_patrones.py`, que también restauran el trigger y la cadencia;
   - con el modo demo, sustituye la cámara por `CamaraSimulada`.
 - **`estatico/`**: `index.html`, `estilo.css` (modo claro/oscuro automático), `i18n.js` (textos en
   español e inglés), `app.js` (lógica) y `nube.js` (visor WebGL).
@@ -1122,6 +1267,9 @@ API, por si se quiere automatizar algo:
 | `GET /api/imagen?cat=&pose=&tipo=` | Imagen de un paso. `tipo`: `franja_V`, `franja_H`, `gray_V`, `textura`, `phiX`, `phiY`, `qX`, `qY`, `Fx`, `Fy`, `kX`, `kY`, `mascara`, `Z`, `error` |
 | `GET /api/nube?cat=&pose=&max=` | Nube binaria: `uint32 N`, `float32 xyz·N`, `uint8 gris·N` |
 | `GET /api/vivo.jpg` | Último frame de la cámara |
+| `GET /api/calibraciones` | Calibraciones del historial y cuál está en uso |
+| `POST /api/calibraciones/activar` | `{"id": "<fecha>"}`: pone en uso esa calibración (no durante una ejecución) |
+| `GET /api/calibracion?variante=` | Errores de reproyección por pose con la calibración en uso (`independiente` o `conjunta`), con los vectores de error |
 
 **Probar con otra copia de los datos.** La variable de entorno `TESIS_DIR_DATOS` hace que todo
 (pipeline e interfaz) use `capturas/`, `capturas_ordenadas/` y `resultados/` de otra carpeta. Es
@@ -1275,14 +1423,24 @@ La calibración vigente está en **`calibraciones/`**, versionada en git:
 Son unos 15 KB. Así, al clonar el proyecto en otro computador conectado **al mismo montaje** se
 puede reconstruir sin recalibrar.
 
-- **Cada recalibración** sobrescribe esos tres archivos y guarda una copia en
+- **Cada recalibración** sobrescribe esos tres archivos, **queda en uso de inmediato** (también
+  al calibrar desde *Proceso por etapas*) y guarda una copia en
   `calibraciones/historial/<fecha>/`. Los diagnósticos pesados (`patron_PhasesData.npz` y las
   figuras) quedan en `resultados/calibracion/`, que no se versiona.
 - **Después de recalibrar, haz commit**:
   `git add calibraciones && git commit -m "Nueva calibración"`. `verificar.py` avisa si hay
   cambios sin commit.
-- **Para volver a una calibración anterior**, copia sus tres archivos desde
-  `calibraciones/historial/<fecha>/` a `calibraciones/`.
+- **Para usar otra calibración del historial** (por ejemplo, para volver a la anterior o para
+  medir capturas hechas con un montaje anterior), hay tres formas:
+  - en la interfaz: pestaña **Calibración** → **Calibración en uso** → **Usar esta calibración**;
+  - por línea de comandos: `calibracion_estereo.py --listar` muestra el historial (con `*` la que
+    está en uso) y `calibracion_estereo.py --activar 20261124_122125` la pone en uso;
+  - a mano: copiar sus tres archivos desde `calibraciones/historial/<fecha>/` a
+    `calibraciones/`.
+
+  Si la calibración en uso no está en el historial, antes de reemplazarla se respalda en
+  `historial/<fecha>_respaldo/`. La reconstrucción detecta el cambio y recalcula las poses en la
+  siguiente ejecución.
 - **La calibración es del montaje, no del computador.** Si se movió la cámara o el proyector,
   si se reenfocó o si se cambió de equipo físico, hay que recalibrar. `verificar.py` comprueba
   que el período de las franjas y la resolución de la cámara conectada coincidan con los de la
