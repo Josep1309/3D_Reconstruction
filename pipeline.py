@@ -78,6 +78,8 @@ REHACER = False
 # Poses del patrón que entran a la calibración: "ultima_sesion", "todas" o ["pose_08", ...].
 # Todas deben ser del mismo montaje (si algo se movió entre sesiones, los planos salen curvos).
 CALIBRACION_POSES = cfg.CALIBRACION_POSES
+# True = poner en uso la calibración nueva aunque no pase el control de calidad (MANUAL.md §12.4)
+CALIBRACION_FORZAR = False
 
 # --- Reconstrucción ---
 FASE_TRIANGULACION = cfg.FASE_TRIANGULACION  # "auto", "ambas", "Fx" o "Fy"

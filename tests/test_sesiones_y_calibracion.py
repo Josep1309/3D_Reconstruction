@@ -94,3 +94,14 @@ def test_control_calidad_aprueba_una_buena():
 def test_control_calidad_rechaza(cambios, texto):
     motivos = ce.control_calidad(_resumen(**cambios))
     assert motivos and any(texto in m for m in motivos)
+
+
+def test_pipeline_no_reconstruye_con_calibracion_rechazada(monkeypatch):
+    import pipeline
+
+    monkeypatch.setattr(ce, "ejecutar_calibracion_estereo", lambda *a, **k: {"en_uso": False})
+    monkeypatch.setitem(pipeline.ETAPAS, "reconstruccion", True)
+    with pytest.raises(RuntimeError, match="control de calidad"):
+        pipeline.etapa_calibracion()
+    monkeypatch.setattr(ce, "ejecutar_calibracion_estereo", lambda *a, **k: {"en_uso": True})
+    pipeline.etapa_calibracion()  # aprobada: sigue sin error
