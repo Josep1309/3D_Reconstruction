@@ -761,6 +761,8 @@ class Manejador(BaseHTTPRequestHandler):
                 return self._enviar(200, ARCHIVO_VIVO.read_bytes(), "image/jpeg")
             if url.path == "/api/imagen":
                 return self._imagen(q)
+            if url.path == "/api/manual":  # MANUAL.md, que la interfaz muestra con su índice
+                return self._enviar(200, (RAIZ / "MANUAL.md").read_bytes(), "text/markdown; charset=utf-8")
             if url.path == "/api/calibraciones":
                 import calibracion_estereo as ce
                 import sesiones

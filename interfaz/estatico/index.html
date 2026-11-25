@@ -21,6 +21,9 @@
   <div class="estado-global">
     <span id="chip-calib" class="chip" data-i18n-title="chip_calib_title" title="Calibración en uso">—</span>
     <span id="chip-estado" class="chip chip-inactivo"><i></i><b>Inactivo</b></span>
+    <button id="b-manual" type="button" class="boton-icono" data-i18n-title="manual" data-i18n-aria="manual" title="Manual" aria-label="Manual">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v16H6.5a1 1 0 0 0 0 2H20v2H6.5A2.5 2.5 0 0 1 4 19.5Zm4 1.5v2h8V6Zm0 4v2h6v-2Z"/></svg>
+    </button>
     <button id="b-ajustes" type="button" class="boton-icono" data-i18n-title="ajustes" data-i18n-aria="ajustes" title="Ajustes" aria-label="Ajustes">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.4 7.4 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.4 7.4 0 0 0 1.7-1l2.4 1 2-3.4ZM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z" transform="translate(-1 0)"/></svg>
       <i class="marca-cambio" hidden></i>
@@ -385,6 +388,33 @@
   </form>
 </dialog>
 
+<dialog id="manual" class="manual" aria-labelledby="man-titulo">
+  <div class="manual-marco">
+    <header class="ajustes-cabecera">
+      <h2 id="man-titulo" data-i18n="manual">Manual</h2>
+      <input id="man-buscar" type="search" data-i18n-aria="man_buscar" data-i18n-title="man_buscar" placeholder="🔍">
+      <small id="man-resultados"></small>
+      <form method="dialog"><button class="boton-icono" data-i18n-aria="cerrar" aria-label="Cerrar">✕</button></form>
+    </header>
+    <div class="manual-cuerpo">
+      <nav id="man-indice" class="man-indice"></nav>
+      <div class="man-texto">
+        <section id="man-atajos" class="man-atajos">
+          <h3 data-i18n="atajos">Atajos de teclado</h3>
+          <dl>
+            <dt><kbd>Enter</kbd></dt><dd data-i18n="atajo_enter">En una pausa: la acción principal (Continuar, Repetir…)</dd>
+            <dt><kbd>Esc</kbd></dt><dd data-i18n="atajo_esc">Cierra el visor de imágenes, la imagen ampliada o un diálogo</dd>
+            <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd data-i18n="atajo_flechas">En el visor: imagen anterior o siguiente</dd>
+            <dt><kbd>?</kbd></dt><dd data-i18n="atajo_ayuda">Abre este manual en los atajos</dd>
+            <dt data-i18n="atajo_nube_t">Nube 3D</dt><dd data-i18n="atajo_nube">Arrastrar = girar · clic derecho o Shift = desplazar · rueda = acercar · doble clic = vista inicial</dd>
+          </dl>
+        </section>
+        <article id="man-contenido" class="man-contenido"></article>
+      </div>
+    </div>
+  </div>
+</dialog>
+
 <div id="visor-img" class="visor-img" role="dialog" aria-modal="true" hidden>
   <figure>
     <img id="vi-img" alt="">
@@ -397,6 +427,7 @@
 
 <div id="burbuja" class="burbuja" role="tooltip" hidden></div>
 <script src="/estatico/nube.js"></script>
+<script src="/estatico/manual.js"></script>
 <script src="/estatico/galeria.js"></script>
 <script src="/estatico/ajustes.js"></script>
 <script src="/estatico/archivos.js"></script>

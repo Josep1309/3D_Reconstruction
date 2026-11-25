@@ -153,6 +153,11 @@ const TEXTOS = {
     ayuda_nitidez: "Contraste de los detalles en el centro de la imagen, el máximo de un ciclo de franjas. Al enfocar la cámara o el proyector, gira el anillo hasta que la barra llegue al máximo. Se reinicia al cambiar la exposición.",
     b_plano: "Plano", b_objeto: "Objeto", b_omitir: "Omitir", b_repetir_anterior: "Repetir la anterior (r)",
 
+    manual: "Manual", man_buscar: "Buscar en el manual", man_resultados: "{n} coincidencias", man_sin_resultados: "sin coincidencias",
+    atajos: "Atajos de teclado", atajo_enter: "En una pausa: la acción principal (Continuar, Repetir…)",
+    atajo_esc: "Cierra el visor de imágenes, la imagen ampliada o un diálogo", atajo_flechas: "En el visor: imagen anterior o siguiente",
+    atajo_ayuda: "Abre este manual en los atajos", atajo_nube_t: "Nube 3D",
+    atajo_nube: "Arrastrar = girar · clic derecho o Shift = desplazar · rueda = acercar · doble clic = vista inicial",
     ajustes: "Ajustes", cerrar: "Cerrar", anterior: "Anterior", siguiente: "Siguiente", volver: "Volver",
     aj_apariencia: "Apariencia", aj_tema: "Tema", aj_tema_auto: "Automático", aj_tema_claro: "Claro", aj_tema_oscuro: "Oscuro",
     aj_fase: "Fase y máscaras", aj_fase_nota: "Deciden qué píxeles se consideran válidos. Desactiva una casilla para no aplicar ese paso y comparar resultados.",
@@ -398,6 +403,11 @@ const TEXTOS = {
     ayuda_nitidez: "Contrast of the details at the image centre, the maximum over one fringe cycle. When focusing the camera or the projector, turn the ring until the bar reaches its maximum. It resets when the exposure changes.",
     b_plano: "Plane", b_objeto: "Object", b_omitir: "Skip", b_repetir_anterior: "Repeat previous (r)",
 
+    manual: "Manual", man_buscar: "Search the manual", man_resultados: "{n} matches", man_sin_resultados: "no matches",
+    atajos: "Keyboard shortcuts", atajo_enter: "In a pause: the main action (Continue, Repeat…)",
+    atajo_esc: "Closes the image viewer, the enlarged image or a dialog", atajo_flechas: "In the viewer: previous or next image",
+    atajo_ayuda: "Opens this manual at the shortcuts", atajo_nube_t: "3D cloud",
+    atajo_nube: "Drag = rotate · right click or Shift = pan · wheel = zoom · double click = initial view",
     ajustes: "Settings", cerrar: "Close", anterior: "Previous", siguiente: "Next", volver: "Back",
     aj_apariencia: "Appearance", aj_tema: "Theme", aj_tema_auto: "Automatic", aj_tema_claro: "Light", aj_tema_oscuro: "Dark",
     aj_fase: "Phase and masks", aj_fase_nota: "They decide which pixels are considered valid. Uncheck a box to skip that step and compare results.",

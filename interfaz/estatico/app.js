@@ -806,6 +806,7 @@ async function iniciar() {
   $("#aviso-error-cerrar").addEventListener("click", () => { est.errorCerrado = est.ejec.error; pintarAvisoError(est.ejec); });
   $("#aviso-error-manual").addEventListener("click", () => window.abrirManual?.($("#aviso-error-manual").dataset.seccion));
   iniciarRegistro();
+  iniciarManual();
   $("#b-previa").addEventListener("click", () =>
     ejecutar({ solo_previa: true, simular: $("#m-demo").checked ? $("#m-fuente").value : null }));
   for (const id of ["#m-categoria", "#m-demo"]) $(id).addEventListener("change", notaMedir);
