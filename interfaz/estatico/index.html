@@ -72,11 +72,9 @@
     </section>
 
     <section id="pausa" class="tarjeta pausa oculto" role="alert">
-      <p><b data-i18n="pausa_titulo">La captura está en pausa.</b> <span id="pausa-pose" class="pausa-pose"></span><br><span data-i18n="pausa_texto">Prepara la pose y continúa.</span></p>
-      <div class="botones">
-        <button id="b-continuar" class="primario" data-i18n="continuar">Continuar ⏎</button>
-        <button id="b-terminar" data-i18n="terminar">Terminar (q)</button>
-      </div>
+      <p><b id="pausa-titulo">La captura está en pausa.</b> <span id="pausa-pose" class="pausa-pose"></span><br><span id="pausa-texto"></span></p>
+      <ul id="pausa-motivos" class="pausa-motivos"></ul>
+      <div class="botones" id="pausa-botones"></div>
     </section>
 
     <details class="tarjeta" id="avanzado">
@@ -149,6 +147,12 @@
       <div id="metricas" class="metricas"></div>
     </div>
 
+    <section id="aviso-error" class="aviso-error oculto" role="alert">
+      <div><b data-i18n="error_titulo">El proceso terminó con un error</b><p id="aviso-error-texto"></p></div>
+      <button type="button" id="aviso-error-manual" class="oculto" data-i18n="ver_manual">Ver en el manual</button>
+      <button type="button" id="aviso-error-cerrar" class="boton-icono" data-i18n-aria="cerrar" aria-label="Cerrar">✕</button>
+    </section>
+
     <nav class="pasos" id="pasos" role="tablist">
       <button role="tab" data-paso="camara"><span>1</span><b data-i18n="paso_camara">Cámara</b></button>
       <button role="tab" data-paso="captura"><span>2</span><b data-i18n="paso_captura">Imágenes</b></button>
@@ -179,12 +183,13 @@
           <label class="casilla"><input id="v-reticula" type="checkbox" checked> <span data-i18n="reticula">Retícula</span></label>
         </div>
         <div class="vivo-acciones">
-          <span id="vivo-pausa" class="botones oculto">
-            <button id="b-continuar2" class="primario" data-i18n="continuar">Continuar ⏎</button>
-            <button id="b-terminar2" data-i18n="terminar">Terminar (q)</button>
-          </span>
+          <span id="vivo-pausa" class="botones oculto"></span>
           <button id="b-cerrar-previa" class="oculto" data-i18n="cerrar_previa">Cerrar vista previa</button>
         </div>
+      </div>
+      <div id="calidad-poses" class="calidad-poses oculto">
+        <h3 data-i18n="calidad_titulo">Control de las poses capturadas</h3>
+        <ol id="calidad-lista"></ol>
       </div>
     </section>
 
@@ -278,7 +283,17 @@
     </section>
 
     <details class="registro" id="registro" open>
-      <summary data-i18n="registro">Registro del proceso</summary>
+      <summary><span data-i18n="registro">Registro del proceso</span>
+        <span class="registro-herramientas">
+          <select id="log-filtro" data-i18n-aria="log_filtro" aria-label="Filtro">
+            <option value="todo" data-i18n="log_todo">Todo</option>
+            <option value="avisos" data-i18n="log_avisos">Avisos y errores</option>
+            <option value="errores" data-i18n="log_errores">Solo errores</option>
+          </select>
+          <button type="button" id="log-descargar" data-i18n="log_descargar">Descargar</button>
+          <button type="button" id="log-limpiar" data-i18n="log_limpiar">Limpiar</button>
+        </span>
+      </summary>
       <pre id="log" aria-live="polite"></pre>
     </details>
   </main>

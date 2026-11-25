@@ -472,3 +472,28 @@ body.sin-scroll { overflow: hidden; }
 }
 .ar-etiqueta.error { border-color: var(--error); color: var(--error); }
 .ar-motivo { flex-basis: 100%; color: var(--texto-2); font-size: 11.5px; }
+
+/* ---------- Pausa con opciones, calidad por pose, progreso, aviso de error, registro ---------- */
+.pausa.invalida { border-color: var(--error); background: color-mix(in srgb, var(--error) 10%, var(--superficie)); }
+.pausa-motivos { margin: 6px 0 8px; padding-left: 18px; font-size: 12.5px; color: var(--error); }
+.pausa-motivos:empty { display: none; }
+#pausa-botones, #vivo-pausa { flex-wrap: wrap; }
+.calidad-poses { margin-top: 10px; padding: 10px 12px; background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); }
+.calidad-poses h3 { margin: 0 0 6px; font-size: 13px; }
+.calidad-poses ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; max-height: 220px; overflow: auto; }
+.calidad-poses li { padding: 3px 8px; border-left: 3px solid var(--ok); }
+.calidad-poses li.aviso { border-left-color: var(--aviso); }
+.calidad-poses li.mal { border-left-color: var(--error); color: var(--error); }
+.secuencia li progress.prog { grid-column: 1 / -1; width: 100%; height: 6px; accent-color: var(--acento); }
+.aviso-error {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--error); border-radius: var(--radio);
+  background: color-mix(in srgb, var(--error) 10%, var(--superficie));
+}
+.aviso-error > div { flex: 1; }
+.aviso-error p { margin: 4px 0 0; font-size: 13px; }
+.registro summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.registro-herramientas { margin-left: auto; display: inline-flex; gap: 6px; }
+.registro-herramientas select { width: auto; padding: 3px 6px; font-size: 12px; }
+.registro-herramientas button { padding: 3px 10px; font-size: 12px; }
+.registro pre[data-filtro=avisos] span:not(.l-error):not(.l-aviso) { display: none; }
+.registro pre[data-filtro=errores] span:not(.l-error) { display: none; }

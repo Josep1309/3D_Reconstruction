@@ -138,6 +138,14 @@ const TEXTOS = {
     registro: "Registro del proceso",
     error_config: "No se pudo leer la configuración: {m}",
 
+    error_titulo: "El proceso terminó con un error", ver_manual: "Ver en el manual",
+    calidad_titulo: "Control de las poses capturadas", cal_saturado: "{p} % saturado", cal_invalida: "La pose {i} no sirve: revisa la pestaña Cámara.",
+    log_filtro: "Filtro", log_todo: "Todo", log_avisos: "Avisos y errores", log_errores: "Solo errores", log_descargar: "Descargar", log_limpiar: "Limpiar",
+    pausa_titulo_pose: "La captura está en pausa.", pausa_titulo_invalida: "La pose {i} no sirve.", pausa_titulo_reintentar: "No se pudo capturar la pose {i}.",
+    pausa_titulo_categoria: "¿Qué es esta captura?", pausa_ultima: "Pose anterior: {r}",
+    b_repetir_pose: "Repetir la pose ⏎", b_guardar_igual: "Guardarla igual", b_reintentar: "Reintentar ⏎",
+    b_plano: "Plano", b_objeto: "Objeto", b_omitir: "Omitir", b_repetir_anterior: "Repetir la anterior (r)",
+
     ajustes: "Ajustes", cerrar: "Cerrar", anterior: "Anterior", siguiente: "Siguiente", volver: "Volver",
     aj_apariencia: "Apariencia", aj_tema: "Tema", aj_tema_auto: "Automático", aj_tema_claro: "Claro", aj_tema_oscuro: "Oscuro",
     aj_fase: "Fase y máscaras", aj_fase_nota: "Deciden qué píxeles se consideran válidos. Desactiva una casilla para no aplicar ese paso y comparar resultados.",
@@ -361,6 +369,14 @@ const TEXTOS = {
     nube_error: "Could not load the point cloud: {m}", webgl_no: "WebGL is not available in this browser",
     registro: "Process log",
     error_config: "Could not read the configuration: {m}",
+
+    error_titulo: "The process ended with an error", ver_manual: "See in the manual",
+    calidad_titulo: "Check of the captured poses", cal_saturado: "{p} % saturated", cal_invalida: "Pose {i} is not usable: check the Camera tab.",
+    log_filtro: "Filter", log_todo: "All", log_avisos: "Warnings and errors", log_errores: "Errors only", log_descargar: "Download", log_limpiar: "Clear",
+    pausa_titulo_pose: "Capture is paused.", pausa_titulo_invalida: "Pose {i} is not usable.", pausa_titulo_reintentar: "Pose {i} could not be captured.",
+    pausa_titulo_categoria: "What is this capture?", pausa_ultima: "Previous pose: {r}",
+    b_repetir_pose: "Repeat the pose ⏎", b_guardar_igual: "Keep it anyway", b_reintentar: "Retry ⏎",
+    b_plano: "Plane", b_objeto: "Object", b_omitir: "Skip", b_repetir_anterior: "Repeat previous (r)",
 
     ajustes: "Settings", cerrar: "Close", anterior: "Previous", siguiente: "Next", volver: "Back",
     aj_apariencia: "Appearance", aj_tema: "Theme", aj_tema_auto: "Automatic", aj_tema_claro: "Light", aj_tema_oscuro: "Dark",

@@ -58,8 +58,14 @@ DIR_CALIBRACION = cfg.DIR_CALIBRACION
 ARCHIVO_VIVO = cfg.DIR_RESULTADOS / ".vivo" / "frame.jpg"
 RE_POSE = re.compile(r"^pose_\d+$")
 RE_ORDENADA = re.compile(r"^img_([HV])_(\d{1,2})$")
-RE_MARCA = re.compile(r"@@(vivo) (\d+) (\d+)|@@(previa) ([\d.]+)")
+RE_MARCA = re.compile(r"@@(vivo) (\d+) (\d+)|@@(previa) ([\d.]+)(?: ([\d.]+))?|@@exposicion [\d.]+")
 RE_PREGUNTA = re.compile(r"^@@pregunta (.*)$")  # el ejecutor anuncia así cada input() (ejecutor._input_marcado)
+RE_META = re.compile(r"^@@meta (\{.*\})$")        # datos de la próxima pregunta (capturar_patrones.preguntar)
+RE_CALIDAD = re.compile(r"^@@calidad (\{.*\})$")  # control de una pose recién capturada
+# Progreso: «=== Fase relativa: 'plano' (3 poses) ===», «=== RECONSTRUCCIÓN 3D: 'PLANO' (3 poses) ===»,
+# «=== Calibración Estéreo Tradicional (8 poses, …» y una línea «  [pose_XX] …» por pose terminada
+RE_TOTAL = re.compile(r"^=+ *[^:(]+?(?:: '(\w+)')? \((\d+) poses")
+RE_POSE_HECHA = re.compile(r"^\s+\[pose_\d+\]")
 
 
 # ==============================================================================
@@ -114,6 +120,10 @@ class Ejecucion:
         self.pregunta = ""
         self.inicio: float | None = None
         self.ultimo_codigo: int | None = None
+        self.meta: dict | None = None       # datos de la pregunta en curso (tipo, pose, motivos…)
+        self.progreso: dict | None = None   # {"cat", "i", "n", "t0"} de la etapa en curso
+        self.calidades: list[dict] = []      # control de cada pose capturada en esta ejecución
+        self.ultimo_error = ""               # última línea [ERROR] (se muestra si el proceso falla)
         self.lock = threading.Lock()
 
     @property
@@ -124,9 +134,21 @@ class Ejecucion:
         return {
             "ejecutando": self.activa, "etapa": self.etapa, "esperando": self.esperando,
             "pregunta": self.pregunta if self.esperando else "",
+            "meta": self.meta if self.esperando else None,
+            "progreso": self._progreso(),
+            "calidades": self.calidades[-60:],
+            "error": self.ultimo_error if self.ultimo_codigo not in (None, 0) else "",
             "codigo": self.ultimo_codigo,
             "segundos": round(time.time() - self.inicio, 1) if self.inicio and self.activa else None,
         }
+
+    def _progreso(self) -> dict | None:
+        p = self.progreso
+        if not p or not self.activa:
+            return None
+        transcurrido = time.time() - p["t0"]
+        restante = transcurrido / p["i"] * (p["n"] - p["i"]) if p["i"] else None
+        return {"cat": p["cat"], "i": p["i"], "n": p["n"], "restante_s": round(restante) if restante is not None else None}
 
     def _emitir_estado(self) -> None:
         difusor.emitir("estado", self.estado())
@@ -143,6 +165,7 @@ class Ejecucion:
                 cwd=RAIZ, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             )
             self.etapa, self.esperando, self.inicio, self.ultimo_codigo = None, False, time.time(), None
+            self.meta, self.progreso, self.calidades, self.ultimo_error = None, None, [], ""
         difusor.emitir("log", {"texto": f"\n▶ Ejecución iniciada {time.strftime('%H:%M:%S')}"})
         self._emitir_estado()
         threading.Thread(target=self._leer_salida, args=(self.proc, ruta), daemon=True).start()
@@ -153,11 +176,37 @@ class Ejecucion:
         for m in RE_MARCA.finditer(linea):
             if m.group(1):
                 difusor.emitir("vivo", {"i": int(m.group(2)), "n": int(m.group(3))})
-            else:
-                difusor.emitir("vivo", {"previa": True, "saturacion": float(m.group(5))})
+            elif m.group(4):
+                difusor.emitir("vivo", {"previa": True, "saturacion": float(m.group(5)),
+                                        "nitidez": float(m.group(6) or 0)})
         linea = RE_MARCA.sub("", linea)
         if not linea.strip():
             return
+        m = RE_META.match(linea.strip())
+        if m:
+            try:
+                self.meta = json.loads(m.group(1))
+            except json.JSONDecodeError:
+                self.meta = None
+            return
+        m = RE_CALIDAD.match(linea.strip())
+        if m:
+            try:
+                calidad = json.loads(m.group(1))
+            except json.JSONDecodeError:
+                return
+            self.calidades.append(calidad)
+            difusor.emitir("calidad", calidad)
+            return
+        m = RE_TOTAL.match(linea.strip())
+        if m:
+            self.progreso = {"cat": (m.group(1) or "patron").lower(), "i": 0, "n": int(m.group(2)), "t0": time.time()}
+            self._emitir_estado()
+        elif self.progreso and RE_POSE_HECHA.match(linea):
+            self.progreso["i"] = min(self.progreso["i"] + 1, self.progreso["n"])
+            self._emitir_estado()
+        if "[ERROR]" in linea:
+            self.ultimo_error = linea.strip()
         m = RE_PREGUNTA.match(linea.strip())
         if m:  # el proceso espera una respuesta
             self.pregunta = m.group(1)
@@ -168,6 +217,7 @@ class Ejecucion:
         m = re.match(r"# ETAPA: (\w+)", linea)
         if m:
             self.etapa = m.group(1)
+            self.progreso = None
             self._emitir_estado()
         if set(linea.strip()) == {"#"}:
             return  # separadores decorativos
@@ -200,6 +250,7 @@ class Ejecucion:
         self.proc.stdin.write((texto + "\n").encode())
         self.proc.stdin.flush()
         self.esperando = False
+        self.meta = None
         difusor.emitir("log", {"texto": f"  ⏎ {texto or '(Enter)'}"})
         self._emitir_estado()
 

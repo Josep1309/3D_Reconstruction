@@ -50,6 +50,7 @@ const fmt = (x, d = 1) => (x === null || x === undefined ? "—" : Number(x).toF
 // ============================== registro ==============================
 const log = $("#log");
 function agregarLog(texto) {
+  if (/MANUAL\.md §/.test(texto)) est.ultimaAyuda = texto;
   const span = document.createElement("span");
   if (/\[ERROR\]|Traceback|✖|Error:/.test(texto)) span.className = "l-error";
   else if (/\[AVISO\]|\[WARN\]/.test(texto)) span.className = "l-aviso";
@@ -62,6 +63,21 @@ function agregarLog(texto) {
   if (abajo) log.scrollTop = log.scrollHeight;
 }
 
+// Herramientas del registro: filtro, descarga y limpieza
+function iniciarRegistro() {
+  $("#log-filtro").addEventListener("change", (e) => { log.dataset.filtro = e.target.value; });
+  for (const id of ["#log-filtro", "#log-descargar", "#log-limpiar"]) $(id).addEventListener("click", (e) => e.stopPropagation());
+  $("#log-descargar").addEventListener("click", () => {
+    const texto = [...log.childNodes].map((n) => n.textContent).join("");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([texto], { type: "text/plain;charset=utf-8" }));
+    a.download = `registro_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.txt`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+  $("#log-limpiar").addEventListener("click", () => { log.innerHTML = ""; });
+}
+
 // ============================== estado de ejecución ==============================
 function pintarEjecucion(e) {
   est.ejec = e;
@@ -69,7 +85,12 @@ function pintarEjecucion(e) {
   let clase = "chip-inactivo", texto = t("estado_inactivo");
   if (e.ejecutando && e.etapa === "previa") { clase = "chip-activo"; texto = t("estado_previa"); }
   else if (e.ejecutando && e.esperando) { clase = "chip-espera"; texto = t("estado_esperando"); }
-  else if (e.ejecutando) { clase = "chip-activo"; texto = e.etapa ? t("estado_ejecutando", { etapa: nombreEtapa(e.etapa) }) : t("estado_iniciando"); }
+  else if (e.ejecutando) {
+    clase = "chip-activo";
+    texto = e.etapa ? t("estado_ejecutando", { etapa: nombreEtapa(e.etapa) }) : t("estado_iniciando");
+    const p = e.progreso;
+    if (p && p.n) texto += ` · ${nombreCat(p.cat)} ${p.i}/${p.n}` + (p.restante_s ? ` · ~${formatoDuracion(p.restante_s)}` : "");
+  }
   else if (e.codigo === 0) { clase = "chip-ok"; texto = t("estado_terminado"); }
   else if (e.codigo !== null && e.codigo !== undefined) { clase = "chip-error"; texto = t("estado_error", { c: e.codigo }); }
   chip.className = `chip ${clase}`;
@@ -85,9 +106,10 @@ function pintarEjecucion(e) {
   $("#pausa").classList.toggle("oculto", !pausaCaptura);
   $("#vivo-pausa").classList.toggle("oculto", !pausaCaptura);
   $("#b-cerrar-previa").classList.toggle("oculto", !previa);
-  if (pausaCaptura) $("#b-continuar").focus();
-  $("#pausa-pose").textContent = pausaCaptura ? poseEnPausa() : "";
+  pintarPausa(pausaCaptura ? e.meta : undefined);
   pintarTextoVivo();
+  pintarCalidades();
+  pintarAvisoError(e);
 
   $("#vivo").classList.toggle("oculto", !capturando);
   $("#camara-inactiva").classList.toggle("oculto", capturando);
@@ -101,7 +123,7 @@ function pintarEjecucion(e) {
   }
   // Mientras la cámara está activa se muestra su pestaña (aunque «seguir» esté desactivado)
   if (capturando) mostrarPaso("camara");
-  marcarEtapaEnCurso(e.ejecutando ? e.etapa : null);
+  marcarEtapaEnCurso(e.ejecutando ? e.etapa : null, e.progreso);
   actualizarBotonUsar();
   pintarPasos();
   if (!e.ejecutando) refrescarEstado();
@@ -343,10 +365,98 @@ async function cargarNube() {
 // Texto bajo la vista en vivo: vista previa (encuadre) o número de frame durante la captura
 // «[patron] Prepara la pose 3/12 …» -> "Patrón · pose 3 de 12"
 function poseEnPausa() {
-  const m = /\[(\w+)\] Prepara la pose (\d+)\/(\d+)/.exec(est.ejec.pregunta || "");
-  if (!m) return "";
-  const cat = nombreCat(m[1]);
-  return t("pausa_pose", { cat: cat.charAt(0).toUpperCase() + cat.slice(1), i: m[2], n: m[3] });
+  const meta = est.ejec.meta;
+  if (!meta?.cat || !meta.i) return "";
+  const cat = nombreCat(meta.cat);
+  return t("pausa_pose", { cat: cat.charAt(0).toUpperCase() + cat.slice(1), i: meta.i, n: meta.n });
+}
+
+// Botones de la pausa según lo que pregunta el proceso (meta.tipo, ver capturar_patrones.preguntar)
+function opcionesPausa(meta) {
+  switch (meta?.tipo) {
+    case "invalida": return [{ k: "b_repetir_pose", r: "r", p: true }, { k: "b_guardar_igual", r: "s" }, { k: "terminar", r: "q" }];
+    case "reintentar": return [{ k: "b_reintentar", r: "", p: true }, { k: "terminar", r: "q" }];
+    case "categoria": return [{ k: "b_plano", r: "p" }, { k: "b_objeto", r: "o", p: true }, { k: "b_omitir", r: "s" }];
+    default: {
+      const ops = [{ k: "continuar", r: "", p: true }];
+      if (meta?.puede_repetir) ops.push({ k: "b_repetir_anterior", r: "r" });
+      ops.push({ k: "terminar", r: "q" });
+      return ops;
+    }
+  }
+}
+
+const responder = (texto) => api("/api/entrada", { texto }).catch((e) => agregarLog(`[ERROR] ${e.message}`));
+
+function pintarPausa(meta) {
+  const visible = meta !== undefined;
+  $("#pausa").classList.toggle("oculto", !visible);
+  $("#pausa").classList.toggle("invalida", ["invalida", "reintentar"].includes(meta?.tipo));
+  if (!visible) return;
+  const tipo = meta?.tipo || "pose";
+  $("#pausa-titulo").textContent = t(`pausa_titulo_${tipo}`, { i: meta?.i ?? "", f: meta?.fuente ?? "" });
+  $("#pausa-pose").textContent = tipo === "pose" ? poseEnPausa() : "";
+  const ultima = est.ejec.calidades?.at(-1);
+  $("#pausa-texto").textContent = tipo === "pose" ? t("pausa_texto") + (ultima && meta?.puede_repetir ? " " + t("pausa_ultima", { r: resumenCalidad(ultima) }) : "")
+    : tipo === "categoria" ? meta.fuente : "";
+  const motivos = $("#pausa-motivos");
+  motivos.innerHTML = "";
+  for (const m of meta?.motivos || (meta?.error ? [meta.error] : [])) {
+    const li = document.createElement("li"); li.textContent = m; motivos.appendChild(li);
+  }
+  const clave = JSON.stringify(meta) + IDIOMA;
+  for (const cont of [$("#pausa-botones"), $("#vivo-pausa")]) {
+    if (cont.dataset.clave === clave) continue;
+    cont.dataset.clave = clave;
+    cont.innerHTML = "";
+    for (const op of opcionesPausa(meta)) {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = t(op.k); if (op.p) b.className = "primario";
+      b.dataset.respuesta = op.r;
+      b.addEventListener("click", () => responder(op.r));
+      cont.appendChild(b);
+    }
+  }
+  $("#pausa-botones .primario")?.focus();
+}
+
+// Control de calidad de cada pose capturada (servidor: evento «calidad» y estado.calidades)
+function resumenCalidad(c) {
+  if (!c.ok) return "✖ " + (c.motivos || []).join("; ");
+  const partes = [`✔ H ${fmt(c.modulacion_H, 2)} · V ${fmt(c.modulacion_V, 2)}`];
+  if (c.saturado != null) partes.push(t("cal_saturado", { p: (100 * c.saturado).toFixed(1) }));
+  return partes.join(" · ") + (c.avisos?.length ? " ⚠ " + c.avisos.join("; ") : "");
+}
+
+function pintarCalidades() {
+  const lista = est.ejec.calidades || [];
+  $("#calidad-poses").classList.toggle("oculto", !lista.length);
+  const ol = $("#calidad-lista");
+  ol.innerHTML = "";
+  for (const c of [...lista].reverse()) {
+    const li = document.createElement("li");
+    li.className = c.ok ? (c.avisos?.length ? "aviso" : "ok") : "mal";
+    const cat = nombreCat(c.cat);
+    li.innerHTML = "<b></b> <span></span>";
+    $("b", li).textContent = `${cat.charAt(0).toUpperCase() + cat.slice(1)} ${c.i}/${c.n}`;
+    $("span", li).textContent = resumenCalidad(c);
+    ol.appendChild(li);
+  }
+}
+
+function formatoDuracion(s) {
+  return s >= 90 ? `${Math.round(s / 60)} min` : `${Math.round(s)} s`;
+}
+
+// Aviso destacado cuando el proceso termina con error (con enlace al manual si lo indica)
+function pintarAvisoError(e) {
+  const hay = !e.ejecutando && e.codigo != null && e.codigo !== 0 && est.errorCerrado !== e.error;
+  $("#aviso-error").classList.toggle("oculto", !hay);
+  if (!hay) return;
+  $("#aviso-error-texto").textContent = (e.error || t("estado_error", { c: e.codigo })).replace(/^\[ERROR\]\s*/, "");
+  const seccion = /§(\d+(?:\.\d+)?)/.exec(est.ultimaAyuda || e.error || "");
+  $("#aviso-error-manual").classList.toggle("oculto", !seccion);
+  $("#aviso-error-manual").dataset.seccion = seccion ? seccion[1] : "";
 }
 
 function pintarTextoVivo() {
@@ -376,6 +486,12 @@ function conectarEventos() {
   const es = new EventSource("/api/eventos");
   es.addEventListener("log", (e) => agregarLog(JSON.parse(e.data).texto));
   es.addEventListener("estado", (e) => pintarEjecucion(JSON.parse(e.data)));
+  es.addEventListener("calidad", (e) => {
+    const c = JSON.parse(e.data);
+    est.ejec.calidades = [...(est.ejec.calidades || []), c];
+    pintarCalidades();
+    if (!c.ok) agregarLog(`[AVISO] ${t("cal_invalida", { i: c.i })}`);
+  });
   es.addEventListener("vivo", (e) => {
     const d = JSON.parse(e.data);
     const vivo = $("#vivo");
@@ -442,8 +558,16 @@ function construirSecuencia(etapas) {
   }
 }
 
-function marcarEtapaEnCurso(etapa) {
-  for (const li of $$("#etapas li")) li.classList.toggle("en-curso", li.dataset.etapa === etapa);
+function marcarEtapaEnCurso(etapa, progreso) {
+  for (const li of $$("#etapas li")) {
+    const activa = li.dataset.etapa === etapa;
+    li.classList.toggle("en-curso", activa);
+    let barra = $(".prog", li);
+    if (activa && progreso?.n) {
+      if (!barra) { barra = document.createElement("progress"); barra.className = "prog"; li.appendChild(barra); }
+      barra.max = progreso.n; barra.value = progreso.i;
+    } else barra?.remove();
+  }
 }
 
 // ============================== ayudas contextuales ==============================
@@ -639,9 +763,10 @@ async function iniciar() {
     ejecutar(confAvanzada());
   });
   $("#b-detener").addEventListener("click", () => api("/api/detener", {}).catch((e) => agregarLog(`[ERROR] ${e.message}`)));
-  const responder = (texto) => api("/api/entrada", { texto }).catch((e) => agregarLog(`[ERROR] ${e.message}`));
-  for (const id of ["#b-continuar", "#b-continuar2", "#b-cerrar-previa"]) $(id).addEventListener("click", () => responder(""));
-  for (const id of ["#b-terminar", "#b-terminar2"]) $(id).addEventListener("click", () => responder("q"));
+  $("#b-cerrar-previa").addEventListener("click", () => responder(""));
+  $("#aviso-error-cerrar").addEventListener("click", () => { est.errorCerrado = est.ejec.error; pintarAvisoError(est.ejec); });
+  $("#aviso-error-manual").addEventListener("click", () => window.abrirManual?.($("#aviso-error-manual").dataset.seccion));
+  iniciarRegistro();
   $("#b-previa").addEventListener("click", () =>
     ejecutar({ solo_previa: true, simular: $("#m-demo").checked ? $("#m-fuente").value : null }));
   for (const id of ["#m-categoria", "#m-demo"]) $(id).addEventListener("change", notaMedir);
@@ -658,7 +783,10 @@ async function iniciar() {
   $("#n-reiniciar").addEventListener("click", () => est.visor?.reiniciar());
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") $$("figure.ampliada").forEach((f) => f.classList.remove("ampliada"));
-    if (e.key === "Enter" && est.ejec.esperando && document.activeElement?.tagName !== "INPUT") $("#b-continuar").click();
+    if (e.key === "Enter" && est.ejec.esperando && !["INPUT", "BUTTON", "SELECT"].includes(document.activeElement?.tagName)) {
+      const primario = opcionesPausa(est.ejec.meta).find((o) => o.p);
+      if (primario) responder(primario.r);
+    }
   });
   aplicarIdioma();
   textoNube();

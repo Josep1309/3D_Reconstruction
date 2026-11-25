@@ -15,6 +15,7 @@ Ejemplos:
 from __future__ import annotations
 
 import argparse
+import json
 import threading
 import time
 from datetime import datetime
@@ -29,13 +30,16 @@ import configuracion as cfg
 AlFrame = Callable[[int, np.ndarray], None]
 AlPrevia = Callable[[np.ndarray], None]
 
+# Cámara abierta en este momento (la usa la interfaz para cambiar la exposición en vivo)
+camara_activa: "CamaraFLIR | CamaraSimulada | None" = None
+
 
 class CamaraFLIR:
     """Blackfly S configurada con trigger externo en Line0 (se usa con `with`)."""
 
     def __init__(
         self,
-        exposicion_us: float = cfg.CAM_EXPOSICION_US,
+        exposicion_us: float | None = None,
         debounce_us: float = cfg.CAM_DEBOUNCE_US,
         trigger_delay_us: float | None = cfg.CAM_TRIGGER_DELAY_US,
         timeout_ms: int = cfg.CAM_TIMEOUT_MS,
@@ -44,7 +48,8 @@ class CamaraFLIR:
         import PySpin  # solo se necesita al capturar
 
         self.ps = PySpin
-        self.exposicion_us = exposicion_us
+        # None = la de configuracion.py en el momento de abrir (la interfaz puede haberla cambiado)
+        self.exposicion_us = cfg.CAM_EXPOSICION_US if exposicion_us is None else exposicion_us
         self.debounce_us = debounce_us
         self.trigger_delay_us = trigger_delay_us
         self.timeout_ms = timeout_ms
@@ -65,9 +70,21 @@ class CamaraFLIR:
         self.camera = self.cameras.GetByIndex(self.indice)
         self.camera.Init()
         self._configurar_trigger()
+        global camara_activa
+        camara_activa = self
         return self
 
+    def fijar_exposicion(self, exposicion_us: float) -> float:
+        """Cambia la exposición (también durante la vista previa). Devuelve el valor aplicado."""
+        cam = self.camera
+        valor = min(max(float(exposicion_us), cam.ExposureTime.GetMin()), cam.ExposureTime.GetMax())
+        cam.ExposureTime.SetValue(valor)
+        self.exposicion_us = valor
+        return cam.ExposureTime.GetValue()
+
     def __exit__(self, exc_type, exc, tb) -> None:
+        global camara_activa
+        camara_activa = None
         self.detener_vista_previa()
         if self.camera is not None:
             try:
@@ -246,19 +263,33 @@ class CamaraSimulada:
         self.frames = oc.cargar_frames(fuentes[0])
         self.periodo_s = periodo_s
         self.inicio = int(np.random.default_rng().integers(len(self.frames)))
+        self.ganancia = 1.0  # simula la exposición: frames × (exposición / exposición original)
         print(f"[OK] Cámara SIMULADA con {len(self.frames)} frames de '{carpeta}'")
 
     def __enter__(self) -> CamaraSimulada:
+        global camara_activa
+        camara_activa = self
         return self
 
     def __exit__(self, *_exc) -> None:
-        return None
+        global camara_activa
+        camara_activa = None
+
+    def fijar_exposicion(self, exposicion_us: float) -> float:
+        self.ganancia = float(exposicion_us) / cfg.VALORES_ORIGINALES["CAM_EXPOSICION_US"]
+        return float(exposicion_us)
+
+    def _frame(self, i: int) -> np.ndarray:
+        f = self.frames[i % len(self.frames)]
+        if self.ganancia == 1.0:
+            return f.copy()
+        return np.clip(f.astype(np.float32) * self.ganancia, 0, 255 if f.dtype == np.uint8 else 65535).astype(f.dtype)
 
     def capturar(self, cantidad: int, al_frame: AlFrame | None = None) -> list[np.ndarray]:
         frames, tiempos = [], []
         for indice in range(cantidad):
             time.sleep(self.periodo_s)
-            frames.append(self.frames[(self.inicio + indice) % len(self.frames)].copy())
+            frames.append(self._frame(self.inicio + indice))
             tiempos.append(time.perf_counter())
             if al_frame is not None:
                 al_frame(indice, frames[-1])
@@ -273,7 +304,7 @@ class CamaraSimulada:
             i = self.inicio
             while self._previa_activa:
                 time.sleep(1.0 / fps)
-                al_frame(self.frames[i % len(self.frames)])
+                al_frame(self._frame(i))
                 i += 1
 
         self._hilo_previa = threading.Thread(target=bucle, daemon=True)
@@ -317,6 +348,24 @@ def guardar_captura(
     return carpeta
 
 
+def preguntar(texto: str, **meta) -> str:
+    """`input()` con datos para la interfaz web: antes de la pregunta imprime `@@meta {json}`, que
+    el servidor usa para mostrar los botones adecuados (en la terminal es solo una línea más)."""
+    if meta:
+        print("@@meta " + json.dumps(meta, ensure_ascii=False), flush=True)
+    return input(texto).strip().lower()
+
+
+def _a_papelera(carpeta: Path) -> None:
+    """Una pose descartada no se borra: va a <DATOS>/papelera/ (recuperable)."""
+    import shutil
+
+    destino = cfg.DATOS / "papelera" / (datetime.now().strftime("%Y%m%d_%H%M%S") + "_repetida") / "capturas" / carpeta.parent.name
+    destino.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(carpeta), str(destino / carpeta.name))
+    print(f"    [OK] Pose descartada: {carpeta.name} movida a la papelera")
+
+
 def capturar_poses(
     categoria: str,
     poses: int = 1,
@@ -327,36 +376,86 @@ def capturar_poses(
     al_frame: AlFrame | None = None,
     sufijo: str = "",
     al_previa: AlPrevia | None = None,
+    validar: bool = True,
 ) -> list[Path]:
     """Captura `poses` secuencias de la categoría indicada, pidiendo confirmación entre poses.
 
-    `camara`: objeto con `__enter__` y `capturar` (por defecto `CamaraFLIR()`; `CamaraSimulada`
-    para el modo demo). `sufijo` se añade al nombre de la carpeta (p. ej. "_simulada").
-    `al_previa(frame)`: si se da, durante cada pausa la cámara transmite una vista previa
-    continua (sin trigger) para encuadrar el objeto; se detiene al confirmar la pose.
+    - `camara`: objeto con `__enter__` y `capturar` (por defecto `CamaraFLIR()`; `CamaraSimulada`
+      para el modo demo). `sufijo` se añade al nombre de la carpeta (p. ej. "_simulada").
+    - `al_previa(frame)`: si se da, durante cada pausa la cámara transmite una vista previa continua
+      (sin trigger) para encuadrar; se detiene al confirmar la pose.
+    - `validar`: tras cada pose se comprueba la secuencia (`organizar_capturas.evaluar_captura`). Si
+      no sirve (p. ej. el proyector no proyectaba) se ofrece repetirla.
+    - En la pausa, «r» repite la pose anterior (la descartada va a la papelera).
     """
+    import organizar_capturas as oc
+
     cantidad = cfg.IMAGENES_POR_CICLO * max(ciclos, 1)
     carpetas: list[Path] = []
+    pose = 0
     with (camara if camara is not None else CamaraFLIR()) as camara:
-        for pose in range(poses):
+        while pose < poses:
             if esperar_enter:
                 previa = al_previa is not None and hasattr(camara, "iniciar_vista_previa")
                 if previa:
                     camara.iniciar_vista_previa(al_previa)
                 try:
-                    resp = input(
-                        f"\n[{categoria}] Prepara la pose {pose + 1}/{poses} y presiona Enter (q = terminar): "
-                    ).strip().lower()
+                    extra = ", r = repetir la anterior" if carpetas else ""
+                    resp = preguntar(
+                        f"\n[{categoria}] Prepara la pose {pose + 1}/{poses} y presiona Enter (q = terminar{extra}): ",
+                        tipo="pose", cat=categoria, i=pose + 1, n=poses, puede_repetir=bool(carpetas),
+                    )
                 finally:
                     if previa:
                         camara.detener_vista_previa()
                 if resp == "q":
                     break
+                if resp == "r" and carpetas:
+                    _a_papelera(carpetas.pop())
+                    pose -= 1
+                    continue
             print(f"    Capturando {cantidad} frames...", flush=True)
-            frames = camara.capturar(cantidad, al_frame)
+            try:
+                frames = camara.capturar(cantidad, al_frame)
+            except RuntimeError as exc:  # p. ej. sin trigger: Arduino apagado o desconectado
+                print(f"    [ERROR] {exc}", flush=True)
+                if not esperar_enter:
+                    raise
+                resp = preguntar(
+                    f"[{categoria}] La pose {pose + 1} no se pudo capturar. Enter = reintentar, q = terminar: ",
+                    tipo="reintentar", cat=categoria, i=pose + 1, n=poses, error=str(exc),
+                )
+                if resp == "q":
+                    break
+                continue
             carpeta = guardar_captura(frames, salida, categoria, sufijo=sufijo)
-            carpetas.append(carpeta)
             print(f"    [OK] {len(frames)} frames en '{carpeta}'")
+            if validar:
+                ev = oc.evaluar_captura(frames)
+                print("@@calidad " + json.dumps({"cat": categoria, "i": pose + 1, "n": poses, **ev}, ensure_ascii=False),
+                      flush=True)
+                for aviso in ev["avisos"]:
+                    print(f"    [AVISO] {aviso}")
+                if not ev["ok"]:
+                    for motivo in ev["motivos"]:
+                        print(f"    [ERROR] Pose {pose + 1} inválida: {motivo}")
+                    if esperar_enter:
+                        resp = preguntar(
+                            f"[{categoria}] La pose {pose + 1}/{poses} no sirve. Enter/r = repetirla, "
+                            f"s = guardarla igual, q = terminar: ",
+                            tipo="invalida", cat=categoria, i=pose + 1, n=poses, motivos=ev["motivos"],
+                        )
+                        if resp in ("", "r"):
+                            _a_papelera(carpeta)
+                            continue
+                        if resp == "q":
+                            carpetas.append(carpeta)
+                            break
+                else:
+                    print(f"    [OK] Pose válida | modulación H={ev['modulacion_H']:.2f} V={ev['modulacion_V']:.2f} | "
+                          f"saturado {100 * ev['saturado']:.1f} %")
+            carpetas.append(carpeta)
+            pose += 1
     return carpetas
 
 

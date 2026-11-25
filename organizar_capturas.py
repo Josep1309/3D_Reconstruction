@@ -409,6 +409,8 @@ def categoria_por_contenido(sec: np.ndarray, descripcion: str, interactivo: bool
 
     if interactivo:
         while True:
+            # Datos para la interfaz web: muestra los botones Plano / Objeto / Omitir
+            print("@@meta " + json.dumps({"tipo": "categoria", "fuente": descripcion}, ensure_ascii=False), flush=True)
             resp = input(
                 f"  [?] '{descripcion}' no indica su categoría y no tiene grilla de círculos. "
                 f"¿Es plano (p), objeto (o) o se omite (s)? "
@@ -444,6 +446,43 @@ def guardar_pose(
             ruta = carpeta / f"{prefijo}{k:02d}{extension}"
             if not cv2.imwrite(str(ruta), secuencia[i]):
                 raise OSError(f"No se pudo escribir {ruta}")
+
+
+def evaluar_captura(frames: list[np.ndarray]) -> dict:
+    """Control rápido de una pose recién capturada (~0.2 s), antes de pasar a la siguiente.
+
+    Devuelve {"ok", "motivos" (problemas que la invalidan), "avisos" (no la invalidan),
+    "modulacion_H", "modulacion_V", "saturado"}. Usa la misma segmentación y verificación que
+    `organizar`, así que una pose aprobada aquí se podrá organizar.
+    """
+    motivos: list[str] = []
+    avisos: list[str] = []
+    datos: dict = {"modulacion_H": None, "modulacion_V": None, "saturado": None}
+    secuencias, avisos_seg = segmentar_secuencias(frames, cfg.IMAGENES_POR_CICLO)
+    if not secuencias:
+        motivos.append(describir_rechazo(frames, avisos_seg))
+        return {"ok": False, "motivos": motivos, "avisos": avisos, **datos}
+    sec = secuencias[0].frames
+    calidad = verificar_secuencia(sec)
+    blanco = np.asarray(sec[-1])
+    tope = 255 if blanco.dtype == np.uint8 or blanco.max() <= 255 else 65535
+    muestra = blanco[::4, ::4]
+    datos.update(modulacion_H=round(calidad["modulacion_H"], 3), modulacion_V=round(calidad["modulacion_V"], 3),
+                 saturado=round(float(np.count_nonzero(muestra >= 0.98 * tope)) / muestra.size, 4))
+    for orient in ("H", "V"):
+        if calidad[f"pureza_{orient}"] < 0.5:
+            motivos.append(f"franjas {orient} desalineadas (pureza {calidad[f'pureza_{orient}']:.2f}): "
+                           f"frame perdido o secuencia distinta")
+    if calidad["modulacion_V"] < cfg.GAMMA_TH:
+        motivos.append(f"franjas verticales casi sin contraste (modulación {calidad['modulacion_V']:.2f}): "
+                       f"desenfoque, exposición o proyector")
+    if calidad["modulacion_H"] < cfg.GAMMA_TH_Y:
+        avisos.append(f"franjas horizontales con poco contraste ({calidad['modulacion_H']:.2f})")
+    if datos["saturado"] > 0.02:
+        avisos.append(f"{100 * datos['saturado']:.1f} % de píxeles saturados en el blanco: baja la exposición")
+    if any("se movió" in a for a in avisos_seg):
+        avisos.append("la escena se movió durante parte de la captura")
+    return {"ok": not motivos, "motivos": motivos, "avisos": avisos, **datos}
 
 
 def describir_rechazo(frames: list[np.ndarray], avisos: list[str]) -> str:
@@ -514,7 +553,8 @@ def organizar(
             raise ValueError("La carpeta de salida debe ser distinta a la de entrada.")
 
     if interactivo is None:
-        interactivo = sys.stdin.isatty()
+        # En la interfaz web stdin no es una terminal, pero las preguntas llegan como botones
+        interactivo = sys.stdin.isatty() or os.environ.get("TESIS_INTERACTIVO") == "1"
     manifiesto = cargar_manifiesto(dir_salida)
     hay_poses_previas = any((dir_salida / c).glob("pose_*") for c in cfg.CATEGORIAS if (dir_salida / c).is_dir())
     if not manifiesto["poses"] and hay_poses_previas and not rehacer:

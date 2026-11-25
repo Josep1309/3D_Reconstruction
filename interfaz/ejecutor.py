@@ -58,6 +58,11 @@ class VistaEnVivo:
     """
 
     def __init__(self, total: int, intervalo_s: float = 0.15, alfa: float = 0.08) -> None:
+        self.nitidez: deque[float] = deque(maxlen=cfg.IMAGENES_POR_CICLO)
+        try:  # un control.json viejo (de otra sesión) no se aplica
+            self.control_m: float | None = (DIR_VIVO / "control.json").stat().st_mtime
+        except OSError:
+            self.control_m = None
         # alfa = 0.08: promedio de ~25 frames (~1.7 s a 15 fps), suficiente para que las franjas
         # del proyector se borren; el objeto tarda ese tiempo en "asentarse" al moverlo.
         self.total = total
@@ -87,12 +92,41 @@ class VistaEnVivo:
             cv2.accumulateWeighted(f, self.media, self.alfa)  # media ← (1-α)·media + α·frame
         muestra = f8[::4, ::4]
         self.saturados.append(float(np.count_nonzero(muestra >= 250)) / muestra.size)
+        # Nitidez: varianza del laplaciano en el centro del frame crudo (con franjas). Se toma el
+        # máximo de un ciclo, cuando se proyectan las franjas más finas: sube al enfocar
+        alto, ancho = f8.shape[:2]
+        centro = f8[alto // 4: 3 * alto // 4: 2, ancho // 4: 3 * ancho // 4: 2]
+        self.nitidez.append(float(cv2.Laplacian(centro, cv2.CV_32F).var()))
         self.ultimo = ("previa", 0, self.media)
         self.version += 1
+
+    def _aplicar_control(self) -> None:
+        """La interfaz deja en `.vivo/control.json` la exposición pedida; se aplica a la cámara abierta."""
+        ruta = DIR_VIVO / "control.json"
+        try:
+            m = ruta.stat().st_mtime
+        except OSError:
+            return
+        if m == self.control_m:
+            return
+        self.control_m = m
+        import capturar_patrones as cp
+
+        try:
+            pedido = json.loads(ruta.read_text(encoding="utf-8"))
+            if cp.camara_activa is not None and pedido.get("exposicion_us"):
+                aplicada = cp.camara_activa.fijar_exposicion(float(pedido["exposicion_us"]))
+                cfg.CAM_EXPOSICION_US = aplicada  # también para las poses que siguen
+                sys.stdout.write(f"\n@@exposicion {aplicada:.0f}\n")
+                sys.stdout.flush()
+        except Exception as exc:  # noqa: BLE001
+            sys.stdout.write(f"\n[AVISO] No se pudo cambiar la exposición: {exc}\n")
+            sys.stdout.flush()
 
     def _bucle(self) -> None:
         while True:
             time.sleep(self.intervalo_s)
+            self._aplicar_control()
             dato, version = self.ultimo, self.version
             if dato is None or version == self.escrita:
                 continue
@@ -108,13 +142,14 @@ class VistaEnVivo:
             if modo == "captura":
                 mensaje = f"@@vivo {indice + 1} {self.total}\n"
             else:
-                mensaje = f"@@previa {max(self.saturados, default=0.0):.4f}\n"
+                mensaje = f"@@previa {max(self.saturados, default=0.0):.4f} {max(self.nitidez, default=0.0):.1f}\n"
             sys.stdout.write("\n" + mensaje)
             sys.stdout.flush()
 
 
 # Ajustes de procesamiento que puede cambiar la interfaz, y el valor que los «desactiva»
 AJUSTES_NEUTROS = {
+    "CAM_EXPOSICION_US": 12000.0,    # (siempre activo: el valor lo pone la interfaz)
     "SUAVIZADO_FASE_PX": 0.0,        # sin suavizado de S y C
     "GAMMA_TH": 0.0,                 # sin máscara de modulación X
     "GAMMA_TH_Y": 0.0,               # sin máscara de modulación Y
@@ -234,6 +269,7 @@ def _al_detener(_senal, _marco) -> None:
 def main() -> None:
     signal.signal(signal.SIGTERM, _al_detener)
     builtins.input = _input_marcado
+    os.environ["TESIS_INTERACTIVO"] = "1"  # organizar puede preguntar (la interfaz muestra botones)
     conf = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     if conf.get("solo_previa"):
         solo_vista_previa(conf)
