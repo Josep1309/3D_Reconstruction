@@ -559,3 +559,28 @@ li.pendiente { color: var(--texto-2); }
 .si-item { display: flex; gap: 8px; font-size: 13px; padding: 3px 0; }
 .si-item small { display: block; color: var(--texto-2); }
 button.enlace { background: none; border: none; padding: 0; color: var(--acento); font-size: 12px; cursor: pointer; text-decoration: underline; }
+
+/* ---------- Medición sobre el mapa Z ---------- */
+.panel[data-panel="profundidad"] figure[data-tipo="Z"] { position: relative; }
+.panel[data-panel="profundidad"] figure[data-tipo="Z"] img { cursor: crosshair; }
+.me-capa { position: absolute; pointer-events: none; overflow: visible; }
+.me-capa .me-punto { fill: #fff; stroke: var(--s-est); stroke-width: .004; }
+.me-capa .me-punto.pend { fill: var(--s-est); }
+.me-capa .me-linea { stroke: var(--s-est); stroke-width: .004; stroke-dasharray: .015 .01; }
+.me-capa .me-linea.dist { stroke: #fff; }
+.me-capa .me-txt { fill: #fff; font: .035px system-ui, sans-serif; paint-order: stroke; stroke: #000; stroke-width: .006; }
+.me-barra { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.me-barra h3 { margin: 0 8px 0 0; font-size: 14px; }
+#me-modo { border: 1px solid var(--borde); background: var(--superficie-2); }
+#me-modo button { font-size: 12.5px; }
+.me-descargas { margin-left: auto; display: inline-flex; gap: 6px; flex-wrap: wrap; }
+a.boton { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--borde); background: var(--superficie-2); color: var(--texto); text-decoration: none; font-size: 12.5px; }
+a.boton:hover { border-color: var(--texto-2); }
+.me-puntos { display: flex; flex-direction: column; gap: 3px; font: 12.5px ui-monospace, Menlo, monospace; margin: 6px 0; }
+.me-dist { font-weight: 700; color: var(--acento); }
+.medicion h4 { margin: 10px 0 4px; font-size: 13px; }
+.me-grafico { width: 100%; max-width: 760px; height: auto; display: block; }
+.me-grafico text { fill: var(--texto-2); font: 11px system-ui, sans-serif; }
+.me-grafico .eje { stroke: var(--borde); }
+.me-grafico .me-curva { fill: none; stroke: var(--s-est); stroke-width: 1.6; }
+.me-grafico .me-barra { fill: var(--s-proj); }

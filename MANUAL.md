@@ -1198,7 +1198,9 @@ está escrito en WebGL puro, así que funciona sin internet.
 
 ### 19.2 Visualización (derecha)
 
-Seis pestañas de pasos y una de calibración. Las de resultados siguen solas al proceso en curso
+Seis pestañas de pasos y tres aparte: **Sistema** (estado del equipo, lista de comprobación antes
+de medir y espacio en disco), **Archivos** y **Calibración**. Arriba a la derecha están el
+**manual** (📖, también con la tecla `?`) y los **Ajustes** (⚙). Las pestañas de resultados siguen solas al proceso en curso
 cuando **Seguir la última** está activo:
 
 1. **Cámara.** Todo lo de la cámara en un solo lugar. Se abre sola cuando la cámara se activa,
@@ -1222,7 +1224,16 @@ cuando **Seguir la última** está activo:
 3. **Fase envuelta.** φ de X e Y en [−π, π] y la modulación γ de cada una.
 4. **Fase desenvuelta.** Fx y Fy, el orden de franja k del código Gray y el mapa de píxeles
    válidos.
-5. **Profundidad.** Mapa Z y, en los planos, el error respecto al plano ajustado.
+5. **Profundidad.** Mapa Z y, en los planos, el error respecto al plano ajustado. Debajo,
+   **Medir sobre el mapa Z**:
+   - *Punto y distancia*: un clic en el mapa Z lee X, Y, Z del píxel válido más cercano. Un
+     segundo clic da la distancia 3D entre los dos puntos, ΔZ y la distancia en X-Y.
+   - *Perfil*: dos clics grafican Z a lo largo de la línea. Cada muestra es la mediana de los
+     píxeles válidos de una ventana 5 × 5. Incluye Z mínima, máxima y rango.
+   - En los planos, el **histograma del error** respecto al plano, con RMS, P95 y máximo.
+   - **Descargas:** la nube `.ply` (binaria, con color), los puntos `.csv` (columna, fila, X, Y, Z
+     en mm) y el informe de la calibración en uso (`.json`).
+   - *Ampliar* agranda el mapa sin dejar de medir.
 6. **Nube de puntos.** Visor 3D interactivo con hasta 400 000 puntos, coloreados por profundidad
    o por textura:
    - arrastrar = girar;
@@ -1435,6 +1446,13 @@ API, por si se quiere automatizar algo:
 | `POST /api/archivos/borrar` | `{"carpetas": ["patron/2026…", …]}`: a la papelera, con todo lo derivado |
 | `POST /api/archivos/vaciar_papelera` | Borra definitivamente la papelera |
 | `POST /api/configuracion/elegir` | `{"proceso": "<id>" | null}`: configuración vigente (null = la última) y su calibración |
+| `GET /api/punto?cat=&pose=&fx=&fy=` | X, Y, Z del píxel válido más cercano (coordenadas de la imagen en [0, 1]) |
+| `GET /api/perfil?cat=&pose=&ax=&ay=&bx=&by=` | Z a lo largo de un segmento |
+| `GET /api/histograma?cat=plano&pose=` | Histograma y estadísticas del error respecto al plano |
+| `GET /api/descargar?tipo=ply\|csv\|calibracion&cat=&pose=` | Archivos para descargar |
+| `GET /api/sistema?hw=0\|1` | Comprobaciones de `verificar.py --json` y espacio en disco |
+| `GET /api/manual` | `MANUAL.md` (la interfaz lo muestra con su índice) |
+| `POST /api/camara` | `{"exposicion_us": N}`: exposición en vivo durante la vista previa |
 | `GET /api/captura/lista?carpeta=` · `GET /api/captura/imagen?carpeta=&i=&ancho=` | Imágenes crudas de una captura |
 | `POST /api/calibraciones/activar` | `{"id": "<fecha>"}`: pone en uso esa calibración (no durante una ejecución) |
 | `GET /api/calibracion?variante=` | Errores de reproyección por pose con la calibración en uso (`independiente` o `conjunta`), con los vectores de error |

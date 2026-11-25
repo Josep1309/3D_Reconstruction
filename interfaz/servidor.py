@@ -694,6 +694,63 @@ def generar_imagen(cat: str, pose: str, tipo: str) -> tuple[np.ndarray, str]:
     raise ValueError(f"tipo de imagen desconocido: {tipo}")
 
 
+# ------------------------------------------------------------------ medición sobre la reconstrucción
+def _xyz(cat: str, pose: str) -> _Npz:
+    return cargar_npz(_archivos_pose(cat, pose)["reconstruida"])
+
+
+def punto_3d(cat: str, pose: str, fx: float, fy: float, radio: int = 6) -> dict:
+    """X, Y, Z del píxel válido más cercano a (fx, fy) ∈ [0, 1]² de la imagen (radio en px)."""
+    xyz = _xyz(cat, pose)
+    m = xyz["Mask"].astype(bool) & np.isfinite(xyz["Z"])
+    alto, ancho = m.shape
+    c, f = int(round(fx * (ancho - 1))), int(round(fy * (alto - 1)))
+    f0, f1, c0, c1 = max(f - radio, 0), min(f + radio + 1, alto), max(c - radio, 0), min(c + radio + 1, ancho)
+    ys, xs = np.nonzero(m[f0:f1, c0:c1])
+    if not len(ys):
+        raise ValueError("sin punto 3D válido cerca de ahí")
+    k = int(np.argmin((ys + f0 - f) ** 2 + (xs + c0 - c) ** 2))
+    fi, ci = int(ys[k] + f0), int(xs[k] + c0)
+    return {"fila": fi, "col": ci, "fx": ci / (ancho - 1), "fy": fi / (alto - 1),
+            **{k2: float(xyz[k2][fi, ci]) for k2 in ("X", "Y", "Z")}}
+
+
+def perfil_3d(cat: str, pose: str, a: tuple[float, float], b: tuple[float, float], n: int = 400) -> dict:
+    """Z (y la distancia recorrida en mm) a lo largo del segmento a→b de la imagen."""
+    xyz = _xyz(cat, pose)
+    m = xyz["Mask"].astype(bool) & np.isfinite(xyz["Z"])
+    alto, ancho = m.shape
+    t = np.linspace(0, 1, n)
+    cols = np.clip(np.round((a[0] + (b[0] - a[0]) * t) * (ancho - 1)).astype(int), 0, ancho - 1)
+    filas = np.clip(np.round((a[1] + (b[1] - a[1]) * t) * (alto - 1)).astype(int), 0, alto - 1)
+    # Cada muestra: mediana de los píxeles válidos en una ventana 5×5 (el mapa tiene píxeles sueltos
+    # sin dato por la rejilla del DMD; leer solo el píxel exacto deja la curva entrecortada)
+    mapas = {k: np.where(m, xyz[k], np.nan) for k in ("X", "Y", "Z")}
+    X, Y, Z = (np.full(n, np.nan) for _ in range(3))
+    for i, (f, c) in enumerate(zip(filas, cols)):
+        ventana = (slice(max(f - 2, 0), f + 3), slice(max(c - 2, 0), c + 3))
+        if np.any(m[ventana]):
+            X[i], Y[i], Z[i] = (float(np.nanmedian(mapas[k][ventana])) for k in ("X", "Y", "Z"))
+    # Distancia recorrida en el plano X-Y (mm), interpolando sobre los huecos
+    pasos = np.hypot(np.diff(X), np.diff(Y))
+    pasos = np.where(np.isfinite(pasos), pasos, np.nanmedian(pasos) if np.any(np.isfinite(pasos)) else 0)
+    s = np.concatenate([[0], np.cumsum(pasos)])
+    return {"s_mm": np.round(s, 3).tolist(), "z_mm": [None if not np.isfinite(z) else round(float(z), 3) for z in Z]}
+
+
+def histograma_plano(cat: str, pose: str, bins: int = 60) -> dict:
+    """Histograma del error respecto al plano ajustado (solo plano) y sus estadísticas."""
+    xyz = _xyz(cat, pose)
+    if "E" not in xyz:
+        raise FileNotFoundError("sin mapa de error (solo categoría plano)")
+    e = xyz["E"][np.isfinite(xyz["E"])].astype(np.float64)
+    lim = float(np.percentile(np.abs(e), 99.5)) or 1.0
+    cuentas, bordes = np.histogram(np.clip(e, -lim, lim), bins=bins, range=(-lim, lim))
+    return {"cuentas": cuentas.tolist(), "bordes": np.round(bordes, 4).tolist(), "n": int(e.size),
+            "rms": float(np.sqrt(np.mean((e - e.mean()) ** 2))), "p95": float(np.percentile(np.abs(e), 95)),
+            "max": float(np.max(np.abs(e)))}
+
+
 def generar_nube(cat: str, pose: str, maximo: int) -> bytes:
     archivos = _archivos_pose(cat, pose)
     xyz = cargar_npz(archivos["reconstruida"])
@@ -812,6 +869,17 @@ class Manejador(BaseHTTPRequestHandler):
                 return self._enviar(200, ARCHIVO_VIVO.read_bytes(), "image/jpeg")
             if url.path == "/api/imagen":
                 return self._imagen(q)
+            if url.path == "/api/punto":
+                cat, pose = self._cat_pose(q)
+                return self._json(punto_3d(cat, pose, float(q["fx"]), float(q["fy"])))
+            if url.path == "/api/perfil":
+                cat, pose = self._cat_pose(q)
+                return self._json(perfil_3d(cat, pose, (float(q["ax"]), float(q["ay"])), (float(q["bx"]), float(q["by"]))))
+            if url.path == "/api/histograma":
+                cat, pose = self._cat_pose(q)
+                return self._json(histograma_plano(cat, pose))
+            if url.path == "/api/descargar":
+                return self._descargar(q)
             if url.path == "/api/sistema":
                 return self._json(estado_sistema(q.get("hw", "1") == "1", q.get("forzar") == "1"))
             if url.path == "/api/manual":  # MANUAL.md, que la interfaz muestra con su índice
@@ -902,6 +970,36 @@ class Manejador(BaseHTTPRequestHandler):
             return self._error(404, str(exc))
         except (ValueError, KeyError, OSError) as exc:
             return self._error(400, str(exc))
+
+    def _descargar(self, q: dict) -> None:
+        """Archivos para llevarse: la nube .ply, los puntos en .csv o el informe de la calibración."""
+        tipo = q.get("tipo", "")
+        if tipo == "calibracion":
+            ruta = DIR_CALIBRACION / "Estereo_TSC_0_2.json"
+            if not ruta.exists():
+                raise FileNotFoundError("no hay calibración")
+            return self._enviar(200, ruta.read_bytes(), "application/json; charset=utf-8",
+                                {"Content-Disposition": f'attachment; filename="calibracion_{ruta.stat().st_mtime:.0f}.json"'})
+        cat, pose = self._cat_pose(q)
+        if tipo == "ply":
+            ruta = DIR_RECONSTRUCCION / cat / f"{cat}_{pose}.ply"
+            if not ruta.exists():
+                raise FileNotFoundError("esta pose aún no tiene reconstrucción")
+            return self._enviar(200, ruta.read_bytes(), "application/octet-stream",
+                                {"Content-Disposition": f'attachment; filename="{ruta.name}"'})
+        if tipo == "csv":
+            xyz = _xyz(cat, pose)
+            m = xyz["Mask"].astype(bool) & np.isfinite(xyz["Z"])
+            filas, cols = np.nonzero(m)
+            datos = np.column_stack([cols, filas, xyz["X"][m], xyz["Y"][m], xyz["Z"][m]])
+            import io
+
+            buf = io.StringIO()
+            buf.write("columna,fila,X_mm,Y_mm,Z_mm\n")
+            np.savetxt(buf, datos, fmt=["%d", "%d", "%.3f", "%.3f", "%.3f"], delimiter=",")
+            return self._enviar(200, buf.getvalue().encode(), "text/csv; charset=utf-8",
+                                {"Content-Disposition": f'attachment; filename="{cat}_{pose}_xyz.csv"'})
+        raise ValueError("tipo de descarga desconocido")
 
     def _post_archivos(self, ruta: str, cuerpo: dict) -> dict:
         import archivos

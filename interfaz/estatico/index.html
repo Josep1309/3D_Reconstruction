@@ -238,6 +238,26 @@
         <figure data-tipo="error" data-solo="plano"><figcaption><span data-i18n="fig_error">Error respecto al plano ajustado</span></figcaption></figure>
         <figure data-tipo="textura"><figcaption><span data-i18n="fig_textura">Textura</span></figcaption></figure>
       </div>
+      <section id="medicion" class="tarjeta medicion oculto">
+        <div class="me-barra">
+          <h3 data-i18n="me_titulo">Medir sobre el mapa Z</h3>
+          <div class="segmentado" id="me-modo" role="group">
+            <button type="button" data-modo="punto" class="activo" data-i18n="me_modo_punto">Punto y distancia</button>
+            <button type="button" data-modo="perfil" data-i18n="me_modo_perfil">Perfil</button>
+          </div>
+          <button type="button" id="me-ampliar" data-i18n="me_ampliar">Ampliar</button>
+          <button type="button" id="me-limpiar" data-i18n="me_limpiar">Limpiar</button>
+          <span class="me-descargas">
+            <a id="me-ply" class="boton" download data-i18n="me_ply">Nube .ply</a>
+            <a id="me-csv" class="boton" download data-i18n="me_csv">Puntos .csv</a>
+            <a id="me-calib" class="boton" download data-i18n="me_calib">Calibración .json</a>
+          </span>
+        </div>
+        <p class="nota" id="me-estado" data-i18n="me_ayuda_punto">Clic en el mapa Z para leer X, Y, Z; un segundo clic mide la distancia entre los dos puntos.</p>
+        <div id="me-puntos" class="me-puntos"></div>
+        <div id="me-perfil"></div>
+        <div id="me-hist"></div>
+      </section>
     </section>
 
     <section class="panel" data-panel="nube">
@@ -453,6 +473,7 @@
 <script src="/estatico/ajustes.js"></script>
 <script src="/estatico/archivos.js"></script>
 <script src="/estatico/sistema.js"></script>
+<script src="/estatico/medicion.js"></script>
 <script src="/estatico/calibracion.js"></script>
 <script src="/estatico/app.js"></script>
 </body>
