@@ -63,6 +63,7 @@ CAPTURA_POSES = 1                      # poses a capturar (pide Enter antes de c
 CAPTURA_PLAN: dict[str, int] | None = None
 CAPTURA_CICLOS = cfg.CICLOS_POR_CAPTURA  # ciclos de 50 patrones por pose (se promedian)
 CAPTURA_ESPERAR_ENTER = True
+CAPTURA_NOMBRE = None                  # nombre del proceso (p. ej. "cilindro con pintas"): va en su carpeta
 
 # --- Organización ---
 ORGANIZAR_ENTRADAS = [cfg.DIR_CAPTURAS]  # carpetas o archivos con capturas crudas
@@ -136,7 +137,7 @@ def etapa_captura() -> None:
 
     todas: list[Path] = []
     # Todo el proceso (patrón, plano y objeto) va a una sola carpeta: capturas/AAAA-MM-DD_HHMM/<cat>/
-    carpeta_proceso = cp.nuevo_proceso(plan, cfg.DIR_CAPTURAS)
+    carpeta_proceso = cp.nuevo_proceso(plan, cfg.DIR_CAPTURAS, CAPTURA_NOMBRE)
     print(f"[INFO] Proceso de captura: {carpeta_proceso.name}", flush=True)
     try:
         for categoria, poses in plan:

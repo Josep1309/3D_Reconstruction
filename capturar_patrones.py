@@ -371,17 +371,19 @@ def _a_papelera(carpeta: Path) -> None:
     print(f"    [OK] Pose descartada: {carpeta.name} movida a la papelera")
 
 
-def nuevo_proceso(plan: list[tuple[str, int]], salida: Path = cfg.DIR_CAPTURAS) -> Path:
-    """Crea la carpeta de un proceso de captura (`capturas/AAAA-MM-DD_HHMM/`) con su `proceso.json`.
+def nuevo_proceso(plan: list[tuple[str, int]], salida: Path = cfg.DIR_CAPTURAS, nombre_usuario: str | None = None) -> Path:
+    """Crea la carpeta de un proceso de captura (`capturas/AAAA-MM-DD_HHMM[_nombre]/`) con su
+    `proceso.json`. `nombre_usuario` (p. ej. «Cilindro con pintas») queda en la carpeta y en el json.
 
     Todas las poses del proceso (patrón, plano, objeto) se guardan dentro, en una subcarpeta por
     categoría: así se encuentran juntas al buscar a mano. Ver rutas.py."""
     import rutas
 
-    nombre = rutas.nombre_proceso(datetime.now())
+    nombre = rutas.nombre_proceso(datetime.now(), etiqueta=nombre_usuario)
     carpeta = salida / nombre
     carpeta.mkdir(parents=True, exist_ok=False)
-    datos = {"proceso": nombre, "inicio": datetime.now().isoformat(timespec="seconds"),
+    datos = {"proceso": nombre, **({"nombre": nombre_usuario.strip()[:80]} if (nombre_usuario or "").strip() else {}),
+             "inicio": datetime.now().isoformat(timespec="seconds"),
              "plan": {c: n for c, n in plan}, "capturas": {}, "poses": {}}
     (carpeta / "proceso.json").write_text(json.dumps(datos, indent=1, ensure_ascii=False), encoding="utf-8")
     return carpeta

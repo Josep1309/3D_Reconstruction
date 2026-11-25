@@ -157,7 +157,12 @@ function bloqueProceso(p) {
   casilla.indeterminate = marcadas > 0 && marcadas < todas.length;
   casilla.setAttribute("aria-label", t("ar_sel_proceso"));
   casilla.addEventListener("change", () => { todas.forEach((c) => (casilla.checked ? ar.sel.add(c) : ar.sel.delete(c))); pintarArchivos(); });
-  $("b", cab).textContent = t("ar_proceso", { a: fechaHora(p.id), b: fechaHora(p.fin, false) });
+  $("b", cab).textContent = (p.nombre ? `${p.nombre} · ` : "") + t("ar_proceso", { a: fechaHora(p.id), b: fechaHora(p.fin, false) });
+  if (p.carpeta) {  // nombre del proceso: renombra su carpeta en capturas/, capturas_ordenadas/ y resultados/
+    const b = boton(p.nombre ? t("ar_renombrar") : t("ar_nombrar"), () => renombrarProceso(p), "ar-nombrar");
+    b.title = t("ar_renombrar_title", { c: p.carpeta });
+    cab.insertBefore(b, $("small", cab));
+  }
   $("small", cab).textContent = megas(p.bytes) + (p.registrado ? "" : " · " + t("ar_sin_registro"));
   cab.insertBefore(campoNota(`proceso:${p.id}`, p.nota, t("ar_nota_proceso")), $("small", cab));
   if (p.calibraciones.length) {
@@ -169,6 +174,17 @@ function bloqueProceso(p) {
   for (const it of p.items) tabla.appendChild(filaCaptura(it));
   div.appendChild(tabla);
   return div;
+}
+
+async function renombrarProceso(p) {
+  const nombre = prompt(t("ar_nombre_prompt", { c: p.carpeta }), p.nombre || "");
+  if (nombre === null) return;
+  try {
+    const r = await api("/api/procesos/renombrar", { carpeta: p.carpeta, nombre });
+    agregarLog(`[OK] ${t("ar_renombrado", { a: p.carpeta, b: r.carpeta })}`);
+  } catch (err) { alert(t("error_x", { m: err.message })); }
+  cargarArchivos(true);
+  refrescarEstado();
 }
 
 function filaCaptura(it) {
@@ -290,6 +306,7 @@ async function revisarImportacion() {
   res.innerHTML = "";
   for (const l of lineas) { const p = document.createElement("div"); p.textContent = l; res.appendChild(p); }
   $("#im-opciones").classList.toggle("oculto", !cats.length);
+  $("#im-nombre").value = d.nombre || "";
 }
 
 async function elegirCarpetaImportar() {
@@ -310,7 +327,7 @@ function ejecutarImportacion() {
   const procesar = $("#im-procesar").checked, hayPatron = !!d.capturas.patron;
   if ($("#im-mover").checked && !confirm(t("im_confirmar_mover"))) return;
   ejecutar({
-    importar: { ruta: d.origen, mover: $("#im-mover").checked },
+    importar: { ruta: d.origen, mover: $("#im-mover").checked, nombre: $("#im-nombre").value.trim() },
     etapas: { patrones: false, lightcrafter: false, captura: false, organizar: true, fase_relativa: procesar,
               fase_absoluta: procesar, calibracion: procesar && hayPatron, reconstruccion: procesar },
     categorias: ["plano", "objeto"].filter((c) => d.capturas[c]),

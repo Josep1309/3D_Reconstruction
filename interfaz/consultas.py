@@ -120,6 +120,7 @@ def listado_archivos() -> dict:
                           "nota": notas.get(f"pose:{it['cat']}/{it['poses'][0]}") if it["poses"] else None})
         salida.append({
             "id": p["id"], "fin": p["fin"].isoformat(timespec="seconds"), "registrado": p["registrado"],
+            "carpeta": p.get("carpeta"), "nombre": p.get("nombre"),
             "nota": notas.get(f"proceso:{p['id']}"), "bytes": sum(i["bytes"] for i in items),
             "patron": p["patron"], "configuracion": config, "vigente": bool(conf) and config == conf["proceso"],
             "inicia_configuracion": config == p["id"], "calibraciones": proceso_calib.get(p["id"], []),
@@ -345,7 +346,7 @@ def configuracion_por_defecto() -> dict:
         "calib_poses": p.CALIBRACION_POSES,
         "parametros": {k: getattr(cfg, k) for k in (
             "PERIODO", "N_BITS_GRAY", "GAMMA_TH", "GAMMA_TH_Y", "SUAVIZADO_FASE_PX", "UMBRAL_INTENSIDAD",
-            "MED_FILT", "BORDE_MASCARA", "ORDEN_BITS_GRAY", "SALTO_MAX_MM", "PLANO_UMBRAL_MM", "FILTRO_VECINOS_SIGMA",
+            "MED_FILT", "BORDE_MASCARA", "ORDEN_BITS_GRAY", "SALTO_MAX_MM", "PLANO_UMBRAL_MM", "FILTRO_VECINOS_SIGMA", "REFLECTANCIA_REL_MIN", "SATURACION_NIVEL",
             "CAM_EXPOSICION_US", "PATRON_COLUMNAS", "PATRON_FILAS", "PATRON_DISTANCIA_MM", "Z_MIN_MM", "Z_MAX_MM")},
         "fuentes_demo": fuentes_demo(),
         "tablero_mm": list(_distancia_tablero()),

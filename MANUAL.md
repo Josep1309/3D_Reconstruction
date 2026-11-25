@@ -218,8 +218,17 @@ carpeta en cualquiera de las tres.
 - `capturas/<proceso>/proceso.json`: inicio y fin, plan, capturas por categoría y las poses
   organizadas que salieron de ellas.
 - `capturas_ordenadas/<proceso>/<cat>/pose_XX/origen.json`: de qué captura y proceso salió cada pose.
+- **Nombre del proceso:** al capturar puedes escribir un nombre en *Nombre del proceso
+  (opcional)*, por ejemplo «cilindro con pintas». La carpeta queda
+  `2026-11-25_1530_cilindro-con-pintas` (sin tildes ni espacios) en las tres raíces, y el nombre
+  tal cual en `proceso.json`. Se muestra en *Archivos* y en *Recalibrar con capturas elegidas*.
+  - Para ponérselo o cambiarlo después: *Archivos* → *✎ Ponerle nombre* / *✎ Cambiar nombre*.
+    Renombra la carpeta en `capturas/`, `capturas_ordenadas/` y `resultados/` y actualiza el
+    manifiesto. No hay que recalcular nada. Dejarlo vacío quita el nombre.
+  - Al importar una carpeta, el nombre por defecto es el de esa carpeta.
 - Los **nombres de pose** (`pose_23`) siguen siendo únicos dentro de su categoría en todo el
-  sistema: las calibraciones, notas y selecciones los usan.
+  sistema: las calibraciones, notas, máscaras, mediciones y selecciones los usan. Por eso
+  renombrar un proceso no afecta nada de eso.
 - La carpeta del proceso es solo dónde están: el módulo `rutas.py` la lee del manifiesto. Todo el
   sistema la usa, también la interfaz.
 - Lo que no es de una pose queda fuera de las carpetas de proceso: calibraciones, comparaciones,
@@ -549,6 +558,11 @@ interfaz solo usan y muestran la configuración vigente**:
   configuración por procesos, eliges tú las poses exactas, de cualquier fecha (§19.2). Se guarda en
   `configuracion_elegida.json` como `{"seleccion": {cat: [poses]}}`, y las etapas y la interfaz
   usan solo esas poses. *Volver a la última* o capturar un patrón nuevo la quitan.
+- **Las capturas nuevas de plano y objeto se suman solas** a una configuración elegida (proceso
+  elegido, selección manual o importación). Se suman las hechas después de elegirla, sin tocar la
+  calibración, así que no hay que volver a agregar cada objeto nuevo. La tarjeta *Poses* lo
+  indica: «Incluye N captura(s) … hechas después de elegirla». Capturar un **patrón** sí empieza
+  una configuración nueva, porque es otro montaje.
 - Calibrar con la etapa *Calibración* usa solo las poses del patrón de la configuración vigente.
   Por eso, después de un proceso completo (patrón + plano + objeto), basta marcar *Calibración*
   para calibrar solo con ese proceso.
@@ -920,6 +934,23 @@ pose de 1.3 Mpx.
 Descarta los puntos que se alejan más de `SALTO_MAX_MM` de la mediana local 5×5 y los que están
 fuera de `[Z_MIN_MM, Z_MAX_MM]`. Equivale al `pcdenoise` de MATLAB.
 
+Después se descartan las **zonas difíciles** (`mascara.zonas_dificiles`):
+
+- **Bordes de manchas oscuras** (`REFLECTANCIA_REL_MIN = 0.6`, `REFLECTANCIA_BORDE_PX = 2`).
+  En un salto brusco de reflectancia, como pintas negras sobre pintura blanca, el desenfoque mezcla
+  franjas de zonas con brillos muy distintos. La fase se corre y aparecen **picos de varios mm que
+  no existen**. Se quitan los píxeles cuya modulación (suavizada σ 1.5 px, por la rejilla fina del
+  DMD) es menor que 0.6 veces la de su entorno (31 px), ampliados 2 px.
+  - Medido en el cilindro con pintas (objeto `pose_18`–`22` del 25-nov): el RMS del interior pasa
+    de 0.39–0.49 a 0.17–0.21 mm, y los picos > 2 mm de ~0.9 % a ~0.1 %, quitando el 8–12 % de los
+    puntos.
+  - En los planos no quita nada.
+- **Saturación** (`SATURACION_NIVEL`, apagado). Si se activa, quita los píxeles que llegan a ese
+  nivel en la mitad o más de los corrimientos. Con 18 corrimientos, recortar levemente la franja
+  casi no afecta. En una pose sobreexpuesta (objeto `pose_15`–`17`: 46 % saturado) quitaría medio
+  objeto. Por eso la reconstrucción **avisa** si más del 5 % de la pose satura: baja la
+  exposición y vuelve a capturar.
+
 Después se aplican, si existen:
 
 - **La máscara de la pose** (`mascara.py`, pestaña *Máscara*).
@@ -1114,6 +1145,8 @@ corresponde. Cada subsección es una tabla de **síntoma → causa probable → 
 | Error de planitud en forma de cuenco (±1–2 mm en las esquinas) | Calibración con pocas poses, poca inclinación o poca cobertura | 10–15 poses con ±20–30°; confirma que la superficie sea realmente plana |
 | Error sistemático cerca del borde izquierdo de la imagen | Zona del proyector (u_p alto) no cubierta por la calibración | Igual que el anterior: poses del tablero desplazadas a esa zona |
 | Huecos o estrías horizontales en superficies oscuras | Poco contraste de las franjas H (DMD en diamante) | Más ciclos por captura; mejor iluminación; ver el último punto de §16.9 |
+| Picos de varios mm sobre manchas, pintas o letras oscuras | Saltos de reflectancia: la fase se corre en el borde de la mancha (§13.5) | Ya se filtran (*Quitar bordes de manchas oscuras*, 0.6). Si quedan, súbelo a 0.7–0.8 en ⚙ o excluye la zona en *Máscara* |
+| Aviso «la pose está sobreexpuesta» | Más del 5 % de los píxeles satura la cámara | Baja la exposición en ⚙ y vuelve a capturar; los brillos dan error de fase |
 | Puntos sueltos muy lejos del objeto | Atípicos que pasan el filtro | Pestaña *Máscara* (región más grande, recortar el contorno, excluir zonas); activa *Quitar puntos aislados en 3D* en ⚙; o ajusta `Z_MIN_MM`, `Z_MAX_MM` y `SALTO_MAX_MM` |
 | Resultados distintos tras cambiar `FASE_TRIANGULACION` | Esperable: Fx y Fy no tienen la misma sensibilidad | Usa `auto` (§13.3) |
 
@@ -1265,10 +1298,12 @@ está escrito en WebGL puro, así que funciona sin internet.
      - En una pausa, *Terminar (q)* salta a la siguiente categoría.
      - Debajo aparece un resumen ("Se capturará: patrón × 12 → plano × 3 → objeto × 1") y avisos,
        por ejemplo si capturas el patrón sin marcar *Calibración*.
-  2. **Etapas.** Las 8 etapas **numeradas en su orden de ejecución**, cada una con una
-     descripción breve y una etiqueta: *hardware* si necesita el montaje, *opcional* para la
-     calibración, *ocasional* para la generación de patrones. Durante la ejecución se resalta la
-     etapa en curso.
+  2. **Etapas.** Las etapas de medición **numeradas en su orden de ejecución**, de *Captura* a
+     *Reconstrucción*. Cada una tiene una descripción breve y una etiqueta: *hardware* si necesita
+     el montaje, *opcional* para la calibración. Durante la ejecución se resalta la etapa en
+     curso.
+     - *Generar patrones* y *Configurar el LightCrafter* se hacen una sola vez. Por eso están en
+       **⚙ Ajustes → Proyector (LightCrafter)**, cada una con su botón, que corre solo esa etapa.
   3. **Opciones.** *Recalcular todo* (`REHACER`). Triangulación, calibración, máscaras y filtros
      están en **Ajustes** (⚙).
 
@@ -1281,8 +1316,14 @@ está escrito en WebGL puro, así que funciona sin internet.
   capturó el patrón en adelante. Arriba se indica desde cuándo y cuántos procesos anteriores están
   ocultos. Los cuatro puntos indican, en orden:
   organizada · fase envuelta · fase desenvuelta · reconstruida. Un clic la abre.
+- **Borrar una pose:** el botón 🗑 junto al selector de pose (arriba de la vista) la mueve a la
+  papelera, con su captura y todo lo calculado (fases, nube, máscara).
+  - Si esa captura dio varias poses, avisa cuáles se van con ella.
+  - Se restaura desde *Archivos → Papelera*. *Organizar* no la vuelve a crear mientras esté ahí.
 - **Calibración.** Resumen de la calibración en uso: fecha, errores RMS, línea base y cobertura
   del proyector.
+- **Registro del proceso.** La salida del pipeline, siempre a mano debajo de *Calibración*. Se
+  puede filtrar (todo / avisos y errores / solo errores), descargar y limpiar.
 
 ### 19.2 Visualización (derecha)
 
@@ -1508,6 +1549,8 @@ los de `configuracion.py`.
 | Fase para triangular | `FASE_TRIANGULACION` | auto | (Fy / Fx / ambas) |
 | Filtro de saltos en Z | `SALTO_MAX_MM` | 5 mm | sin filtro |
 | Rango de Z válido | `Z_MIN_MM`, `Z_MAX_MM` | 100–1500 mm | sin límite |
+| Quitar bordes de manchas oscuras | `REFLECTANCIA_REL_MIN` | 0.6 | sin filtro |
+| Descartar píxeles saturados | `SATURACION_NIVEL` | apagado | (activo: 250) |
 | Quitar puntos aislados en 3D | `FILTRO_VECINOS_SIGMA` | apagado | (activo: 3 σ) |
 | Tolerancia del plano (RANSAC) | `PLANO_UMBRAL_MM` | 3 mm | — |
 | Calibración / poses del patrón | `CALIBRACION`, `CALIBRACION_POSES` | independiente / última sesión | — |

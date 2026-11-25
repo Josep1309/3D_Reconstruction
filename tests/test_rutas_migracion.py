@@ -112,3 +112,35 @@ def test_importar_carpeta_externa(tmp_path):
     v = sesiones.configuracion_vigente()
     assert v["carpetas"] == {f"{c}/{x['nombre']}" for c, lista in res["capturas"].items() for x in lista}
     assert importar.analizar(externa)["capturas"] == {}  # volver a importar no duplica
+
+
+def test_renombrar_proceso():
+    import archivos
+
+    _estructura_anterior()
+    plan = mig.planificar()
+    mig.aplicar(plan)
+    P = plan["procesos"][0]["proceso"]
+    nueva = archivos.renombrar_proceso(P, "Cilindro con pintas")
+    assert nueva == f"{P}_cilindro-con-pintas" and rutas.es_proceso(nueva)
+    for raiz in (cfg.DIR_CAPTURAS, cfg.DIR_ORDENADAS, cfg.DIR_RESULTADOS):
+        assert (raiz / nueva).is_dir() and not (raiz / P).exists()
+    # todo se sigue encontrando, con el mismo nombre de pose
+    assert rutas.dir_pose_ordenada("patron", "pose_00") == cfg.DIR_ORDENADAS / nueva / "patron" / "pose_00"
+    assert rutas.fase_absoluta("plano", "pose_02").exists()
+    assert rutas.ruta_captura("plano/20261125_090100").parent.parent.name == nueva
+    e = json.loads((cfg.DIR_ORDENADAS / "manifiesto.json").read_text())["poses"][0]
+    assert nueva in e["fuente"] and e["fuente"] in e["firma"]
+    sesiones._cache.clear()
+    assert sesiones.procesos()[0]["nombre"] == "Cilindro con pintas"
+    # quitar el nombre vuelve a la carpeta con solo la fecha
+    assert archivos.renombrar_proceso(nueva, "") == P
+    assert sesiones.procesos()[0]["nombre"] is None
+
+
+def test_nombre_de_proceso_nuevo():
+    assert rutas.etiqueta_carpeta("Pieza Nº 3 (ñ)") == "pieza-no-3-n"
+    from datetime import datetime
+
+    n = rutas.nombre_proceso(datetime(2026, 11, 25, 15, 30), etiqueta="Cilindro")
+    assert n == "2026-11-25_1530_cilindro" and rutas.es_proceso(n)

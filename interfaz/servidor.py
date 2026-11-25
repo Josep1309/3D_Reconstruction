@@ -261,6 +261,27 @@ class Manejador(BaseHTTPRequestHandler):
                 cuerpo = self._cuerpo()
                 archivos.guardar_nota(str(cuerpo.get("clave", "")), str(cuerpo.get("texto", "")))
                 return self._json({"ok": True})
+            if url.path == "/api/poses/borrar":  # {cat, poses, simular}: simular = qué se movería
+                import archivos
+
+                cuerpo = self._cuerpo()
+                cat = str(cuerpo.get("cat", ""))
+                poses = [str(p) for p in cuerpo.get("poses") or [] if RE_POSE.match(str(p))]
+                if cat not in cfg.CATEGORIAS or not poses:
+                    raise ValueError("categoría o poses inválidas")
+                if cuerpo.get("simular"):
+                    return self._json(archivos.capturas_de_poses(cat, poses))
+                if ejecucion.estado()["ejecutando"]:
+                    raise RuntimeError("hay un proceso en curso: espera a que termine")
+                return self._json(archivos.borrar_poses(cat, poses))
+            if url.path == "/api/procesos/renombrar":
+                import archivos
+
+                if ejecucion.estado()["ejecutando"]:
+                    raise RuntimeError("hay un proceso en curso: espera a que termine")
+                cuerpo = self._cuerpo()
+                return self._json({"carpeta": archivos.renombrar_proceso(str(cuerpo.get("carpeta", "")),
+                                                                         str(cuerpo.get("nombre", "")))})
             if url.path in ("/api/archivos/borrar", "/api/archivos/vaciar_papelera", "/api/configuracion/elegir",
                             "/api/archivos/restaurar"):
                 if ejecucion.estado()["ejecutando"]:

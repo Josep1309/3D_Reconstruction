@@ -26,7 +26,10 @@ from pathlib import Path
 
 import configuracion as cfg
 
-RE_PROCESO = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{4}(_\d{2}(_\d+)?)?$")
+# AAAA-MM-DD_HHMM, con segundos o contador si se repite, y opcionalmente el nombre que le dio el
+# usuario en minúsculas y sin espacios: 2026-11-25_1530_cilindro-pintas
+RE_PROCESO = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{4}(_\d{2})?(_\d+)?(_[a-z0-9][a-z0-9-]*)?$")
+RE_PREFIJO_PROCESO = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{4}(_\d{2})?(_\d+)?")
 FORMATO_PROCESO = "%Y-%m-%d_%H%M"
 
 _cache: dict = {}
@@ -37,17 +40,39 @@ def es_proceso(nombre: str) -> bool:
     return bool(RE_PROCESO.match(nombre))
 
 
-def nombre_proceso(hora: datetime, ocupados: set[str] | None = None) -> str:
-    """Nombre de la carpeta de un proceso que empieza a esa hora (único entre los ya usados)."""
+def etiqueta_carpeta(texto: str | None) -> str:
+    """'Cilindro con pintas #2' -> 'cilindro-con-pintas-2' (para el nombre de la carpeta)."""
+    import unicodedata
+
+    t = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]+", "-", t).strip("-")[:40].strip("-")
+
+
+def nombre_proceso(hora: datetime, ocupados: set[str] | None = None, etiqueta: str | None = None) -> str:
+    """Nombre de la carpeta de un proceso que empieza a esa hora (único entre los ya usados), con
+    el nombre que le dio el usuario al final si lo hay."""
     ocupados = set(ocupados or ()) | {p.name for p in cfg.DIR_CAPTURAS.glob("*") if p.is_dir()}
+    sufijo = f"_{etiqueta_carpeta(etiqueta)}" if etiqueta_carpeta(etiqueta) else ""
+    prefijos = {(RE_PREFIJO_PROCESO.match(o) or [o])[0] for o in ocupados}  # la fecha no se repite
     nombre = hora.strftime(FORMATO_PROCESO)
-    if nombre in ocupados:
+    if nombre in prefijos:
         nombre = hora.strftime(FORMATO_PROCESO + "_%S")
     k = 2
     base = nombre
-    while nombre in ocupados:
+    while nombre in prefijos:
         nombre, k = f"{base}_{k}", k + 1
-    return nombre
+    return nombre + sufijo
+
+
+def nombre_legible(carpeta: str | None) -> str | None:
+    """El nombre que el usuario le dio al proceso (de su proceso.json, o de la carpeta)."""
+    if not carpeta:
+        return None
+    nombre = leer_proceso_json(carpeta).get("nombre")
+    if nombre:
+        return str(nombre)
+    resto = RE_PREFIJO_PROCESO.sub("", carpeta).lstrip("_")
+    return resto.replace("-", " ") if resto else None
 
 
 def proceso_en_ruta(ruta: str | Path) -> str | None:

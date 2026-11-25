@@ -129,6 +129,19 @@ CALIBRACION = "independiente"  # "independiente" (Estereo_TSC_0_2) o "conjunta" 
 Z_MIN_MM = 100.0
 Z_MAX_MM = 1500.0
 SALTO_MAX_MM = 5.0             # salto local máximo en Z (filtro de puntos atípicos)
+# Saltos de reflectancia (manchas oscuras sobre fondo claro) y brillos: la fase se corre en sus
+# bordes por el desenfoque y da picos de varios mm (objeto pose_18-22 del 25-nov: pintas negras
+# sobre pintura blanca). Se descartan los píxeles cuya modulación B (suavizada) es menor que esta
+# fracción de la de su entorno (31 px), ampliados REFLECTANCIA_BORDE_PX. Con 0.6 / 2 px: RMS del
+# interior 0.39-0.49 -> 0.17-0.21 mm quitando 8-12 % de los puntos; en los planos no quita nada.
+# 0 = desactivado.
+REFLECTANCIA_REL_MIN = 0.6
+REFLECTANCIA_BORDE_PX = 2
+# Descartar píxeles que llegan a este nivel en la mitad o más de los corrimientos. Desactivado
+# (256): con 18 corrimientos recortar el pico de la franja casi no afecta la fase, y en una pose
+# sobreexpuesta (objeto pose_15-17: 46 % saturado) quitaría medio objeto. La reconstrucción avisa
+# si más del 5 % de la pose satura; la solución es bajar la exposición.
+SATURACION_NIVEL = 256
 FILTRO_VECINOS_SIGMA = 0.0     # quita puntos aislados en 3D (mascara.filtrar_vecinos); 0 = desactivado
 PLANO_UMBRAL_MM = 3.0          # distancia máxima al plano (RANSAC) para medir la planitud de `plano`
 

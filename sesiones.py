@@ -193,7 +193,8 @@ def procesos(dir_capturas: Path | None = None, dir_ordenadas: Path | None = None
         inicio = items[0]["hora"]
         salida.append({"id": inicio.isoformat(timespec="seconds"), "inicio": inicio, "fin": items[-1]["hora"],
                        "items": items, "patron": any(x["cat"] == "patron" for x in items),
-                       "registrado": registrado, "carpeta": items[0].get("proceso_dir")})
+                       "registrado": registrado, "carpeta": items[0].get("proceso_dir"),
+                       "nombre": _rutas().nombre_legible(items[0].get("proceso_dir"))})
     return sorted(salida, key=lambda p: p["inicio"])
 
 
@@ -202,8 +203,45 @@ def fijar_configuracion(proceso_id: str | None) -> None:
     if proceso_id is None:
         ELEGIDA.unlink(missing_ok=True)
     else:
-        _escribir_json(ELEGIDA, {"proceso": proceso_id})
+        _escribir_json(ELEGIDA, {"proceso": proceso_id, "fijada": _ahora()})
     _cache.clear()
+
+
+def _ahora() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def _fijada() -> datetime | None:
+    """Cuándo se eligió la configuración en uso (las capturas posteriores de plano/objeto se le
+    suman solas). Archivos anteriores sin la marca: la fecha del archivo."""
+    datos = _leer_json(ELEGIDA, {})
+    try:
+        return datetime.fromisoformat(datos["fijada"])
+    except (KeyError, TypeError, ValueError):
+        try:
+            return datetime.fromtimestamp(ELEGIDA.stat().st_mtime)
+        except OSError:
+            return None
+
+
+def _capturas_nuevas(lista: list[dict], desde: datetime | None) -> list[dict]:
+    """Capturas de plano y objeto de procesos sin patrón hechos después de `desde`: con una
+    configuración elegida (selección manual, un proceso o una importación) se suman solas, para
+    no tener que agregar cada objeto nuevo a mano. Un proceso con patrón es otro montaje: ese
+    caso ya lo cubre registrar_proceso (vuelve a la última configuración)."""
+    if desde is None:
+        return []
+    return [it for p in lista if not p["patron"] for it in p["items"]
+            if it["cat"] != "patron" and it["hora"] > desde]
+
+
+def _sumar_nuevas(resultado: dict, nuevas: list[dict]) -> dict:
+    for it in nuevas:
+        resultado["poses"].setdefault(it["cat"], set()).update(it["poses"])
+        resultado["carpetas"].add(it["carpeta"])
+        resultado["hasta"] = max(resultado["hasta"], it["hora"])
+    resultado["nuevas"] = len(nuevas)
+    return resultado
 
 
 def fijar_seleccion(seleccion: dict[str, list[str]]) -> None:
@@ -213,7 +251,7 @@ def fijar_seleccion(seleccion: dict[str, list[str]]) -> None:
     limpia = {c: sorted({str(p) for p in seleccion.get(c, []) if str(p).startswith("pose_")}) for c in cfg.CATEGORIAS}
     if not any(limpia.values()):
         raise ValueError("la selección está vacía")
-    _escribir_json(ELEGIDA, {"seleccion": limpia})
+    _escribir_json(ELEGIDA, {"seleccion": limpia, "fijada": _ahora()})
     _cache.clear()
 
 
@@ -221,7 +259,7 @@ def fijar_solo_proceso(carpeta: str) -> None:
     """Configuración = exactamente las capturas de una carpeta de proceso (p. ej. una importación),
     sin sumar los procesos siguientes. Sus poses se toman del manifiesto al momento de usarlas, así
     que sirve antes de organizar."""
-    _escribir_json(ELEGIDA, {"solo_proceso": carpeta})
+    _escribir_json(ELEGIDA, {"solo_proceso": carpeta, "fijada": _ahora()})
     _cache.clear()
 
 
@@ -290,6 +328,12 @@ def configuracion_vigente() -> dict | None:
                          "proceso": lista[rango[0]]["id"], "auto": auto, "poses": poses,
                          "carpetas": carpetas, "procesos_ocultos": len(lista) - (rango[1] - rango[0]),
                          "es_ultima": rango == rangos[-1]}
+            if not auto and rango != rangos[-1]:  # las capturas posteriores quedarían en otra configuración
+                ya = {it["carpeta"] for p in lista[rango[0]:rango[1]] for it in p["items"]}
+                _sumar_nuevas(resultado, [it for it in _capturas_nuevas(lista, _fijada()) if it["carpeta"] not in ya])
+        if resultado and (solo or manual) and lista:
+            ya = resultado["carpetas"]
+            _sumar_nuevas(resultado, [it for it in _capturas_nuevas(lista, _fijada()) if it["carpeta"] not in ya])
         _cache.clear()
         _cache[clave] = resultado
         return resultado
@@ -344,7 +388,7 @@ def info_vigente() -> dict | None:
     return {"desde": conf["desde"].isoformat(timespec="seconds"), "proceso": conf["proceso"],
             "auto": conf["auto"], "es_ultima": conf["es_ultima"], "manual": bool(conf.get("manual")),
             "poses": {c: len(p) for c, p in conf["poses"].items()},
-            "procesos_ocultos": conf["procesos_ocultos"]}
+            "procesos_ocultos": conf["procesos_ocultos"], "nuevas": conf.get("nuevas", 0)}
 
 
 def proceso_de_poses(categoria: str, poses: list[str]) -> str | None:
@@ -355,3 +399,9 @@ def proceso_de_poses(categoria: str, poses: list[str]) -> str | None:
         if any(i["cat"] == categoria and buscadas & set(i["poses"]) for i in p["items"]):
             elegido = p["id"]
     return elegido
+
+
+def _rutas():
+    import rutas  # rutas no depende de sesiones, pero se importa tarde por orden de carga
+
+    return rutas

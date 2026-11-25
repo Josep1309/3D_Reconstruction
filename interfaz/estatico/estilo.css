@@ -739,3 +739,21 @@ a.boton:hover { border-color: var(--texto-2); }
 
 .md-distancia small { font-size: 15px; font-weight: 600; opacity: .8; }
 .mk-guia { align-self: flex-start; background: none; border: none; padding: 0; color: var(--acento); font-size: 12.5px; cursor: pointer; text-decoration: underline; }
+
+.im-nombre { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; flex: 1 1 100%; }
+.ar-nombrar { font-size: 12px; padding: 2px 8px; }
+
+button.icono { padding: 4px 8px; line-height: 1; }
+#b-borrar-pose:hover { border-color: var(--error, #d14343); }
+
+.aj-acciones { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+.aj-accion { display: flex; gap: 12px; align-items: center; }
+.aj-accion button { flex: 0 0 auto; min-width: 210px; }
+.aj-accion small { opacity: .75; font-size: 12px; }
+
+/* Registro en la columna izquierda: más alto y con letra algo menor (la columna es angosta) */
+.control .registro { box-shadow: var(--sombra); }
+.control .registro summary { padding: 10px 12px; }
+.control .registro-herramientas { margin-left: 0; width: 100%; }
+.control .registro-herramientas select { flex: 1; }
+.control .registro pre { max-height: 420px; min-height: 120px; font-size: 11.5px; padding: 8px 10px; }

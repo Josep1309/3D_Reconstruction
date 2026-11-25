@@ -30,7 +30,7 @@ function posesPorProceso(cat) {
                      procesada: ps.absoluta });
       }
     }
-    if (poses.length) grupos.push({ id: p.id, nota: p.nota, poses });
+    if (poses.length) grupos.push({ id: p.id, nota: p.nombre ? p.nombre + (p.nota ? " · " + p.nota : "") : p.nota, poses });
   }
   return grupos.reverse();  // lo más reciente arriba
 }

@@ -201,6 +201,7 @@ def configurar(conf: dict) -> None:
     p.CAPTURA_POSES = int(cap.get("poses", p.CAPTURA_POSES))
     p.CAPTURA_CICLOS = int(cap.get("ciclos", p.CAPTURA_CICLOS))
     p.CAPTURA_ESPERAR_ENTER = bool(cap.get("esperar_enter", p.CAPTURA_ESPERAR_ENTER))
+    p.CAPTURA_NOMBRE = str(cap.get("nombre") or "").strip()[:80] or None
     if cap.get("plan"):  # varias categorías en una sesión: {"patron": 12, "plano": 3, "objeto": 1}
         p.CAPTURA_PLAN = {c: int(n) for c, n in cap["plan"].items()}
     p.REHACER = bool(conf.get("rehacer", p.REHACER))

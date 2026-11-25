@@ -33,8 +33,10 @@ NEUTROS = {
     "Z_MAX_MM": float("inf"),
     "PLANO_UMBRAL_MM": 3.0,
     "FILTRO_VECINOS_SIGMA": 0.0,     # sin filtro de puntos aislados
+    "REFLECTANCIA_REL_MIN": 0.0,     # sin filtro de manchas
+    "SATURACION_NIVEL": 256,         # sin descartar saturados
 }
-ENTEROS = {"BORDE_MASCARA", "MED_FILT"}
+ENTEROS = {"BORDE_MASCARA", "MED_FILT", "SATURACION_NIVEL"}
 
 
 def leer(ruta: Path = RUTA) -> dict:

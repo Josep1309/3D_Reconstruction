@@ -124,6 +124,27 @@ def _mover_a_papelera(carpetas: list[str]) -> dict:
     return {"carpetas": len(carpetas), "elementos": movidos, "papelera": str(destino)}
 
 
+def capturas_de_poses(cat: str, poses: list[str]) -> dict:
+    """Qué hay que mover para borrar estas poses: las capturas de las que salieron (con lo derivado
+    de ellas). Si una captura dio varias poses, se van todas. {"capturas", "poses"}"""
+    pedidas = set(poses)
+    capturas, todas = [], set()
+    for it in sesiones.capturas():
+        if it["cat"] == cat and pedidas & set(it["poses"]):
+            capturas.append(it["carpeta"])
+            todas.update(it["poses"])
+    faltan = pedidas - todas
+    if faltan:
+        raise ValueError(f"no se encontró la captura de: {', '.join(sorted(faltan))}")
+    return {"capturas": capturas, "poses": sorted(todas, key=lambda p: int(p[5:]))}
+
+
+def borrar_poses(cat: str, poses: list[str]) -> dict:
+    """Mueve a la papelera las poses (sus capturas y todo lo derivado). Se restauran desde Archivos."""
+    plan = capturas_de_poses(cat, poses)
+    return {**mover_a_papelera(plan["capturas"]), "poses": plan["poses"]}
+
+
 def listar_papelera() -> list[dict]:
     """Lotes de la papelera (el más reciente primero) con lo que contiene cada uno."""
     lotes = []
@@ -283,3 +304,68 @@ def vaciar_papelera() -> dict:
     if PAPELERA.is_dir():
         shutil.rmtree(PAPELERA)
     return info
+
+
+# ------------------------------------------------------------------ nombre de un proceso
+def renombrar_proceso(carpeta: str, nombre: str) -> str:
+    """Le pone (o cambia, o quita con "") el nombre a un proceso: renombra su carpeta en
+    capturas/, capturas_ordenadas/ y resultados/ (AAAA-MM-DD_HHMM_<nombre>) y actualiza el
+    manifiesto, su proceso.json y la configuración elegida. Las poses no cambian de nombre, así que
+    calibraciones, notas, máscaras y mediciones siguen valiendo. Devuelve el nombre nuevo de la carpeta."""
+    import os
+
+    if not rutas.es_proceso(carpeta) or not (cfg.DIR_CAPTURAS / carpeta).is_dir():
+        raise ValueError(f"no existe el proceso '{carpeta}'")
+    prefijo = rutas.RE_PREFIJO_PROCESO.match(carpeta)[0]
+    etiqueta = rutas.etiqueta_carpeta(nombre)
+    nueva = f"{prefijo}_{etiqueta}" if etiqueta else prefijo
+    raices = [r for r in (cfg.DIR_CAPTURAS, cfg.DIR_ORDENADAS, cfg.DIR_RESULTADOS) if (r / carpeta).is_dir()]
+    with sesiones.ESCRITURA:
+        if nueva != carpeta:
+            if any((r / nueva).exists() for r in (cfg.DIR_CAPTURAS, cfg.DIR_ORDENADAS, cfg.DIR_RESULTADOS)):
+                raise ValueError(f"ya existe un proceso '{nueva}'")
+            hechos = []
+            try:
+                for r in raices:
+                    os.rename(r / carpeta, r / nueva)
+                    hechos.append(r)
+            except OSError:
+                for r in hechos:  # deja todo como estaba
+                    os.rename(r / nueva, r / carpeta)
+                raise
+            _cambiar_proceso_en_manifiesto(carpeta, nueva)
+            elegida = sesiones._leer_json(sesiones.ELEGIDA, {})
+            if elegida.get("solo_proceso") == carpeta:
+                sesiones._escribir_json(sesiones.ELEGIDA, {**elegida, "solo_proceso": nueva})
+        ruta_json = cfg.DIR_CAPTURAS / nueva / "proceso.json"
+        datos = sesiones._leer_json(ruta_json, {})
+        datos["proceso"] = nueva
+        if nombre.strip():
+            datos["nombre"] = nombre.strip()[:80]
+        else:
+            datos.pop("nombre", None)
+        sesiones._escribir_json(ruta_json, datos)
+    sesiones._cache.clear()
+    return nueva
+
+
+def _cambiar_proceso_en_manifiesto(viejo: str, nuevo: str) -> None:
+    ruta = cfg.DIR_ORDENADAS / "manifiesto.json"
+    man = sesiones._leer_json(ruta, None)
+    if not man:
+        return
+
+    def cambiar(texto: str) -> str:
+        partes = Path(texto).parts
+        return str(Path(*[nuevo if p == viejo else p for p in partes])) if viejo in partes else texto
+
+    def firma(f: str) -> str:
+        partes = f.split("|")
+        if len(partes) >= 2:
+            partes[1] = cambiar(partes[1])
+        return "|".join(partes)
+
+    for e in man.get("poses", []):
+        e["fuente"], e["carpeta"], e["firma"] = cambiar(e.get("fuente", "")), cambiar(e.get("carpeta", "")), firma(e.get("firma", ""))
+    man["rechazadas"] = {firma(k): {**r, "fuente": cambiar(r.get("fuente", ""))} for k, r in man.get("rechazadas", {}).items()}
+    sesiones._escribir_json(ruta, man)

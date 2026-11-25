@@ -300,6 +300,8 @@ def _id_reconstruccion(ruta_calibracion: Path, fd: str, z_min: float, z_max: flo
     st = ruta_calibracion.resolve().stat()
     extra = "" if plano_umbral == 3.0 else f"|{plano_umbral}"  # sin cambiar el id de lo ya calculado
     extra += f"|vecinos={vecinos}" if vecinos else ""
+    # filtro de manchas y brillos (mascara.zonas_dificiles): siempre en el id
+    extra += f"|refl={cfg.REFLECTANCIA_REL_MIN}/{cfg.REFLECTANCIA_BORDE_PX}|sat={cfg.SATURACION_NIVEL}"
     return f"{ruta_calibracion.resolve()}|{st.st_mtime_ns}|{fd}|{z_min}|{z_max}|{salto_max}{extra}"
 
 
@@ -386,6 +388,8 @@ def procesar_reconstruccion(
             )
             m = filtrar_outliers_3d(z, m, salto_max, z_min, z_max)
             n_antes = int(np.count_nonzero(m))
+            m &= ~mascara.zonas_dificiles(d, rutas.dir_pose_ordenada(categoria, nombre), fd_usada)
+            n_dificiles = n_antes - int(np.count_nonzero(m))
             mask_usuario = mascara.cargar(categoria, nombre, m.shape)
             if mask_usuario is not None:
                 m &= mask_usuario
@@ -400,9 +404,11 @@ def procesar_reconstruccion(
             e_map, erms = None, None
             texto = ""
             info = {"id": ident, "puntos": int(len(pts)), "fuera_de_cobertura": round(fuera, 4),
-                    "mascara": firma_mascara, "quitados_mascara": n_antes - int(len(pts))}
+                    "mascara": firma_mascara, "quitados_mascara": n_antes - n_dificiles - int(len(pts)),
+                    "quitados_manchas": n_dificiles}
+            texto = f" | manchas/brillos: -{n_dificiles:,}" if n_dificiles else ""
             if firma_mascara or cfg.FILTRO_VECINOS_SIGMA:
-                texto = f" | máscara/filtro: -{n_antes - len(pts):,} puntos"
+                texto += f" | máscara/filtro: -{n_antes - n_dificiles - len(pts):,}"
             if categoria == "plano" and np.count_nonzero(m) > 100:
                 e_map, erms, coef = plane_fitting(x, y, z, m, umbral_mm=plano_umbral)
                 cobertura = 100.0 * np.count_nonzero(np.isfinite(e_map)) / np.count_nonzero(m)
@@ -415,6 +421,13 @@ def procesar_reconstruccion(
             print(
                 f"  [{nombre}] {len(pts):,} puntos ({time.perf_counter() - t0:.1f} s){texto} -> '{ruta_ply.name}'"
             )
+            sat = mascara.imagenes_saturadas(rutas.dir_pose_ordenada(categoria, nombre),
+                                             "V" if fd_usada.lower() == "fx" else "H")
+            frac_sat = float(np.mean(sat[m] >= cfg.N_PASOS / 2)) if sat.shape == m.shape and np.any(m) else 0.0
+            info["saturados"] = round(frac_sat, 4)
+            if frac_sat > 0.05:
+                print(f"      [AVISO] {100 * frac_sat:.0f}% de los puntos saturan la cámara en la mitad o más de las "
+                      f"imágenes de franjas: la pose está sobreexpuesta. Baja la exposición (⚙ Ajustes) y vuelve a capturar.")
             if fuera > 0.05:
                 print(f"      [AVISO] {100 * fuera:.0f}% de los puntos usan zonas del proyector fuera del "
                       f"rango calibrado: ahí el error crece. Captura poses del tablero que cubran esa zona.")

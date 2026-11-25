@@ -1,5 +1,5 @@
 {
-  "fecha": "2026-11-25T14:11:28",
+  "fecha": "2026-11-25T15:20:08",
   "poses": [
     "pose_31",
     "pose_32",
@@ -82,7 +82,11 @@
       "pose_23",
       "pose_24",
       "pose_25",
-      "pose_26"
+      "pose_26",
+      "pose_27",
+      "pose_28",
+      "pose_29",
+      "pose_30"
     ]
   },
   "error_por_pose_cam_px": {

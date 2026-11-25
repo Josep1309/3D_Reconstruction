@@ -145,3 +145,30 @@ def test_seleccion_manual_de_poses(datos):
     assert not sesiones.configuracion_vigente().get("manual")
     with pytest.raises(ValueError):
         sesiones.fijar_seleccion({"patron": []})
+
+
+def _fijar_en(minutos: float) -> None:
+    """Simula que la configuración se eligió en T0 + minutos."""
+    datos = json.loads(sesiones.ELEGIDA.read_text())
+    datos["fijada"] = (T0 + timedelta(minutes=minutos)).isoformat()
+    sesiones.ELEGIDA.write_text(json.dumps(datos))
+    sesiones._cache.clear()
+
+
+def test_capturas_nuevas_se_suman_a_la_seleccion(datos):
+    """Con una selección manual, un objeto capturado después aparece solo (sin recalibrar)."""
+    sesiones.fijar_seleccion({"patron": ["pose_00", "pose_01"], "plano": ["pose_00"]})
+    _fijar_en(200)  # se eligió entre el objeto de las 12:01 y el de las 15:00
+    v = sesiones.configuracion_vigente()
+    assert v["poses"]["objeto"] == {"pose_01"}           # el posterior, sí; el anterior, no
+    assert v["poses"]["patron"] == {"pose_00", "pose_01"}  # la calibración no cambia
+    assert v["nuevas"] == 1
+
+
+def test_capturas_nuevas_se_suman_al_proceso_elegido(datos):
+    primera = sesiones.procesos()[0]["id"]
+    sesiones.fijar_configuracion(primera)
+    _fijar_en(200)
+    v = sesiones.configuracion_vigente()
+    assert "pose_01" in v["poses"]["objeto"] and "pose_00" not in v["poses"]["objeto"]
+    assert v["poses"]["patron"] == {"pose_00", "pose_01", "pose_02"}

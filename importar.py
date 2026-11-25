@@ -114,7 +114,8 @@ def analizar(carpeta: str | Path) -> dict:
                 "tipo": "video" if u.is_file() else "sueltas" if sueltas else "carpeta"})
     horas = [datetime.fromisoformat(c["hora"]) for lista in capturas.values() for c in lista]
     inicio = min(horas) if horas else datetime.now()
-    return {"origen": str(origen), "proceso": rutas.nombre_proceso(inicio), "inicio": inicio.isoformat(timespec="seconds"),
+    return {"origen": str(origen), "proceso": rutas.nombre_proceso(inicio, etiqueta=origen.name),
+            "nombre": origen.name, "inicio": inicio.isoformat(timespec="seconds"),
             "capturas": capturas, "omitidas": omitidas, "ignoradas": ignoradas,
             "bytes": sum(c["bytes"] for lista in capturas.values() for c in lista)}
 
@@ -126,7 +127,12 @@ def importar(carpeta: str | Path, nombre: str | None = None, mover: bool = False
     if not plan["capturas"]:
         raise ValueError("No hay capturas nuevas para importar" + (f" ({len(plan['omitidas'])} ya estaban en el sistema)"
                                                                      if plan["omitidas"] else ""))
-    proceso = nombre if nombre and rutas.es_proceso(nombre) else plan["proceso"]
+    # nombre: el que eligió el usuario (por defecto, el de la carpeta de origen) o una carpeta completa
+    if nombre and rutas.es_proceso(nombre):
+        proceso, etiqueta = nombre, None
+    else:
+        etiqueta = (nombre or "").strip() or plan["nombre"]
+        proceso = rutas.nombre_proceso(datetime.fromisoformat(plan["inicio"]), etiqueta=etiqueta)
     destino_proceso = cfg.DIR_CAPTURAS / proceso
     if destino_proceso.exists():
         raise FileExistsError(f"Ya existe {destino_proceso}")
@@ -150,7 +156,8 @@ def importar(carpeta: str | Path, nombre: str | None = None, mover: bool = False
                 shutil.copytree(origen, destino, copy_function=shutil.copy2)
             copiadas.append(destino)
     sesiones.escribir_json(destino_proceso / "proceso.json", {
-        "proceso": proceso, "inicio": plan["inicio"], "importado": datetime.now().isoformat(timespec="seconds"),
+        "proceso": proceso, **({"nombre": etiqueta[:80]} if etiqueta else {}),
+        "inicio": plan["inicio"], "importado": datetime.now().isoformat(timespec="seconds"),
         "origen": plan["origen"], "capturas": {cat: [c["nombre"] for c in lista] for cat, lista in plan["capturas"].items()},
         "poses": {},
     })
@@ -166,7 +173,7 @@ def main() -> None:
     parser.add_argument("carpeta", type=Path, help="Carpeta con subcarpetas patron/, plano/, objeto/")
     parser.add_argument("--aplicar", action="store_true", help="Importa (sin esto solo muestra qué haría)")
     parser.add_argument("--mover", action="store_true", help="Mueve en vez de copiar (la carpeta original queda vacía)")
-    parser.add_argument("--nombre", help="Nombre de la carpeta del proceso (AAAA-MM-DD_HHMM); por defecto, su fecha")
+    parser.add_argument("--nombre", help="Nombre del proceso (p. ej. 'cilindro con pintas'); por defecto, el de la carpeta")
     parser.add_argument("--procesar", action="store_true",
                         help="Después de importar: organizar, fases, calibración (si hay patrón) y reconstrucción")
     args = parser.parse_args()

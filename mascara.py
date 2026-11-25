@@ -185,6 +185,41 @@ def firma(cat: str, pose: str) -> str | None:
     return f"{st.st_mtime_ns}|{st.st_size}"
 
 
+def zonas_dificiles(fases: dict, dir_pose: Path, fd: str, rel_min: float = cfg.REFLECTANCIA_REL_MIN,
+                    borde: int = cfg.REFLECTANCIA_BORDE_PX, saturacion: float = cfg.SATURACION_NIVEL) -> np.ndarray:
+    """Píxeles donde la fase no es fiable aunque pasen los umbrales: bordes de manchas oscuras
+    (modulación mucho menor que la de su entorno) y píxeles saturados. Devuelve True = descartar.
+
+    La modulación se suaviza (σ 1.5 px) antes de compararla: tiene un patrón fino píxel a píxel
+    (rejilla del DMD) que, si no, se confunde con manchas."""
+    alto, ancho = fases["Itex"].shape
+    malo = np.zeros((alto, ancho), bool)
+    orient = {"fx": ["V"], "fy": ["H"]}.get(str(fd).lower(), ["H", "V"])
+    if rel_min and rel_min > 0:
+        for o in orient:
+            b = cv2.GaussianBlur(np.nan_to_num(fases["BY" if o == "H" else "BX"]).astype(np.float32), (0, 0), 1.5)
+            entorno = cv2.medianBlur(np.clip(b, 0, 255).astype(np.uint8), 31).astype(np.float32)
+            malo |= b < rel_min * np.maximum(entorno, 1.0)
+        if borde > 0:
+            k = 2 * borde + 1
+            malo = cv2.dilate(malo.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))).astype(bool)
+    if saturacion is not None and saturacion <= 255:
+        for o in orient:
+            malo |= imagenes_saturadas(dir_pose, o, saturacion) >= cfg.N_PASOS / 2
+    return malo
+
+
+def imagenes_saturadas(dir_pose: Path, orient: str = "H", nivel: float = 250) -> np.ndarray:
+    """En cuántos de los corrimientos de fase llega cada píxel a `nivel` (0 si faltan imágenes)."""
+    cuenta = None
+    for i in range(cfg.N_PASOS):
+        img = cv2.imread(str(dir_pose / orient / f"{cfg.PREFIJO_ORDENADAS}{i:02d}.tiff"), cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            continue
+        cuenta = (img >= nivel).astype(np.int16) if cuenta is None else cuenta + (img >= nivel)
+    return cuenta if cuenta is not None else np.zeros((1, 1), np.int16)
+
+
 def filtrar_vecinos(x: np.ndarray, y: np.ndarray, z: np.ndarray, m: np.ndarray, sigma: float) -> np.ndarray:
     """Quita puntos aislados en 3D (como `pcdenoise`, pero sobre la rejilla de la cámara).
 

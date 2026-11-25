@@ -94,6 +94,14 @@ Las etapas corren en un orden fijo desde `pipeline.py` (`ETAPAS`):
       `conf.seleccion` + `calib_poses`.
     - La calibración la guarda en su `.json` y `usar_configuracion_de()` la restaura al
       activarla.
+- **Configuración elegida + capturas nuevas:** `configuracion_elegida.json` guarda `fijada`. Las
+  capturas de plano/objeto de procesos sin patrón posteriores se suman solas
+  (`sesiones._capturas_nuevas`), sin cambiar la calibración.
+- **Nombre de proceso:** carpeta `AAAA-MM-DD_HHMM_<etiqueta>` (`rutas.RE_PROCESO`,
+  `nombre_proceso(etiqueta=)`), nombre legible en `proceso.json`. `archivos.renombrar_proceso`
+  mueve las tres carpetas y reescribe el manifiesto.
+- **Zonas difíciles** (`mascara.zonas_dificiles`, siempre en la reconstrucción): bordes de manchas
+  oscuras (`REFLECTANCIA_REL_MIN` 0.6) y, opcional, saturación. Van en el id de la reconstrucción.
 - **Máscara por pose** (`mascara.py`, pestaña Máscara): `pose_XX_mascara.png` junto a las
   fases. La reconstrucción la aplica si existe (más `FILTRO_VECINOS_SIGMA`, 0 = apagado). Su
   firma va en `<cat>_resumen.json` (`mascara`), así que cambiarla recalcula solo esa pose.

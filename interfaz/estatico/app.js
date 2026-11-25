@@ -135,6 +135,8 @@ function pintarEjecucion(e) {
   $("#b-medir").disabled = e.ejecutando;
   $("#b-ejecutar").disabled = e.ejecutando;
   $("#b-previa").disabled = e.ejecutando;
+  $("#aj-lightcrafter").disabled = $("#aj-patrones").disabled = e.ejecutando;
+  $("#b-borrar-pose").disabled = e.ejecutando || !est.pose;
   $("#b-detener").classList.toggle("oculto", !e.ejecutando || previa);
   $("#pausa").classList.toggle("oculto", !pausaCaptura);
   $("#vivo-pausa").classList.toggle("oculto", !pausaCaptura);
@@ -233,7 +235,8 @@ function pintarListaPoses() {
     const nota = document.createElement("p");
     nota.className = "nota vigente";
     const desde = new Date(v.desde).toLocaleString(locale(), { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
-    nota.textContent = (v.manual ? t("vigente_nota_manual") : t(v.auto ? "vigente_nota" : "vigente_nota_elegida", { f: desde })) + (v.procesos_ocultos && !v.manual ? " " + t("vigente_ocultos", { n: v.procesos_ocultos }) : "");
+    nota.textContent = (v.manual ? t("vigente_nota_manual") : t(v.auto ? "vigente_nota" : "vigente_nota_elegida", { f: desde })) + (v.procesos_ocultos && !v.manual ? " " + t("vigente_ocultos", { n: v.procesos_ocultos }) : "")
+    + (v.nuevas ? " " + t("vigente_nuevas", { n: v.nuevas }) : "");
     nota.title = t("vigente_title");
     cont.appendChild(nota);
   }
@@ -309,6 +312,25 @@ function pintarPasos() {
     b.classList.toggle("en-curso", paso === enCurso || (enCurso === "profundidad" && paso === "nube"));
     b.setAttribute("aria-selected", String(paso === est.paso));
   }
+}
+
+// ============================== borrar la pose elegida ==============================
+// Mueve a la papelera la captura de la pose (y todo lo derivado); se restaura desde Archivos.
+async function borrarPoseActual() {
+  const cat = est.cat, pose = est.pose;
+  if (!pose) return;
+  let plan;
+  try { plan = await api("/api/poses/borrar", { cat, poses: [pose], simular: true }); }
+  catch (err) { alert(t("error_x", { m: err.message })); return; }
+  const otras = plan.poses.filter((p) => p !== pose);
+  const texto = t("borrar_pose_confirmar", { p: `${nombreCat(cat)} ${pose}` }) +
+    (otras.length ? "\n\n" + t("borrar_pose_otras", { l: otras.join(", ") }) : "");
+  if (!confirm(texto)) return;
+  try {
+    await api("/api/poses/borrar", { cat, poses: [pose] });
+    agregarLog(`[OK] ${t("borrar_pose_hecho", { l: plan.poses.join(", ") })}`);
+  } catch (err) { alert(t("error_x", { m: err.message })); }
+  await refrescarEstado();
 }
 
 // ============================== selección y paneles ==============================
@@ -589,7 +611,8 @@ function construirSecuencia(etapas) {
   lista.innerHTML = "";
   let n = 0;
   for (const [etapa, activa] of Object.entries(etapas)) {
-    if (etapa === "visualizacion") continue;
+    // patrones y lightcrafter se hacen una vez: están en ⚙ Ajustes → Proyector
+    if (["visualizacion", "patrones", "lightcrafter"].includes(etapa)) continue;
     const tipo = TIPO_ETAPA[etapa];
     const li = document.createElement("li");
     li.dataset.etapa = etapa;
@@ -775,7 +798,8 @@ function confMedir() {
     },
     // Tras recalibrar se reconstruyen planos y objetos (cambia la calibración); si no, solo lo medido
     categorias: calibrar ? ["plano", "objeto"] : [cat],
-    captura: { categoria: cat, poses: +$("#m-poses").value || 1, ciclos: +$("#m-ciclos").value || 1, esperar_enter: $("#m-pausa").checked },
+    captura: { categoria: cat, poses: +$("#m-poses").value || 1, ciclos: +$("#m-ciclos").value || 1, esperar_enter: $("#m-pausa").checked,
+               nombre: $("#m-nombre").value.trim() },
     rehacer: false, fase: $("#a-fase").value, calibracion: $("#a-calib").value, ...posesCalib(),
     ajustes: ajustesParaEnviar(),
     simular: $("#m-demo").checked ? $("#m-fuente").value : null,
@@ -794,8 +818,17 @@ function planAvanzado() {
   return plan;
 }
 
+// ⚙ Ajustes → Proyector: corre solo esa etapa
+function ejecutarSoloEtapa(etapa) {
+  if (est.ejec.ejecutando) return;
+  const etapas = Object.fromEntries(Object.keys(est.config.etapas).map((e) => [e, e === etapa]));
+  $("#ajustes").close();
+  ejecutar({ etapas, categorias: [], rehacer: false, fase: $("#a-fase").value, calibracion: $("#a-calib").value,
+             ajustes: ajustesParaEnviar() });
+}
+
 function confAvanzada() {
-  const etapas = {};
+  const etapas = { patrones: false, lightcrafter: false };
   for (const c of $$("#etapas input")) etapas[c.value] = c.checked;
   const plan = planAvanzado();
   const categorias = Object.keys(plan);
@@ -804,7 +837,7 @@ function confAvanzada() {
     categorias,  // también deciden qué se procesa (el patrón solo se procesa si se calibra)
     captura: {
       plan, categoria: categorias.find((c) => c !== "patron") || categorias[0],
-      ciclos: +$("#a-ciclos").value || 1, esperar_enter: $("#a-pausa").checked,
+      ciclos: +$("#a-ciclos").value || 1, esperar_enter: $("#a-pausa").checked, nombre: $("#a-nombre").value.trim(),
     },
     rehacer: $("#a-rehacer").checked, fase: $("#a-fase").value, calibracion: $("#a-calib").value, ...posesCalib(),
     ajustes: ajustesParaEnviar(),
@@ -915,6 +948,9 @@ async function iniciar() {
   for (const id of ["#m-categoria", "#m-demo"]) $(id).addEventListener("change", notaMedir);
   $("#v-categoria").addEventListener("change", (e) => { $("#v-seguir").checked = false; const ps = est.poses[e.target.value] || []; seleccionar(e.target.value, ps.length ? ps[ps.length - 1].pose : null); });
   $("#v-pose").addEventListener("change", (e) => { $("#v-seguir").checked = false; seleccionar(est.cat, e.target.value); });
+  $("#b-borrar-pose").addEventListener("click", borrarPoseActual);
+  $("#aj-lightcrafter").addEventListener("click", () => ejecutarSoloEtapa("lightcrafter"));
+  $("#aj-patrones").addEventListener("click", () => ejecutarSoloEtapa("patrones"));
   for (const b of $$("#pasos button")) b.addEventListener("click", () => mostrarPaso(b.dataset.paso));
   for (const b of $$(".segmentado.color button")) b.addEventListener("click", () => {
     $$(".segmentado.color button").forEach((x) => x.classList.toggle("activo", x === b));

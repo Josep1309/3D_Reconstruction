@@ -60,6 +60,11 @@
             <button type="button" class="ayuda" data-i18n-ayuda="ayuda_ciclos" data-i18n-etiqueta="ciclos">?</button></span>
           <input id="m-ciclos" type="number" min="1" max="8" value="1">
         </div>
+        <div class="campo ancho">
+          <span class="etiqueta"><label for="m-nombre" data-i18n="nombre_proceso">Nombre del proceso (opcional)</label>
+            <button type="button" class="ayuda" data-i18n-ayuda="ayuda_nombre_proceso" data-i18n-etiqueta="nombre_proceso">?</button></span>
+          <input id="m-nombre" type="text" maxlength="60" spellcheck="false" data-i18n-placeholder="nombre_proceso_ej" placeholder="p. ej. cilindro con pintas">
+        </div>
       </div>
       <div class="fila-casilla">
         <label class="casilla"><input id="m-pausa" type="checkbox" checked> <span data-i18n="pausa">Pausa antes de cada pose</span></label>
@@ -107,6 +112,11 @@
             <button type="button" class="ayuda" data-i18n-ayuda="ayuda_ciclos" data-i18n-etiqueta="ciclos">?</button></span>
           <input id="a-ciclos" type="number" min="1" max="8" value="1">
         </div>
+        <div class="campo ancho">
+          <span class="etiqueta"><label for="a-nombre" data-i18n="nombre_proceso">Nombre del proceso (opcional)</label>
+            <button type="button" class="ayuda" data-i18n-ayuda="ayuda_nombre_proceso" data-i18n-etiqueta="nombre_proceso">?</button></span>
+          <input id="a-nombre" type="text" maxlength="60" spellcheck="false" data-i18n-placeholder="nombre_proceso_ej" placeholder="p. ej. cilindro con pintas">
+        </div>
       </div>
       <div class="fila-casilla">
         <label class="casilla"><input id="a-pausa" type="checkbox" checked> <span data-i18n="pausa">Pausa antes de cada pose</span></label>
@@ -137,6 +147,22 @@
       <dl id="calib-detalle" class="detalle"></dl>
       <button id="b-ver-calib" type="button" data-i18n="ver_calib">Ver errores o cambiar de calibración</button>
     </details>
+
+    <!-- Registro del proceso: en la columna izquierda, siempre a mano -->
+    <details class="registro" id="registro" open>
+      <summary><span data-i18n="registro">Registro del proceso</span>
+        <span class="registro-herramientas">
+          <select id="log-filtro" data-i18n-aria="log_filtro" aria-label="Filtro">
+            <option value="todo" data-i18n="log_todo">Todo</option>
+            <option value="avisos" data-i18n="log_avisos">Avisos y errores</option>
+            <option value="errores" data-i18n="log_errores">Solo errores</option>
+          </select>
+          <button type="button" id="log-descargar" data-i18n="log_descargar">Descargar</button>
+          <button type="button" id="log-limpiar" data-i18n="log_limpiar">Limpiar</button>
+        </span>
+      </summary>
+      <pre id="log" aria-live="polite"></pre>
+    </details>
   </aside>
 
   <!-- ===================== VISUALIZACIÓN ===================== -->
@@ -157,6 +183,7 @@
       <div class="selector">
         <select id="v-categoria" data-i18n-aria="categoria"></select>
         <select id="v-pose" data-i18n-aria="poses"></select>
+        <button type="button" id="b-borrar-pose" class="icono" data-i18n-title="borrar_pose" title="Mover esta pose a la papelera">🗑</button>
         <label class="casilla"><input id="v-seguir" type="checkbox" checked> <span data-i18n="seguir">Seguir la última</span></label>
       </div>
       <div id="metricas" class="metricas"></div>
@@ -457,6 +484,8 @@
         </div>
         <div id="im-resumen" class="im-resumen"></div>
         <div id="im-opciones" class="im-fila oculto">
+          <label class="im-nombre"><span data-i18n="nombre_proceso">Nombre del proceso (opcional)</span>
+            <input id="im-nombre" type="text" maxlength="60" spellcheck="false"></label>
           <label class="casilla"><input id="im-procesar" type="checkbox" checked> <span data-i18n="im_procesar">Procesar todo después de importar</span></label>
           <label class="casilla"><input id="im-mover" type="checkbox"> <span data-i18n="im_mover">Mover en vez de copiar</span></label>
           <button type="button" id="im-importar" class="primario" data-i18n="im_importar">Importar</button>
@@ -516,20 +545,6 @@
       <p class="nota" data-i18n="ec_nota_vectores">Las flechas son el error de cada círculo (medido − modelo), ampliado para que se vea. Un patrón ordenado (todas hacia un lado o en remolino) indica un error del modelo; flechas al azar, ruido de medición. En gris, los círculos de las demás poses: muestran qué parte del sensor y del proyector cubre la calibración.</p>
     </section>
 
-    <details class="registro" id="registro" open>
-      <summary><span data-i18n="registro">Registro del proceso</span>
-        <span class="registro-herramientas">
-          <select id="log-filtro" data-i18n-aria="log_filtro" aria-label="Filtro">
-            <option value="todo" data-i18n="log_todo">Todo</option>
-            <option value="avisos" data-i18n="log_avisos">Avisos y errores</option>
-            <option value="errores" data-i18n="log_errores">Solo errores</option>
-          </select>
-          <button type="button" id="log-descargar" data-i18n="log_descargar">Descargar</button>
-          <button type="button" id="log-limpiar" data-i18n="log_limpiar">Limpiar</button>
-        </span>
-      </summary>
-      <pre id="log" aria-live="polite"></pre>
-    </details>
   </main>
 </div>
 
@@ -593,6 +608,20 @@
           </select>
         </div>
         <div id="aj-calib" class="aj-lista"></div>
+      </section>
+      <section>
+        <h3 data-i18n="aj_proyector">Proyector (LightCrafter)</h3>
+        <p class="nota" data-i18n="aj_proyector_nota">Se hace una sola vez, o cuando el proyector se reinicia o pierde su configuración. No hace falta para medir.</p>
+        <div class="aj-acciones">
+          <div class="aj-accion">
+            <button type="button" id="aj-lightcrafter" data-i18n="aj_lightcrafter">Configurar el LightCrafter</button>
+            <small data-i18n="corta_lightcrafter"></small>
+          </div>
+          <div class="aj-accion">
+            <button type="button" id="aj-patrones" data-i18n="aj_patrones">Generar los patrones</button>
+            <small data-i18n="corta_patrones"></small>
+          </div>
+        </div>
       </section>
     </div>
     <footer class="ajustes-pie">
