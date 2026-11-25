@@ -124,13 +124,54 @@ function reiniciarMedicion() {
   pintarPuntos(); pintarPerfil(); dibujarCapa();
 }
 
+// ------------------------------------------------------------------ comparar
+async function cargarComparar() {
+  const sel = $("#cmp-ref"), previa = sel.value;
+  let copias = [];
+  try { copias = await api(`/api/comparaciones?cat=${est.cat}`); } catch (_) { /* sin copias */ }
+  const opciones = [`<option value="">${escHTML(t("cmp_elegir"))}</option>`];
+  for (const c of copias.filter((c) => c.pose === est.pose)) {
+    opciones.push(`<option value="copia:${c.id}">${escHTML(t("cmp_copia", { f: fechaCorta(c.fecha), a: c.calculada_con || "" }))}</option>`);
+  }
+  for (const p of (est.poses[est.cat] || []).filter((p) => p.reconstruida && p.pose !== est.pose)) {
+    opciones.push(`<option value="pose:${p.pose}">${escHTML(t("cmp_otra_pose", { p: p.pose + (p.nota ? " · " + p.nota : "") }))}</option>`);
+  }
+  sel.innerHTML = opciones.join("");
+  if ([...sel.options].some((o) => o.value === previa)) sel.value = previa;
+  await pintarComparacion();
+}
+
+async function pintarComparacion() {
+  const ref = $("#cmp-ref").value, fig = $("#cmp-fig"), stats = $("#cmp-stats");
+  $("img", fig)?.remove();
+  stats.innerHTML = ""; $("#cmp-escala").textContent = "";
+  if (!ref) { stats.textContent = t("cmp_ayuda"); return; }
+  try {
+    const r = await fetch(`/api/imagen?cat=${est.cat}&pose=${est.pose}&tipo=${encodeURIComponent("dif:" + ref)}&ancho=1000`);
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+    const img = document.createElement("img");
+    img.src = URL.createObjectURL(await r.blob());
+    img.addEventListener("click", () => fig.classList.toggle("ampliada"));
+    fig.prepend(img);
+    $("#cmp-escala").textContent = decodeURIComponent(r.headers.get("X-Escala") || "");
+    const s = await api(`/api/comparar?cat=${est.cat}&pose=${est.pose}&ref=${encodeURIComponent(ref)}`);
+    const filas = [
+      t("cmp_puntos", { a: s.puntos_actual.toLocaleString(locale()), b: s.puntos_ref.toLocaleString(locale()), c: s.comunes.toLocaleString(locale()) }),
+      t("cmp_solo", { a: s.solo_actual.toLocaleString(locale()), b: s.solo_ref.toLocaleString(locale()) }),
+    ];
+    if (s.rms != null) filas.push(t("cmp_dif_stats", { m: s.media.toFixed(3), rms: s.rms.toFixed(3), p95: s.p95.toFixed(3), max: s.max.toFixed(2) }));
+    for (const f of filas) { const d = document.createElement("div"); d.className = "me-fila"; d.textContent = f; stats.appendChild(d); }
+  } catch (err) { stats.textContent = t("error_x", { m: err.message }); }
+}
+
 // Al mostrar la pestaña o cambiar de pose
 function cargarMedicion() {
   const clave = `${est.cat}/${est.pose}/${version("reconstruida")}`;
   const hay = !!infoPose()?.reconstruida;
   $("#medicion").classList.toggle("oculto", !hay);
+  $("#comparar").classList.toggle("oculto", !hay);
   for (const id of ["#me-ply", "#me-csv"]) $(id).href = `/api/descargar?tipo=${id === "#me-ply" ? "ply" : "csv"}&cat=${est.cat}&pose=${est.pose}`;
-  if (me.clave !== clave) { me.clave = clave; reiniciarMedicion(); pintarHistograma(); }
+  if (me.clave !== clave) { me.clave = clave; reiniciarMedicion(); pintarHistograma(); if (hay) cargarComparar(); }
   setTimeout(dibujarCapa, 300);  // cuando la imagen ya tiene tamaño
 }
 
@@ -146,5 +187,15 @@ function iniciarMedicion() {
   $("#me-limpiar").addEventListener("click", reiniciarMedicion);
   $("#me-ampliar").addEventListener("click", () => { figuraZ().classList.toggle("ampliada"); setTimeout(dibujarCapa, 50); });
   $("#me-calib").href = "/api/descargar?tipo=calibracion";
+  $("#cmp-ref").addEventListener("change", pintarComparacion);
+  $("#cmp-guardar").addEventListener("click", async () => {
+    try {
+      const c = await api("/api/comparacion/guardar", { cat: est.cat, pose: est.pose });
+      agregarLog(`[OK] ${t("cmp_guardada", { p: est.pose })}`);
+      await cargarComparar();
+      $("#cmp-ref").value = `copia:${c.id}`;
+      pintarComparacion();
+    } catch (err) { agregarLog(`[ERROR] ${err.message}`); }
+  });
   window.addEventListener("resize", dibujarCapa);
 }

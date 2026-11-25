@@ -258,6 +258,18 @@
         <div id="me-perfil"></div>
         <div id="me-hist"></div>
       </section>
+      <section id="comparar" class="tarjeta medicion oculto">
+        <div class="me-barra">
+          <h3 data-i18n="cmp_titulo">Comparar</h3>
+          <select id="cmp-ref" data-i18n-aria="cmp_ref"></select>
+          <button type="button" id="cmp-guardar" data-i18n="cmp_guardar">Guardar el resultado actual para comparar</button>
+          <button type="button" class="ayuda" data-i18n-ayuda="ayuda_comparar" data-i18n-etiqueta="cmp_titulo">?</button>
+        </div>
+        <div class="cmp-cuerpo">
+          <figure id="cmp-fig" class="ec-figura"><figcaption><span data-i18n="cmp_dif">Z actual − Z referencia</span> <small id="cmp-escala"></small></figcaption></figure>
+          <div id="cmp-stats" class="me-puntos"></div>
+        </div>
+      </section>
     </section>
 
     <section class="panel" data-panel="nube">

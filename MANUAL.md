@@ -1234,6 +1234,18 @@ cuando **Seguir la última** está activo:
    - **Descargas:** la nube `.ply` (binaria, con color), los puntos `.csv` (columna, fila, X, Y, Z
      en mm) y el informe de la calibración en uso (`.json`).
    - *Ampliar* agranda el mapa sin dejar de medir.
+
+   **Comparar**, debajo, muestra el mapa de **Z actual − Z de una referencia**, píxel a píxel, solo
+   donde las dos tienen dato. También da cuántos puntos tiene cada una y la diferencia media, RMS,
+   P95 y máxima. La referencia puede ser:
+   - **otra pose** de la misma categoría: repetibilidad entre dos capturas de la misma escena;
+   - **una copia guardada** de esta pose. Reprocesar sobrescribe el resultado, así que para
+     comparar ajustes:
+     1. pulsa *Guardar el resultado actual para comparar*;
+     2. cambia el ajuste en ⚙ y vuelve a procesar (fases y reconstrucción);
+     3. elige la copia guardada.
+
+   Las copias quedan en `resultados/comparaciones/`, con los ajustes con que se calcularon.
 6. **Nube de puntos.** Visor 3D interactivo con hasta 400 000 puntos, coloreados por profundidad
    o por textura:
    - arrastrar = girar;
@@ -1274,6 +1286,16 @@ las poses que salieron de ella, con cuatro puntos: organizada · fase envuelta �
 · reconstruida.
 - **Ver** abre las imágenes crudas de la captura (las 50 o más que guardó la cámara), con el mismo
   visor.
+- **Notas:**
+  - cada proceso tiene una nota («calibración de la mañana, objeto rotado 30°…»);
+  - cada captura, el **nombre de la pieza** («pieza A, cara superior»).
+
+  El nombre se ve en la lista de *Poses*, en el selector de pose y en las métricas. Se guardan en
+  `<DATOS>/notas.json`.
+- Cada captura y cada proceso muestran el **espacio** que ocupan: captura cruda más poses
+  organizadas, que es lo que se libera al borrarlos.
+- Las capturas **rechazadas** (sin ciclos válidos) y las **dudosas** (organizadas antes de los
+  controles actuales, con pureza < 0.5) se marcan con su motivo.
 - **Usar esta configuración** la pone en uso, junto con su calibración si existe. **Volver a la
   última** regresa a la más reciente.
 - **Borrar:** marca capturas, un proceso o una configuración entera (*Seleccionar todo*) y pulsa
@@ -1282,8 +1304,14 @@ las poses que salieron de ella, con cuatro puntos: organizada · fase envuelta �
   resumen y del registro.
   - Antes de borrar se pide confirmación, con un aviso si hay poses del patrón usadas por la
     calibración en uso o capturas de la configuración vigente.
-  - Lo borrado va a `papelera/<fecha>/` en la carpeta de datos, con las mismas rutas, y se
-    restaura moviéndolo de vuelta. **Vaciar papelera** lo elimina definitivamente.
+  - Lo borrado va a `papelera/<fecha>/` en la carpeta de datos, con las mismas rutas. Cada lote
+    guarda en `papelera.json` las entradas que se quitaron del manifiesto y del registro.
+  - Al final de la pestaña, **Papelera** lista los lotes.
+    - **Restaurar** devuelve un lote a su lugar, con los **mismos nombres de pose**.
+    - No pisa nada: lo que ya exista queda en la papelera y se avisa.
+    - Los lotes de una pose repetida en la captura no tienen datos del manifiesto: se devuelven
+      solo los archivos, y *Organizar* les da un número de pose nuevo.
+  - **Vaciar papelera** lo elimina definitivamente.
   - Los números de pose borrados no se reutilizan (`ultimo_indice` en el manifiesto), así que
     una calibración nunca apunta a una pose distinta de la que usó.
 

@@ -681,6 +681,12 @@ def generar_imagen(cat: str, pose: str, tipo: str) -> tuple[np.ndarray, str]:
     """Devuelve (imagen BGR o gris, texto de escala) para un paso del proceso."""
     archivos = _archivos_pose(cat, pose)
     n, b = cfg.N_PASOS, cfg.N_BITS_GRAY
+    if tipo.startswith("dif:"):  # diferencia de Z contra una referencia (comparar)
+        dif, _ = diferencia_z(cat, pose, tipo[4:])
+        validos = np.isfinite(dif)
+        lim = float(np.percentile(np.abs(dif[validos]), 98)) if np.any(validos) else 1.0
+        img, r = _color(dif, None, cv2.COLORMAP_TURBO, (-max(lim, 1e-3), max(lim, 1e-3)))
+        return img, f"ΔZ ±{lim:.2f} mm"
     m = RE_ORDENADA.match(tipo)
     if m:  # cualquier imagen organizada: img_V_03 = franja vertical, paso 3
         indice = int(m.group(2))
@@ -783,6 +789,70 @@ def histograma_plano(cat: str, pose: str, bins: int = 60) -> dict:
     return {"cuentas": cuentas.tolist(), "bordes": np.round(bordes, 4).tolist(), "n": int(e.size),
             "rms": float(np.sqrt(np.mean((e - e.mean()) ** 2))), "p95": float(np.percentile(np.abs(e), 95)),
             "max": float(np.max(np.abs(e)))}
+
+
+# ------------------------------------------------------------------ comparar resultados
+DIR_COMPARACIONES = cfg.DIR_RESULTADOS / "comparaciones"
+RE_REF = re.compile(r"^(copia:\d{8}_\d{6}_\w+|pose:pose_\d+)$")
+
+
+def guardar_comparacion(cat: str, pose: str) -> dict:
+    """Copia el resultado actual de una pose (X, Y, Z, Mask, E) para compararlo después, p. ej. tras
+    cambiar un ajuste (el reprocesado sobrescribe el resultado)."""
+    import archivos
+
+    origen = _archivos_pose(cat, pose)["reconstruida"]
+    if not origen.exists():
+        raise FileNotFoundError("esta pose aún no tiene reconstrucción")
+    inv = next((p for p in inventario().get(cat, []) if p["pose"] == pose), {})
+    ident = f"{time.strftime('%Y%m%d_%H%M%S')}_{cat}_{pose}"
+    DIR_COMPARACIONES.mkdir(parents=True, exist_ok=True)
+    import shutil
+
+    shutil.copyfile(origen, DIR_COMPARACIONES / f"{ident}.npz")
+    meta = {"id": ident, "cat": cat, "pose": pose, "fecha": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "calculada_con": inv.get("calculada_con"), "puntos": inv.get("puntos"), "erms_mm": inv.get("erms_mm"),
+            "nota": archivos.leer_notas().get(f"pose:{cat}/{pose}")}
+    (DIR_COMPARACIONES / f"{ident}.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    return meta
+
+
+def listar_comparaciones(cat: str) -> list[dict]:
+    if not DIR_COMPARACIONES.is_dir():
+        return []
+    salida = []
+    for ruta in sorted(DIR_COMPARACIONES.glob(f"*_{cat}_pose_*.json"), reverse=True):
+        try:
+            salida.append(json.loads(ruta.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError):
+            continue
+    return salida
+
+
+def _ruta_referencia(cat: str, ref: str) -> Path:
+    if not RE_REF.match(ref):
+        raise ValueError("referencia inválida")
+    tipo, valor = ref.split(":", 1)
+    ruta = DIR_COMPARACIONES / f"{valor}.npz" if tipo == "copia" else _archivos_pose(cat, valor)["reconstruida"]
+    if not ruta.exists():
+        raise FileNotFoundError("la referencia no existe")
+    return ruta
+
+
+def diferencia_z(cat: str, pose: str, ref: str) -> tuple[np.ndarray, dict]:
+    """Z(actual) − Z(referencia) en los píxeles válidos en ambos, y estadísticas de la comparación."""
+    a, b = _xyz(cat, pose), cargar_npz(_ruta_referencia(cat, ref))
+    ma = a["Mask"].astype(bool) & np.isfinite(a["Z"])
+    mb = b["Mask"].astype(bool) & np.isfinite(b["Z"])
+    comun = ma & mb
+    dif = np.where(comun, a["Z"].astype(np.float64) - b["Z"].astype(np.float64), np.nan)
+    d = dif[comun]
+    stats = {"puntos_actual": int(ma.sum()), "puntos_ref": int(mb.sum()), "comunes": int(comun.sum()),
+             "solo_actual": int((ma & ~mb).sum()), "solo_ref": int((mb & ~ma).sum())}
+    if d.size:
+        stats.update(media=float(d.mean()), rms=float(np.sqrt(np.mean(d ** 2))), p95=float(np.percentile(np.abs(d), 95)),
+                     max=float(np.max(np.abs(d))))
+    return dif, stats
 
 
 def generar_nube(cat: str, pose: str, maximo: int) -> bytes:
@@ -909,6 +979,14 @@ class Manejador(BaseHTTPRequestHandler):
             if url.path == "/api/perfil":
                 cat, pose = self._cat_pose(q)
                 return self._json(perfil_3d(cat, pose, (float(q["ax"]), float(q["ay"])), (float(q["bx"]), float(q["by"]))))
+            if url.path == "/api/comparaciones":
+                cat = q.get("cat", "")
+                if cat not in cfg.CATEGORIAS:
+                    raise ValueError("categoría inválida")
+                return self._json(listar_comparaciones(cat))
+            if url.path == "/api/comparar":
+                cat, pose = self._cat_pose(q)
+                return self._json(diferencia_z(cat, pose, q.get("ref", ""))[1])
             if url.path == "/api/histograma":
                 cat, pose = self._cat_pose(q)
                 return self._json(histograma_plano(cat, pose))
@@ -983,6 +1061,10 @@ class Manejador(BaseHTTPRequestHandler):
                 tmp.write_text(json.dumps({"exposicion_us": us}), encoding="utf-8")
                 tmp.replace(dir_vivo / "control.json")
                 return self._json({"ok": True, "activa": ejecucion.estado()["ejecutando"]})
+            if url.path == "/api/comparacion/guardar":
+                cuerpo = self._cuerpo()
+                cat, pose = self._cat_pose({k: str(v) for k, v in cuerpo.items()})
+                return self._json(guardar_comparacion(cat, pose))
             if url.path == "/api/notas":
                 import archivos
 

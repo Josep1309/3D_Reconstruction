@@ -175,8 +175,9 @@ Medido en `objeto/20261124_132424`:
 - Total ≈ 217 MB por pose. Hoy hay 16 GB en datos.
 - Propuestas:
   - `GUARDAR_VIDEO = False`: el organizador descarta el AVI cuando están los TIFF. −22 %.
-  - TIFF con compresión sin pérdida (LZW o Deflate) en la captura y en el organizador: típicamente
-    −40 a −60 % en imágenes de 8 bits.
+  - ~~TIFF con compresión sin pérdida~~. **Medido en la Fase 4 y descartado:** con 50 frames
+    reales, LZW no reduce nada y Deflate solo un 8 % (48.3 contra 52.6 MB), con escritura ~45 % más
+    lenta. Los frames de la cámara tienen mucho ruido y se comprimen mal.
   - A mediano plazo: que `capturas_ordenadas/` guarde solo el **orden** (índices, ya están en el
     manifiesto como `indices_origen`) y que las fases lean directamente de `capturas/`.
 
