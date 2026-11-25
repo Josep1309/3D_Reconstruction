@@ -247,48 +247,6 @@ def detectar_orden_bits(
     return min(puntajes, key=puntajes.get), puntajes
 
 
-def recuperar_fase_orientacion(
-    prefijo_ruta: Path,
-    fringe_pitch: int = 18,
-    n_step: int = 18,
-    n_bits: int = 6,
-    gamma_th: float = 0.15,
-    med_filt_size: int = 5,
-    orden_bits: str = "auto",
-) -> dict[str, np.ndarray | str]:
-    """Calcula fase relativa y absoluta de una orientación (`H/` o `V/`) de una pose organizada.
-
-    Estructura esperada de la carpeta: F00..F(N-1) corrimientos, F(N)..F(N+B-1) Gray,
-    F(N+B) negro, F(N+B+1) blanco.
-    """
-    imagenes = cargar_secuencia(prefijo_ruta, n_step + n_bits + 2)
-    rel = fase_relativa(imagenes[:n_step], gamma_th=gamma_th)
-
-    negro = imagenes[n_step + n_bits]
-    blanco = imagenes[n_step + n_bits + 1]
-    bits = bits_gray(imagenes[n_step : n_step + n_bits], rel["A"], med_filt_size)
-
-    puntajes: dict[str, float] = {}
-    if orden_bits == "auto":
-        orden_bits, puntajes = detectar_orden_bits(
-            rel["phi"], bits, fringe_pitch, rel["mascara"], med_filt_size
-        )
-    k = decodificar_gray(bits, orden_bits)
-    fase_abs = fase_absoluta(rel["phi"], k, fringe_pitch, med_filt_size)
-
-    return {
-        **rel,
-        "k": k.astype(np.int16),
-        "Phi": fase_abs,
-        "coord_proyector": coordenada_proyector(fase_abs, fringe_pitch),
-        "negro": negro.astype(np.float32),
-        "blanco": blanco.astype(np.float32),
-        "orden_bits": orden_bits,
-        "saltos_msb": puntajes.get("msb", np.nan),
-        "saltos_lsb": puntajes.get("lsb", np.nan),
-    }
-
-
 def mascara_valida(
     gm: np.ndarray,
     itex: np.ndarray,
@@ -647,8 +605,3 @@ def cargar_fases_categoria(dir_fases: Path, categoria: str) -> tuple[list[str], 
             f"No hay fases absolutas en '{dir_fases / categoria}'. Ejecuta antes 'fase_absoluta'."
         )
     return [r.stem for r in rutas], [cargar_fases_pose(r) for r in rutas]
-
-
-def apilar_poses(lista: Sequence[dict[str, np.ndarray]], clave: str) -> np.ndarray:
-    """Apila un campo de varias poses en un arreglo (H, W, P) como en los códigos de MATLAB."""
-    return np.stack([d[clave] for d in lista], axis=-1)

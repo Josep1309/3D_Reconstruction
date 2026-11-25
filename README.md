@@ -55,10 +55,13 @@ La instalación de la cámara (Spinnaker SDK + PySpin) está explicada paso a pa
 [`MANUAL.md`](MANUAL.md). Los problemas frecuentes de cada etapa, con su causa y solución, están
 en el §16.
 
-## Estado actual (capturas del 2026-10-30)
+## Estado actual (montaje del 2026-11-24)
 
-- Calibración: RMS estéreo 0.51 px, línea base de 91.6 mm (casi vertical).
-- Error de planitud medio en 8 planos de referencia: **0.50 mm**.
-- Proceso completo de 17 poses (incluida la calibración): ≈ 70 s.
-- Pendiente físico: recalibrar con poses que cubran todo el ancho del proyector (hoy solo el
-  43 %) y medir el tamaño real del tablero. Ver §16 del manual.
+- Calibración en uso: 7 poses del patrón, RMS estéreo **0.59 px**, línea base de 95.3 mm (casi
+  vertical).
+- Error de planitud en los planos de referencia de esa sesión: **≈ 0.62 mm**.
+- Pendiente físico (ver `AUDITORIA.md` §5):
+  - medir el tamaño real del tablero, porque hoy hay ~1 % de incertidumbre de escala;
+  - recalibrar con poses que cubran todo el ancho del proyector, porque hoy cubren el 59 %.
+- La interfaz web solo muestra y procesa la configuración vigente del montaje (§9.1 del manual).
+  Lo anterior queda en la pestaña *Archivos*.

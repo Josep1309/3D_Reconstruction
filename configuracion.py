@@ -57,7 +57,9 @@ CAM_DEBOUNCE_US = 500.0
 CAM_TRIGGER_DELAY_US = None  # None = no modificar el valor de la cámara
 CAM_TIMEOUT_MS = 2000
 CICLOS_POR_CAPTURA = 1   # >1 captura varios ciclos seguidos; el organizador los promedia
-GUARDAR_VIDEO = True     # además de los .tiff guarda un .avi FFV1 sin pérdida
+# Además de los .tiff, un .avi FFV1 con los mismos frames. Duplica ~47 MB por pose y el organizador
+# lo descarta cuando están los .tiff, así que está desactivado (AUDITORIA.md §4.1)
+GUARDAR_VIDEO = False
 
 # ==============================================================================
 # --- RECUPERACIÓN DE FASE ---
@@ -96,6 +98,12 @@ PATRON_COLOR_CIRCULOS = "white"
 #   "todas"         -> todas las poses de capturas_ordenadas/patron
 #   ["pose_08", ...] -> una lista explícita
 CALIBRACION_POSES: str | list[str] = "ultima_sesion"
+# Control de calidad: una calibración nueva solo se pone en uso si lo cumple; si no, queda en el
+# historial marcada como rechazada y sigue la anterior (se puede forzar)
+CALIB_RMS_ESTEREO_MAX_PX = 1.5    # RMS estéreo máximo
+CALIB_RAZON_ESTEREO_MAX = 3.0     # RMS estéreo / máx(RMS cámara, RMS proyector): poses incoherentes
+CALIB_POSES_MIN = 6               # poses del patrón mínimas
+CALIB_COBERTURA_MIN = 0.4         # fracción mínima del ancho y del alto del proyector cubierta
 HORAS_ENTRE_SESIONES = 2.0
 # True: las etapas de proceso y la interfaz solo usan y muestran las poses de la configuración
 # vigente: desde el último proceso de captura que incluyó el patrón hasta hoy (ver sesiones.py).

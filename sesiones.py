@@ -103,6 +103,7 @@ def capturas(dir_capturas: Path | None = None, dir_ordenadas: Path | None = None
     dir_capturas = dir_capturas or cfg.DIR_CAPTURAS
     dir_ordenadas = dir_ordenadas or cfg.DIR_ORDENADAS
     manifiesto = _leer_json(dir_ordenadas / "manifiesto.json", {})
+    rechazo_de = {clave_carpeta(r.get("fuente", "")): r.get("motivo", "") for r in manifiesto.get("rechazadas", {}).values()}
     poses_de: dict[str, list[str]] = {}
     for e in manifiesto.get("poses", []):
         clave = clave_carpeta(str(e.get("fuente", "")))
@@ -121,7 +122,7 @@ def capturas(dir_capturas: Path | None = None, dir_ordenadas: Path | None = None
             clave = f"{cat}/{p.name}"
             hora = hora_de_carpeta(p.name) or datetime.fromtimestamp(p.stat().st_mtime)
             items[clave] = {"cat": cat, "carpeta": clave, "hora": hora, "existe": True,
-                            "poses": sorted(poses_de.get(clave, []))}
+                            "poses": sorted(poses_de.get(clave, [])), "rechazo": rechazo_de.get(clave)}
     for clave, poses in poses_de.items():
         if clave not in items:
             cat = clave.split("/")[0]

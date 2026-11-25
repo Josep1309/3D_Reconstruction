@@ -470,3 +470,5 @@ body.sin-scroll { overflow: hidden; }
   .ar-hora, .ar-nombre { display: none; }
   .ar-poses { grid-column: 2 / -1; }
 }
+.ar-etiqueta.error { border-color: var(--error); color: var(--error); }
+.ar-motivo { flex-basis: 100%; color: var(--texto-2); font-size: 11.5px; }

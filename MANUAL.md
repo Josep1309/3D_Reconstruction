@@ -423,8 +423,18 @@ modificar los originales.
    - métricas de calidad.
 
 **Incremental:** las fuentes ya registradas se omiten y las nuevas reciben el siguiente número de
-pose. `ORGANIZAR_REHACER = True` rehace todo. Para **excluir** una pose mala: saca su captura
-cruda de `capturas/`, borra `capturas_ordenadas/` y vuelve a organizar.
+pose.
+- **Capturas rechazadas:** si una captura no tiene ningún ciclo válido, se registra en
+  `manifiesto["rechazadas"]` con el motivo y no se vuelve a leer en cada ejecución. Por ejemplo:
+  «brillo casi constante (29–30): el proyector no estaba proyectando la secuencia o la cámara no
+  está sincronizada». Aparece en la pestaña *Archivos* como **rechazada**.
+- **`ORGANIZAR_REHACER = True`** (o `--rehacer`) rehace las categorías indicadas desde cero:
+  - lo organizado antes va a la papelera;
+  - **cada captura conserva su nombre de pose**, porque las calibraciones guardan esos nombres;
+  - los números de las poses borradas no se reutilizan.
+- Las rutas del manifiesto y la firma de cada captura son relativas a la carpeta de datos. Por eso
+  siguen valiendo aunque los datos se muevan de carpeta o de disco (`TESIS_DIR_DATOS`).
+- Para **excluir** una pose mala, muévela a la papelera desde la pestaña *Archivos*.
 
 ---
 
@@ -701,6 +711,24 @@ Igual que `Traditional_StereoCalib.m` (2 coeficientes radiales y tangencial, sin
    Fuera de ese rango el modelo, sobre todo la distorsión, **se extrapola**. Si cubre menos del
    70 % en algún eje, se avisa. El rango se guarda en el `.npz` y la reconstrucción avisa cuando
    usa puntos fuera de él.
+6. **Control de calidad (`control_calidad`).** La calibración nueva se guarda siempre en
+   `historial/<fecha>/`, pero **solo se pone en uso si pasa el control**:
+
+   | Criterio | Variable | Límite |
+   |---|---|---|
+   | RMS estéreo | `CALIB_RMS_ESTEREO_MAX_PX` | ≤ 1.5 px |
+   | RMS estéreo / máx(cámara, proyector) | `CALIB_RAZON_ESTEREO_MAX` | ≤ 3 |
+   | Poses del patrón usadas | `CALIB_POSES_MIN` | ≥ 6 |
+   | Fracción del ancho y del alto del proyector cubierta | `CALIB_COBERTURA_MIN` | ≥ 40 % |
+
+   - Si no lo pasa, el registro lista los motivos, sigue en uso la anterior y **el pipeline se
+     detiene antes de reconstruir**, porque usar la anterior con capturas de otro montaje daría
+     resultados falsos.
+   - Para usarla igual: `CALIBRACION_FORZAR = True` en `pipeline.py`, `--forzar`, o *Usar esta
+     calibración* en la pestaña Calibración, que pide confirmación y muestra los motivos.
+   - Si no había ninguna calibración, se pone en uso igual, con un aviso.
+   - El resultado queda en el `.json` (`control_calidad`), y la interfaz marca las calibraciones
+     rechazadas con ⚠.
 
 ### 12.5 Salidas
 
@@ -946,7 +974,8 @@ corresponde. Cada subsección es una tabla de **síntoma → causa probable → 
 | `no se encontró el par negro → blanco` | No hay un ciclo completo, o el blanco no se distingue del resto | Captura de nuevo; revisa la exposición (que el blanco no sature) |
 | `pureza baja` / `corrimientos poco sinusoidales` | Frame perdido, o la secuencia del proyector no coincide | Repite la pose; verifica la secuencia cargada (§16.2) |
 | `la escena se movió … se descarta` | El objeto o el soporte se movieron durante los 2.5 s | Fija bien el objeto y repite |
-| `modulación H baja` | Franjas horizontales con poco contraste (DMD en diamante, desenfoque) | Esperable en este proyector. Mejora con `CICLOS_POR_CAPTURA` 2–4 o enfocando mejor |
+| `modulación H baja` | Franjas horizontales por debajo de `GAMMA_TH_Y` | Desenfoque o exposición. Mejora con `CICLOS_POR_CAPTURA` 2–4 o enfocando mejor |
+| `brillo casi constante …: el proyector no estaba proyectando la secuencia` (captura **rechazada**) | Proyector apagado, en otro modo, sin la secuencia cargada, o el Arduino no dispara a los dos | Revisa el proyector y el Arduino y repite la pose. La captura queda en *Archivos* como rechazada; muévela a la papelera |
 | Una pose quedó en la categoría equivocada | El nombre de la carpeta no tenía la palabra clave | Mueve la captura cruda a `capturas/<categoria>/`, borra `capturas_ordenadas/` y reorganiza (§9) |
 | La interfaz no pregunta si es plano u objeto | Sin terminal interactiva se asigna `objeto` | Guarda las capturas en `capturas/plano/` u `objeto/` |
 
@@ -963,6 +992,7 @@ corresponde. Cada subsección es una tabla de **síntoma → causa probable → 
 
 | Síntoma | Causa probable | Solución |
 |---|---|---|
+| `Calibración RECHAZADA: sigue en uso la anterior` y el pipeline se detiene | No pasó el control de calidad (§12.4, punto 6) | Lee los motivos en el registro o en la pestaña Calibración. Repite las poses del patrón, o fuerza su uso si sabes lo que haces |
 | `[AVISO] … se descarta la pose` | No se detectaron los 9 × 12 círculos | Tablero completo en la imagen, sin reflejos y bien iluminado; revisa la imagen blanca de esa pose |
 | `Solo N poses válidas` | Menos de 3 poses con el tablero detectado | Captura más poses (10–15 recomendadas) |
 | `Cobertura del proyector … [AVISO]` | Las poses no cubren todo el campo del proyector | Agrega poses con el tablero en los bordes y esquinas, inclinado ±20–30° |
@@ -1291,6 +1321,15 @@ Funciona igual en el modo demo, que reproduce la captura elegida. Solo está dis
 interfaz web: `pipeline.py` en la terminal sigue pidiendo Enter sin vista previa.
 
 ### 19.4 Cómo funciona
+
+**Seguridad.**
+- El servidor escucha solo en `127.0.0.1` y rechaza:
+  - nombres de host ajenos (*DNS rebinding*);
+  - POST que no sean JSON o que vengan de otro origen. Así una página web cualquiera abierta en el
+    mismo navegador no puede lanzar capturas ni borrar datos (CSRF).
+- *Detener* envía SIGTERM, y el ejecutor lo convierte en una interrupción normal para que la
+  cámara se cierre bien.
+- Las preguntas del proceso (`input()`) se anuncian con una línea `@@pregunta …`.
 
 ```
 navegador ──HTTP/SSE──► interfaz/servidor.py ──subproceso──► interfaz/ejecutor.py ──► pipeline.main()

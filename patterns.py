@@ -2,10 +2,10 @@ import numpy as np
 import cv2
 
 def generar_patrones_binarios(
-    width=1140, 
-    height=912, 
-    periodo=18, 
-    num_pasos=3, 
+    width,
+    height,
+    periodo=18,
+    num_pasos=3,
     orientacion='vertical'
 ):
     """

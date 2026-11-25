@@ -68,9 +68,9 @@ function pintarListaCalib() {
   for (const c of ec.lista) {
     const o = document.createElement("option");
     o.value = c.id;
-    const mal = calibMezclada({ cam: c.rms_cam_px, proj: c.rms_proj_px, estereo: c.rms_stereo_px });
+    const mal = c.control ? !c.control.aprobada : calibMezclada({ cam: c.rms_cam_px, proj: c.rms_proj_px, estereo: c.rms_stereo_px });
     o.textContent = t("ec_opcion", { f: fechaCorta(c.fecha || c.id), n: c.poses.length, e: fmt(c.rms_stereo_px, 2) }) +
-      (mal ? " ⚠" : "") + (c.activa ? ` — ${t("ec_en_uso_corto")}` : "");
+      (mal ? ` ⚠ ${t("ec_rechazada")}` : "") + (c.activa ? ` — ${t("ec_en_uso_corto")}` : "");
     sel.appendChild(o);
   }
   if (!ec.lista.length) {
@@ -100,6 +100,12 @@ function pintarOrigenCalib(c) {
   titulo.className = "nota";
   titulo.textContent = t("ec_origen", { n: c.poses_info.length, f: c.proceso ? fechaCorta(c.proceso) : "—" });
   cont.appendChild(titulo);
+  if (c.control && !c.control.aprobada) {  // por qué no pasó el control de calidad
+    const aviso = document.createElement("p");
+    aviso.className = "nota aviso";
+    aviso.textContent = t("ec_motivos", { m: c.control.motivos.join(" · ") });
+    cont.appendChild(aviso);
+  }
   const tira = document.createElement("div");
   tira.className = "miniaturas tira";
   const url = (p, ancho) => `/api/imagen?cat=patron&pose=${p.pose}&tipo=textura&ancho=${ancho}`;
@@ -124,6 +130,8 @@ function pintarOrigenCalib(c) {
 async function usarCalibracion() {
   const id = $("#ec-elegir").value;
   if (!id) return;
+  const c = ec.lista.find((x) => x.id === id);
+  if (c?.control && !c.control.aprobada && !confirm(t("ec_confirmar_rechazada", { m: c.control.motivos.join("\n• ") }))) return;
   $("#ec-usar").disabled = true;
   ec.turno++; ec.datos = null; ec.error = null;  // fuera los errores de la anterior desde ya
   pintarErroresCalib();

@@ -18,8 +18,10 @@ mensajes para el servidor (estado de la captura en vivo), no para el usuario.
 
 from __future__ import annotations
 
+import builtins
 import json
 import os
+import signal
 from collections import deque
 import sys
 import threading
@@ -199,6 +201,8 @@ def solo_vista_previa(conf: dict) -> None:
                 input("Vista previa de la cámara activa: pulsa Enter para cerrar: ")
             finally:
                 camara.detener_vista_previa()
+    except KeyboardInterrupt:
+        pass  # «Detener» desde la interfaz: la cámara ya se cerró al salir del `with`
     except Exception as exc:  # noqa: BLE001
         print(f"[ERROR] No se pudo abrir la vista previa: {exc}\n"
               f"        Posibles causas y soluciones: MANUAL.md §16.3 (o ejecuta .env/bin/python verificar.py)",
@@ -207,7 +211,29 @@ def solo_vista_previa(conf: dict) -> None:
     print("[OK] Vista previa cerrada.", flush=True)
 
 
+def _input_marcado(prompt: str = "") -> str:
+    """Reemplaza a `input()`: anuncia la pregunta al servidor con una línea `@@pregunta …`.
+
+    Así la interfaz sabe que el proceso espera una respuesta sin tener que reconocer frases
+    concretas del texto (que podrían cambiar)."""
+    sys.stdout.write(f"\n@@pregunta {prompt.strip()}\n")
+    sys.stdout.flush()
+    linea = sys.stdin.readline()
+    if not linea:
+        raise EOFError
+    return linea.rstrip("\n")
+
+
+def _al_detener(_senal, _marco) -> None:
+    """«Detener» de la interfaz envía SIGTERM. Por defecto Python moriría sin ejecutar los
+    `finally`/`with` y la cámara quedaría abierta (sin DeInit). Se convierte en una interrupción
+    normal para que todo se cierre bien."""
+    raise KeyboardInterrupt
+
+
 def main() -> None:
+    signal.signal(signal.SIGTERM, _al_detener)
+    builtins.input = _input_marcado
     conf = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     if conf.get("solo_previa"):
         solo_vista_previa(conf)

@@ -34,7 +34,7 @@ import configuracion as cfg
 #
 # Flujo típico para MEDIR OBJETOS con el sistema ya calibrado (calibracion = False):
 #     captura -> organizar -> fase_relativa -> fase_absoluta -> reconstruccion -> visualizacion
-# La reconstrucción usa la última calibración guardada en resultados/calibracion/.
+# La reconstrucción usa la calibración en uso de calibraciones/ (ver la pestaña Calibración).
 #
 # Para RECALIBRAR: captura con CAPTURA_CATEGORIA = "patron" (10-15 poses) y calibracion = True.
 # Las fases del patrón solo se calculan cuando 'calibracion' está activa.
@@ -47,7 +47,7 @@ ETAPAS = {
     "fase_absoluta": True,
     "calibracion": False,     # OPCIONAL: solo si se capturaron poses nuevas del patrón
     "reconstruccion": True,
-    "visualizacion": True,    # abre la cuadrícula del proceso y la ventana 3D
+    "visualizacion": False,   # ventanas de matplotlib (la interfaz web ya muestra todo)
 }
 
 # Categorías a procesar en las etapas de fase y reconstrucción ("plano" y/o "objeto").
@@ -211,8 +211,14 @@ def etapa_fase_absoluta() -> None:
 def etapa_calibracion() -> None:
     import calibracion_estereo as ce
 
-    ce.ejecutar_calibracion_estereo(DIR_FASES, DIR_CALIBRACION, poses_calibracion=CALIBRACION_POSES,
+    resumen = ce.ejecutar_calibracion_estereo(DIR_FASES, DIR_CALIBRACION, poses_calibracion=CALIBRACION_POSES,
+                                    forzar=CALIBRACION_FORZAR,
                                     gamma_th=cfg.GAMMA_TH, gamma_th_y=cfg.GAMMA_TH_Y, borde=cfg.BORDE_MASCARA)
+    if not resumen.get("en_uso") and ETAPAS.get("reconstruccion"):
+        # Reconstruir con la calibración anterior daría resultados falsos: es de otro montaje
+        raise RuntimeError(
+            "la calibración nueva no pasó el control de calidad y no se reconstruye con la anterior. "
+            "Revisa las poses del patrón (pestaña Calibración) o fuerza su uso (CALIBRACION_FORZAR)")
 
 
 def etapa_reconstruccion() -> None:

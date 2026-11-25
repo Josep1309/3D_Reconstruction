@@ -484,6 +484,7 @@ def ejecutar_calibracion_estereo(
     guardar_mapas: bool = False,
     dir_diagnostico: Path = cfg.DIR_RESULTADOS / "calibracion",
     poses_calibracion: str | list[str] = cfg.CALIBRACION_POSES,
+    forzar: bool = False,
 ) -> dict:
     """Ejecuta el flujo de `Traditional_StereoCalib.m` sobre las fases del patrón de calibración.
 
@@ -628,12 +629,15 @@ def ejecutar_calibracion_estereo(
         proj_size_wh=np.array(proj_size_wh), fringe_pitch=cfg.PERIODO,
         cobertura_up=cobertura_up, cobertura_vp=cobertura_vp,
     )
-    ruta_tsc = dir_salida / "Estereo_TSC_0_2.npz"
+    # Todo se escribe primero en el historial; se pone en uso solo si pasa el control de calidad
+    historial = dir_salida / "historial" / datetime.now().strftime("%Y%m%d_%H%M%S")
+    historial.mkdir(parents=True, exist_ok=True)
+    ruta_tsc = historial / "Estereo_TSC_0_2.npz"
     np.savez(
         ruta_tsc, **calib_tsc,
         rms_stereo=rms_st, rvecs_cam=np.array(rvecs_cam), tvecs_cam=np.array(tvecs_cam), **comunes,
     )
-    ruta_tsc_j = dir_salida / "Estereo_TSC_0_2_J.npz"
+    ruta_tsc_j = historial / "Estereo_TSC_0_2_J.npz"
     np.savez(
         ruta_tsc_j, **_parametros(k_cam_j, dist_cam_j, k_proj_j, dist_proj_j, r_mat_j, t_vec_j, e_mat_j, f_mat_j),
         rms_stereo=rms_st_j, **comunes,
@@ -683,23 +687,54 @@ def ejecutar_calibracion_estereo(
         "cobertura_up_px": cobertura_up.tolist(),
         "cobertura_vp_px": cobertura_vp.tolist(),
     }
-    ruta_json = dir_salida / "Estereo_TSC_0_2.json"
+    motivos = control_calidad(resumen, proj_size_wh)
+    hay_anterior = (dir_salida / "Estereo_TSC_0_2.npz").exists()
+    en_uso = not motivos or forzar or not hay_anterior
+    resumen["control_calidad"] = {"aprobada": not motivos, "motivos": motivos, "forzada": bool(motivos and en_uso)}
+    ruta_json = historial / "Estereo_TSC_0_2.json"
     ruta_json.write_text(json.dumps(resumen, indent=2), encoding="utf-8")
-    ruta_puntos = dir_salida / ARCHIVO_PUNTOS
-    guardar_puntos(ruta_puntos, detectados, usados, det_cam, det_proj, world_points)
-
+    guardar_puntos(historial / ARCHIVO_PUNTOS, detectados, usados, det_cam, det_proj, world_points)
     _guardar_figura_diagnostico(dir_diagnostico, texturas[0], pts_cam[0], residuos[0], usados[0])
 
-    # Copia en el historial: recalibrar no hace perder la calibración anterior
-    historial = dir_salida / "historial" / datetime.now().strftime("%Y%m%d_%H%M%S")
-    historial.mkdir(parents=True, exist_ok=True)
-    for ruta in (ruta_tsc, ruta_tsc_j, ruta_json, ruta_puntos):
-        shutil.copy2(ruta, historial / ruta.name)
-    print(f"[OK] Calibración guardada en:\n  - {ruta_tsc}\n  - {ruta_tsc_j}\n  - {ruta_json}\n"
-          f"  (copia en {historial}; diagnósticos en {dir_diagnostico})")
-    print("     Para volver a una calibración anterior, copia sus 3 archivos desde historial/ a "
-          f"'{dir_salida}'. Recuerda hacer commit de calibraciones/ para que viaje con el código.")
+    print(f"[OK] Calibración guardada en {historial} (diagnósticos en {dir_diagnostico})")
+    if motivos:
+        print("[AVISO] La calibración NO pasa el control de calidad:")
+        for m in motivos:
+            print(f"        - {m}")
+    if en_uso:
+        activar_calibracion(historial.name, dir_salida)
+        if motivos and not hay_anterior:
+            print("[AVISO] Se pone en uso igual porque no había ninguna otra calibración.")
+        elif motivos:
+            print("[AVISO] Se puso en uso porque se pidió forzarla.")
+        print("     Recuerda hacer commit de calibraciones/ para que viaje con el código.")
+    else:
+        print(f"[AVISO] Calibración RECHAZADA: sigue en uso la anterior. Para usarla igual: pestaña "
+              f"Calibración de la interfaz, o calibracion_estereo.py --activar {historial.name}. MANUAL.md §16.6")
+    resumen["en_uso"] = en_uso
+    resumen["historial"] = historial.name
     return resumen
+
+
+def control_calidad(resumen: dict, proj_size_wh: tuple[int, int] = (cfg.PROYECTOR_ANCHO, cfg.PROYECTOR_ALTO)) -> list[str]:
+    """Motivos por los que una calibración no debería usarse (lista vacía = aprobada)."""
+    motivos = []
+    rms_st = resumen.get("rms_stereo_indep_px") or float("inf")
+    indep = max(resumen.get("rms_cam_px") or 0, resumen.get("rms_proj_px") or 0, 0.3)
+    if rms_st > cfg.CALIB_RMS_ESTEREO_MAX_PX:
+        motivos.append(f"RMS estéreo {rms_st:.2f} px > {cfg.CALIB_RMS_ESTEREO_MAX_PX} px")
+    if rms_st > cfg.CALIB_RAZON_ESTEREO_MAX * indep:
+        motivos.append(f"RMS estéreo {rms_st:.2f} px es {rms_st / indep:.0f}× el de cámara/proyector: poses "
+                       f"de montajes distintos o con malas correspondencias")
+    n = len(resumen.get("poses", []))
+    if n < cfg.CALIB_POSES_MIN:
+        motivos.append(f"solo {n} poses del patrón (mínimo {cfg.CALIB_POSES_MIN})")
+    for clave, total, eje in (("cobertura_up_px", proj_size_wh[0], "ancho"), ("cobertura_vp_px", proj_size_wh[1], "alto")):
+        lo, hi = resumen.get(clave) or (0, 0)
+        if (hi - lo) / total < cfg.CALIB_COBERTURA_MIN:
+            motivos.append(f"las poses cubren solo el {100 * (hi - lo) / total:.0f}% del {eje} del proyector "
+                           f"(mínimo {100 * cfg.CALIB_COBERTURA_MIN:.0f}%)")
+    return motivos
 
 
 # ------------------------------------------------------------------------------
@@ -717,7 +752,9 @@ def listar_calibraciones(dir_calibracion: Path = cfg.DIR_CALIBRACION) -> list[di
     `historial/<fecha>/`, así que la vigente se reconoce comparando el contenido de los archivos.
     """
     activa = dir_calibracion / "Estereo_TSC_0_2.npz"
+    # El .npz puede repetirse (misma calibración calculada dos veces); el .json lleva la fecha
     contenido_activo = activa.read_bytes() if activa.exists() else None
+    json_activo = (dir_calibracion / "Estereo_TSC_0_2.json").read_bytes() if (dir_calibracion / "Estereo_TSC_0_2.json").exists() else None
     salida = []
     carpetas = sorted((dir_calibracion / "historial").glob("*/"), reverse=True)
     for carpeta in carpetas:
@@ -737,7 +774,10 @@ def listar_calibraciones(dir_calibracion: Path = cfg.DIR_CALIBRACION) -> list[di
             "rms_stereo_px": info.get("rms_stereo_indep_px"),
             "linea_base_mm": info.get("linea_base_mm"),
             "poses_info": _origen_poses(info),
-            "activa": contenido_activo is not None and (carpeta / "Estereo_TSC_0_2.npz").read_bytes() == contenido_activo,
+            "control": info.get("control_calidad") or {"aprobada": not control_calidad(info), "motivos": control_calidad(info)},
+            "activa": contenido_activo is not None and (carpeta / "Estereo_TSC_0_2.npz").read_bytes() == contenido_activo
+                      and (json_activo is None or not (carpeta / "Estereo_TSC_0_2.json").exists()
+                           or (carpeta / "Estereo_TSC_0_2.json").read_bytes() == json_activo),
         })
     return salida
 
@@ -858,6 +898,8 @@ def main() -> None:
                         help="Guarda también los mapas RegWcordtoImage (para las calibraciones híbridas)")
     parser.add_argument("--poses", nargs="+", default=None,
                         help="Poses a usar: 'ultima_sesion' (defecto), 'todas' o nombres como pose_08 pose_09 ...")
+    parser.add_argument("--forzar", action="store_true",
+                        help="Pone en uso la calibración nueva aunque no pase el control de calidad")
     parser.add_argument("--listar", action="store_true", help="Lista las calibraciones del historial y sale")
     parser.add_argument("--activar", metavar="FECHA",
                         help="Pone en uso la calibración historial/FECHA (p. ej. 20261124_122125) y sale")
@@ -886,6 +928,7 @@ def main() -> None:
                          else args.distancia[0] if len(args.distancia) == 1 else tuple(args.distancia[:2])),
         pattern_type=args.tipo_patron,
         guardar_mapas=args.mapas,
+        forzar=args.forzar,
         poses_calibracion=(cfg.CALIBRACION_POSES if not args.poses
                            else args.poses[0] if len(args.poses) == 1 and not args.poses[0].startswith("pose_")
                            else args.poses),

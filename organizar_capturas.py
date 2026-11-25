@@ -93,10 +93,14 @@ def _clave_natural(ruta: Path) -> list:
 
 
 def _ruta_relativa(ruta: Path) -> str:
-    try:
-        return str(ruta.resolve().relative_to(cfg.RAIZ))
-    except ValueError:
-        return str(ruta.resolve())
+    """Ruta relativa a la carpeta de DATOS (no a la del código): así la firma de cada captura y el
+    manifiesto siguen valiendo si los datos se mueven de carpeta o de disco (TESIS_DIR_DATOS)."""
+    for base in (cfg.DATOS, cfg.RAIZ):
+        try:
+            return str(ruta.resolve().relative_to(base.resolve()))
+        except ValueError:
+            continue
+    return str(ruta.resolve())
 
 
 def _contar_frames_video(ruta: Path) -> int:
@@ -442,6 +446,32 @@ def guardar_pose(
                 raise OSError(f"No se pudo escribir {ruta}")
 
 
+def describir_rechazo(frames: list[np.ndarray], avisos: list[str]) -> str:
+    """Motivo legible de por qué una captura no tiene ningún ciclo utilizable."""
+    if len(frames) < cfg.IMAGENES_POR_CICLO:
+        return f"solo {len(frames)} frames (se necesitan {cfg.IMAGENES_POR_CICLO})"
+    medias = np.array([float(np.mean(f)) for f in frames])
+    if medias.max() - medias.min() < 15:
+        return (f"brillo casi constante ({medias.min():.0f}–{medias.max():.0f}): el proyector no estaba "
+                f"proyectando la secuencia o la cámara no está sincronizada")
+    return "; ".join(avisos) or "sin ciclos completos"
+
+
+def _a_papelera_ordenadas(dir_salida: Path, categorias: Sequence[str]) -> None:
+    """Mueve las poses organizadas existentes a la papelera antes de reorganizar desde cero."""
+    import shutil
+
+    destino = cfg.DATOS / "papelera" / (datetime.now().strftime("%Y%m%d_%H%M%S") + "_reorganizar")
+    movidas = 0
+    for cat in categorias:
+        for pose in sorted((dir_salida / cat).glob("pose_*")) if (dir_salida / cat).is_dir() else []:
+            (destino / cat).mkdir(parents=True, exist_ok=True)
+            shutil.move(str(pose), str(destino / cat / pose.name))
+            movidas += 1
+    if movidas:
+        print(f"[INFO] {movidas} poses organizadas anteriores movidas a {destino}")
+
+
 def cargar_manifiesto(dir_salida: Path) -> dict:
     ruta = dir_salida / NOMBRE_MANIFIESTO
     if ruta.exists():
@@ -493,11 +523,25 @@ def organizar(
             "se reconstruyen desde las capturas crudas."
         )
         rehacer = True
+    # Al reorganizar desde cero, cada captura conserva su nombre de pose (las calibraciones guardan
+    # esos nombres) y lo organizado antes va a la papelera, no queda mezclado
+    pose_previa: dict[str, tuple[str, int]] = {}
     if rehacer:
-        manifiesto = {"version": 1, "poses": []}
-        siguiente: dict[str, int] = {c: 0 for c in cfg.CATEGORIAS}
+        anterior = manifiesto
+        pose_previa = {f"{p['firma']}#{p['segmento']}": (p["categoria"], int(p["pose"])) for p in anterior.get("poses", [])}
+        ultimo = dict(anterior.get("ultimo_indice", {}))
+        for p in anterior.get("poses", []):
+            ultimo[p["categoria"]] = max(int(ultimo.get(p["categoria"], -1)), int(p["pose"]))
+        if not simular:
+            _a_papelera_ordenadas(dir_salida, categorias)
+        # Se conservan las poses de las categorías que NO se reorganizan
+        manifiesto = {"version": 1, "ultimo_indice": ultimo, "rechazadas": {},
+                      "poses": [p for p in anterior.get("poses", []) if p["categoria"] not in categorias]}
+        pose_previa = {k: v for k, v in pose_previa.items() if v[0] in categorias}
+        siguiente: dict[str, int] = {c: int(ultimo.get(c, -1)) + 1 for c in cfg.CATEGORIAS}
     else:
         siguiente = {c: _siguiente_pose(dir_salida, c, manifiesto) for c in cfg.CATEGORIAS}
+    rechazadas: dict = manifiesto.setdefault("rechazadas", {})
 
     ya_registradas = {p["firma"] + f"#{p['segmento']}" for p in manifiesto["poses"]}
     fuentes = descubrir_fuentes(entradas, excluir=[dir_salida, cfg.DIR_RESULTADOS])
@@ -509,13 +553,20 @@ def organizar(
         if f"{firma}#0" in ya_registradas and not rehacer:
             print(f"  [=] '{_ruta_relativa(fuente.ruta)}' ya organizada, se omite.")
             continue
+        if firma in rechazadas and not rehacer:
+            continue  # ya se intentó y no tiene ciclos válidos (se lista en la pestaña Archivos)
 
         frames = cargar_frames(fuente)
         secuencias, avisos = segmentar_secuencias(frames, cfg.IMAGENES_POR_CICLO)
         for aviso in avisos:
             print(f"  [AVISO] '{_ruta_relativa(fuente.ruta)}': {aviso}")
         if not secuencias:
-            print(f"  [X] '{_ruta_relativa(fuente.ruta)}' ({len(frames)} frames): sin ciclos completos, se omite.")
+            motivo = describir_rechazo(frames, avisos)
+            print(f"  [X] '{_ruta_relativa(fuente.ruta)}' ({len(frames)} frames): {motivo}. Se omite.")
+            if not simular:
+                rechazadas[firma] = {"fuente": _ruta_relativa(fuente.ruta), "motivo": motivo,
+                                     "fecha": datetime.now().isoformat(timespec="seconds")}
+                guardar_manifiesto(dir_salida, manifiesto)
             continue
 
         raiz = next((e for e in entradas if _es_subruta(fuente.ruta, e)), None)
@@ -535,8 +586,12 @@ def organizar(
                 continue
 
             calidad = verificar_secuencia(sec.frames)
-            pose = siguiente[categoria]
-            siguiente[categoria] += 1
+            previa = pose_previa.get(f"{firma}#{s_idx}")
+            if previa and previa[0] == categoria:
+                pose = previa[1]  # misma captura -> mismo nombre que antes de reorganizar
+            else:
+                pose = siguiente[categoria]
+                siguiente[categoria] += 1
             nombre_pose = f"pose_{pose:02d}"
             dir_pose = dir_salida / categoria / nombre_pose
 
@@ -553,10 +608,13 @@ def organizar(
                         f"      [AVISO] corrimientos {orient} poco sinusoidales "
                         f"(pureza={calidad[f'pureza_{orient}']:.2f}): posible frame perdido o desalineado."
                     )
-                if calidad[f"modulacion_{orient}"] < cfg.GAMMA_TH:
+                # Cada orientación con su umbral: las franjas H (fase Y) tienen poco contraste en el
+                # DMD en diamante y por eso GAMMA_TH_Y es mucho menor que GAMMA_TH
+                umbral = cfg.GAMMA_TH_Y if orient == "H" else cfg.GAMMA_TH
+                if calidad[f"modulacion_{orient}"] < umbral:
                     print(
                         f"      [AVISO] modulación {orient} baja ({calidad[f'modulacion_{orient}']:.2f} < "
-                        f"{cfg.GAMMA_TH}): franjas casi sin contraste (desenfoque o exposición)."
+                        f"{umbral}): franjas casi sin contraste (desenfoque o exposición)."
                     )
             if not (calidad["negro_es_minimo"] and calidad["blanco_es_maximo"]):
                 print("      [AVISO] el negro/blanco no son los frames extremos: revisa la captura.")

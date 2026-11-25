@@ -38,8 +38,7 @@ import threading
 import time
 import webbrowser
 import zipfile
-from functools import lru_cache
-from http import HTTPStatus
+from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
@@ -60,7 +59,7 @@ ARCHIVO_VIVO = cfg.DIR_RESULTADOS / ".vivo" / "frame.jpg"
 RE_POSE = re.compile(r"^pose_\d+$")
 RE_ORDENADA = re.compile(r"^img_([HV])_(\d{1,2})$")
 RE_MARCA = re.compile(r"@@(vivo) (\d+) (\d+)|@@(previa) ([\d.]+)")
-PROMPTS = ("presiona Enter", "(q = terminar)", "¿Es plano (p), objeto (o)", "pulsa Enter para cerrar")
+RE_PREGUNTA = re.compile(r"^@@pregunta (.*)$")  # el ejecutor anuncia así cada input() (ejecutor._input_marcado)
 
 
 # ==============================================================================
@@ -159,6 +158,13 @@ class Ejecucion:
         linea = RE_MARCA.sub("", linea)
         if not linea.strip():
             return
+        m = RE_PREGUNTA.match(linea.strip())
+        if m:  # el proceso espera una respuesta
+            self.pregunta = m.group(1)
+            self.esperando = True
+            difusor.emitir("log", {"texto": self.pregunta})
+            self._emitir_estado()
+            return
         m = re.match(r"# ETAPA: (\w+)", linea)
         if m:
             self.etapa = m.group(1)
@@ -179,13 +185,6 @@ class Ejecucion:
             *lineas, pendiente = pendiente.split("\n")
             for linea in lineas:
                 self._linea(linea.rstrip("\r"))
-            # Las preguntas de input() no terminan en salto de línea
-            if pendiente and any(p in pendiente for p in PROMPTS):
-                difusor.emitir("log", {"texto": pendiente})
-                self.pregunta = pendiente.strip()
-                pendiente = ""
-                self.esperando = True
-                self._emitir_estado()
         if pendiente:
             self._linea(pendiente)
         codigo = proc.wait()
@@ -206,9 +205,9 @@ class Ejecucion:
 
     def detener(self) -> None:
         if self.activa:
-            self.proc.terminate()
+            self.proc.terminate()  # el ejecutor lo convierte en KeyboardInterrupt y cierra la cámara
             try:
-                self.proc.wait(timeout=5)
+                self.proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 self.proc.kill()
             difusor.emitir("log", {"texto": "■ Proceso detenido por el usuario"})
@@ -310,7 +309,7 @@ def listado_archivos() -> dict:
                 estado = {k: _mtime(r) is not None for k, r in _archivos_pose(it["cat"], pose).items()}
                 poses.append({"pose": pose, **estado})
             items.append({"cat": it["cat"], "carpeta": it["carpeta"], "hora": it["hora"].isoformat(timespec="seconds"),
-                          "existe": it["existe"], "poses": poses})
+                          "existe": it["existe"], "poses": poses, "rechazo": it.get("rechazo")})
         salida.append({
             "id": p["id"], "fin": p["fin"].isoformat(timespec="seconds"), "registrado": p["registrado"],
             "patron": p["patron"], "configuracion": config, "vigente": bool(conf) and config == conf["proceso"],
@@ -445,22 +444,74 @@ def vigilar() -> None:
 # ==============================================================================
 
 
-@lru_cache(maxsize=24)
-def _npz(ruta: str, _mtime_clave: float) -> dict[str, np.ndarray]:
-    with np.load(ruta) as d:
-        return {k: d[k] for k in d.files}
+class _CacheMapas:
+    """Caché de mapas de los .npz con un límite de memoria.
+
+    Se guarda cada mapa por separado, (ruta, fecha, clave): una imagen necesita 1–3 de los 10–15
+    mapas de una pose (~5 MB cada uno). Antes se cacheaban .npz completos, 24 de hasta 52 MB:
+    ~1.2 GB de RAM.
+    """
+
+    def __init__(self, max_bytes: int = 400_000_000) -> None:
+        self.max_bytes = max_bytes
+        self.datos: "OrderedDict[tuple, np.ndarray]" = OrderedDict()
+        self.claves_npz: dict[tuple, list[str]] = {}
+        self.bytes = 0
+        self.lock = threading.Lock()
+
+    def claves(self, ruta: str, m: float) -> list[str]:
+        with self.lock:
+            if (ruta, m) not in self.claves_npz:
+                with np.load(ruta) as d:
+                    self.claves_npz[(ruta, m)] = list(d.files)
+            return self.claves_npz[(ruta, m)]
+
+    def mapa(self, ruta: str, m: float, clave: str) -> np.ndarray:
+        k = (ruta, m, clave)
+        with self.lock:
+            if k in self.datos:
+                self.datos.move_to_end(k)
+                return self.datos[k]
+            with np.load(ruta) as d:
+                valor = d[clave]
+            self.datos[k] = valor
+            self.bytes += valor.nbytes
+            while self.bytes > self.max_bytes and len(self.datos) > 1:
+                _, viejo = self.datos.popitem(last=False)
+                self.bytes -= viejo.nbytes
+            return valor
+
+    def limpiar(self) -> None:
+        with self.lock:
+            self.datos.clear()
+            self.claves_npz.clear()
+            self.bytes = 0
 
 
-_lock_npz = threading.Lock()
+_cache_mapas = _CacheMapas()
+_lock_npz = threading.Lock()  # se toma al mover archivos a la papelera
 
 
-def cargar_npz(ruta: Path) -> dict[str, np.ndarray]:
-    """Carga (con caché) un .npz; el candado evita que peticiones simultáneas lo lean varias veces."""
+class _Npz:
+    """Vista perezosa de un .npz: cada mapa se lee (y cachea) solo cuando se pide."""
+
+    def __init__(self, ruta: Path, m: float) -> None:
+        self.ruta, self.m = str(ruta), m
+
+    def __getitem__(self, clave: str) -> np.ndarray:
+        if clave not in self:
+            raise KeyError(clave)
+        return _cache_mapas.mapa(self.ruta, self.m, clave)
+
+    def __contains__(self, clave: str) -> bool:
+        return clave in _cache_mapas.claves(self.ruta, self.m)
+
+
+def cargar_npz(ruta: Path) -> _Npz:
     m = _mtime(ruta)
     if m is None:
         raise FileNotFoundError(str(ruta))
-    with _lock_npz:
-        return _npz(str(ruta), m)
+    return _Npz(ruta, m)
 
 
 def _leer_ordenada(cat: str, pose: str, orient: str, indice: int) -> np.ndarray:
@@ -610,7 +661,25 @@ class Manejador(BaseHTTPRequestHandler):
         return json.loads(self.rfile.read(largo) or b"{}")
 
     # --- rutas ---
+    # --- seguridad: solo peticiones de la propia interfaz ---
+    def _host_valido(self) -> bool:
+        """Rechaza nombres de host ajenos (DNS rebinding): solo 127.0.0.1/localhost, salvo --host 0.0.0.0."""
+        if getattr(self.server, "red_abierta", False):
+            return True
+        host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]").lower()
+        return host in ("127.0.0.1", "localhost", "::1")
+
+    def _post_valido(self) -> bool:
+        """Contra CSRF: una página ajena puede enviar un formulario a 127.0.0.1, pero no con
+        Content-Type JSON sin permiso CORS (que este servidor nunca da), ni con un Origin ajeno."""
+        if not (self.headers.get("Content-Type") or "").startswith("application/json"):
+            return False
+        origen = self.headers.get("Origin")
+        return origen is None or urlparse(origen).netloc == self.headers.get("Host")
+
     def do_GET(self) -> None:
+        if not self._host_valido():
+            return self._error(403, "host no permitido")
         url = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
         try:
@@ -666,6 +735,8 @@ class Manejador(BaseHTTPRequestHandler):
             return self._error(503, f"reintentar: {exc}")
 
     def do_POST(self) -> None:
+        if not (self._host_valido() and self._post_valido()):
+            return self._error(403, "petición rechazada: solo se aceptan peticiones JSON de la propia interfaz")
         url = urlparse(self.path)
         try:
             if url.path == "/api/ejecutar":
@@ -719,7 +790,7 @@ class Manejador(BaseHTTPRequestHandler):
                 raise ValueError("no se indicó qué borrar")
             with _lock_npz, _lock_errores:
                 res = archivos.mover_a_papelera(carpetas)
-                _npz.cache_clear()
+                _cache_mapas.limpiar()
                 _cache_errores.clear()
             difusor.emitir("log", {"texto": f"[OK] {len(carpetas)} captura(s) movidas a la papelera "
                                             f"({res['elementos']} elementos): {res['papelera']}"})
@@ -820,6 +891,7 @@ def main() -> None:
     threading.Thread(target=vigilar, daemon=True).start()
     servidor = ThreadingHTTPServer((args.host, args.puerto), Manejador)
     servidor.daemon_threads = True
+    servidor.red_abierta = args.host not in ("127.0.0.1", "localhost", "::1")
     url = f"http://{'127.0.0.1' if args.host == '0.0.0.0' else args.host}:{args.puerto}"
     print(f"[OK] Interfaz en {url}  (datos: {cfg.DATOS})  — Ctrl+C para salir")
     if args.host == "0.0.0.0":

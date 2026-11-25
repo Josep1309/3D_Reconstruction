@@ -111,6 +111,8 @@ def _actualizar_indices(poses_borradas: dict[str, set[str]], carpetas: set[str])
             e for e in manifiesto.get("poses", [])
             if f"pose_{int(e['pose']):02d}" not in poses_borradas.get(e["categoria"], set())
         ]
+        manifiesto["rechazadas"] = {f: r for f, r in manifiesto.get("rechazadas", {}).items()
+                                    if sesiones.clave_carpeta(r.get("fuente", "")) not in carpetas}
         tmp = ruta.with_name(ruta.name + ".tmp")
         tmp.write_text(json.dumps(manifiesto, indent=2, ensure_ascii=False), encoding="utf-8")
         tmp.replace(ruta)
