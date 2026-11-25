@@ -59,6 +59,11 @@ class VistaEnVivo:
 
     def __init__(self, total: int, intervalo_s: float = 0.15, alfa: float = 0.08) -> None:
         self.nitidez: deque[float] = deque(maxlen=cfg.IMAGENES_POR_CICLO)
+        # Detección del tablero en la vista previa (solo si se va a capturar el patrón): ~1 vez/s
+        self.buscar_tablero = False
+        self.tablero_t = 0.0
+        self.tablero: int | None = None
+        self.n_previa = 0  # frames acumulados en el promedio de la vista previa
         try:  # un control.json viejo (de otra sesión) no se aplica
             self.control_m: float | None = (DIR_VIVO / "control.json").stat().st_mtime
         except OSError:
@@ -80,14 +85,17 @@ class VistaEnVivo:
 
     def __call__(self, indice: int, frame) -> None:
         self.media = None
+        self.n_previa = 0
         self.ultimo = ("captura", indice, frame)  # solo asignaciones: no frena la captura
         self.version += 1
 
     def previa(self, frame) -> None:
         f8 = frame if frame.dtype == np.uint8 else (frame >> 8).astype(np.uint8)
         f = f8.astype(np.float32)
+        self.n_previa += 1
         if self.media is None or self.media.shape != f.shape:
             self.media = f
+            self.n_previa = 1
         else:
             cv2.accumulateWeighted(f, self.media, self.alfa)  # media ← (1-α)·media + α·frame
         muestra = f8[::4, ::4]
@@ -99,6 +107,22 @@ class VistaEnVivo:
         self.nitidez.append(float(cv2.Laplacian(centro, cv2.CV_32F).var()))
         self.ultimo = ("previa", 0, self.media)
         self.version += 1
+
+    @staticmethod
+    def _detectar_tablero(img_mitad: np.ndarray) -> int:
+        """Círculos del tablero detectados en la vista previa (0 si no se encuentra la grilla).
+
+        Se busca sobre la imagen promediada (iluminación uniforme) llevada a resolución completa,
+        porque el detector está ajustado al tamaño real de los círculos."""
+        from calibracion_estereo import detectar_puntos_tablero
+
+        completa = cv2.resize(img_mitad, (0, 0), fx=2, fy=2, interpolation=cv2.INTER_LINEAR)
+        try:
+            puntos = detectar_puntos_tablero(completa, (cfg.PATRON_COLUMNAS, cfg.PATRON_FILAS),
+                                             cfg.PATRON_TIPO, cfg.PATRON_COLOR_CIRCULOS)
+            return len(puntos)
+        except RuntimeError:
+            return 0
 
     def _aplicar_control(self) -> None:
         """La interfaz deja en `.vivo/control.json` la exposición pedida; se aplica a la cámara abierta."""
@@ -142,7 +166,13 @@ class VistaEnVivo:
             if modo == "captura":
                 mensaje = f"@@vivo {indice + 1} {self.total}\n"
             else:
-                mensaje = f"@@previa {max(self.saturados, default=0.0):.4f} {max(self.nitidez, default=0.0):.1f}\n"
+                # Solo con el promedio ya estable (~30 frames): un frame suelto tiene franjas encima
+                if self.buscar_tablero and self.n_previa >= 30 and time.time() - self.tablero_t > 1.0:
+                    self.tablero_t = time.time()
+                    self.tablero = self._detectar_tablero(img)
+                tablero = "" if self.tablero is None else f" {self.tablero}"
+                mensaje = (f"@@previa {max(self.saturados, default=0.0):.4f} "
+                           f"{max(self.nitidez, default=0.0):.1f}{tablero}\n")
             sys.stdout.write("\n" + mensaje)
             sys.stdout.flush()
 
@@ -168,6 +198,13 @@ def aplicar_ajustes(ajustes: dict) -> list[str]:
     """Aplica a `configuracion` los ajustes de la interfaz: número = activo con ese valor,
     null = desactivado. Devuelve la lista de cambios respecto a configuracion.py (para el registro)."""
     cambios = []
+    # Tamaño del tablero: dos valores (entre columnas, entre filas) -> PATRON_DISTANCIA_MM
+    dx, dy = ajustes.pop("PATRON_DX_MM", None), ajustes.pop("PATRON_DY_MM", None)
+    if dx and dy:
+        nuevo = (float(dx), float(dy)) if float(dx) != float(dy) else float(dx)
+        if nuevo != cfg.PATRON_DISTANCIA_MM:
+            cambios.append(f"PATRON_DISTANCIA_MM={nuevo}")
+        cfg.PATRON_DISTANCIA_MM = nuevo
     for clave, valor in ajustes.items():
         if clave == "ORDEN_BITS_GRAY":
             if valor in ("auto", "lsb", "msb"):
@@ -213,6 +250,7 @@ def configurar(conf: dict) -> None:
     import capturar_patrones as cp
 
     vista = VistaEnVivo(cfg.IMAGENES_POR_CICLO * max(p.CAPTURA_CICLOS, 1))
+    vista.buscar_tablero = "patron" in (p.CAPTURA_PLAN or {p.CAPTURA_CATEGORIA: p.CAPTURA_POSES})
     extra: dict = {"al_frame": vista, "al_previa": vista.previa}
     simular = conf.get("simular")
     if simular and p.ETAPAS.get("captura"):

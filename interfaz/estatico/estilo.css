@@ -504,3 +504,4 @@ body.sin-scroll { overflow: hidden; }
 .vivo-exp input[type=range] { width: min(260px, 50vw); accent-color: var(--acento); }
 .vivo-exp output, .vivo-nitidez output { font-variant-numeric: tabular-nums; min-width: 52px; color: var(--texto-2); }
 .vivo-nitidez meter { width: 120px; }
+#vivo-texto.sin-tablero { color: var(--error); font-weight: 600; }

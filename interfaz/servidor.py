@@ -58,7 +58,7 @@ DIR_CALIBRACION = cfg.DIR_CALIBRACION
 ARCHIVO_VIVO = cfg.DIR_RESULTADOS / ".vivo" / "frame.jpg"
 RE_POSE = re.compile(r"^pose_\d+$")
 RE_ORDENADA = re.compile(r"^img_([HV])_(\d{1,2})$")
-RE_MARCA = re.compile(r"@@(vivo) (\d+) (\d+)|@@(previa) ([\d.]+)(?: ([\d.]+))?|@@exposicion [\d.]+")
+RE_MARCA = re.compile(r"@@(vivo) (\d+) (\d+)|@@(previa) ([\d.]+)(?: ([\d.]+))?(?: (\d+))?|@@exposicion [\d.]+")
 RE_PREGUNTA = re.compile(r"^@@pregunta (.*)$")  # el ejecutor anuncia así cada input() (ejecutor._input_marcado)
 RE_META = re.compile(r"^@@meta (\{.*\})$")        # datos de la próxima pregunta (capturar_patrones.preguntar)
 RE_CALIDAD = re.compile(r"^@@calidad (\{.*\})$")  # control de una pose recién capturada
@@ -178,7 +178,8 @@ class Ejecucion:
                 difusor.emitir("vivo", {"i": int(m.group(2)), "n": int(m.group(3))})
             elif m.group(4):
                 difusor.emitir("vivo", {"previa": True, "saturacion": float(m.group(5)),
-                                        "nitidez": float(m.group(6) or 0)})
+                                        "nitidez": float(m.group(6) or 0),
+                                        "tablero": None if m.group(7) is None else int(m.group(7))})
         linea = RE_MARCA.sub("", linea)
         if not linea.strip():
             return
@@ -662,6 +663,11 @@ def generar_nube(cat: str, pose: str, maximo: int) -> bytes:
 # ==============================================================================
 
 
+def _distancia_tablero() -> tuple[float, float]:
+    d = cfg.VALORES_ORIGINALES["PATRON_DISTANCIA_MM"]
+    return (float(d), float(d)) if not isinstance(d, (tuple, list)) else (float(d[0]), float(d[1]))
+
+
 def configuracion_por_defecto() -> dict:
     import pipeline as p
 
@@ -677,6 +683,7 @@ def configuracion_por_defecto() -> dict:
             "MED_FILT", "BORDE_MASCARA", "ORDEN_BITS_GRAY", "SALTO_MAX_MM", "PLANO_UMBRAL_MM",
             "CAM_EXPOSICION_US", "PATRON_COLUMNAS", "PATRON_FILAS", "PATRON_DISTANCIA_MM", "Z_MIN_MM", "Z_MAX_MM")},
         "fuentes_demo": fuentes_demo(),
+        "tablero_mm": list(_distancia_tablero()),
         "datos": str(cfg.DATOS),
     }
 

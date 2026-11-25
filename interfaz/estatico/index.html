@@ -290,6 +290,11 @@
         <figure class="ec-figura"><figcaption><span id="ec-tit-cam"></span> <small id="ec-esc-cam"></small></figcaption><div id="ec-res-cam" class="ec-residuos"></div></figure>
         <figure class="ec-figura"><figcaption><span id="ec-tit-proj"></span> <small id="ec-esc-proj"></small></figcaption><div id="ec-res-proj" class="ec-residuos"></div></figure>
       </div>
+      <div class="rejilla dos">
+        <figure class="ec-figura"><figcaption><span data-i18n="ec_cob_proj">Cobertura del proyector</span> <small id="ec-cob-pct"></small></figcaption><div id="ec-cob-proj" class="ec-residuos"></div></figure>
+        <figure class="ec-figura"><figcaption><span data-i18n="ec_cob_cam">Dónde poner el tablero (vista de la cámara)</span></figcaption><div id="ec-cob-cam" class="ec-residuos"></div></figure>
+      </div>
+      <p class="nota" id="ec-cob-nota"></p>
       <p class="nota" data-i18n="ec_nota_vectores">Las flechas son el error de cada círculo (medido − modelo), ampliado para que se vea. Un patrón ordenado (todas hacia un lado o en remolino) indica un error del modelo; flechas al azar, ruido de medición. En gris, los círculos de las demás poses: muestran qué parte del sensor y del proyector cubre la calibración.</p>
     </section>
 
@@ -369,6 +374,7 @@
             <option value="todas" data-i18n="calib_poses_todas">todas</option>
           </select>
         </div>
+        <div id="aj-calib" class="aj-lista"></div>
       </section>
     </div>
     <footer class="ajustes-pie">

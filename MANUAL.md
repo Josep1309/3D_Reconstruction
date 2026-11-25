@@ -696,15 +696,14 @@ fase es ~0.05 px en u y ~0.1–0.3 px en v.
 
 Igual que `Traditional_StereoCalib.m` (2 coeficientes radiales y tangencial, sin skew):
 
-0. **Selección de poses** (`sesiones_patron`, `seleccionar_poses`). Agrupa las poses en sesiones
-   según la hora de su carpeta en `capturas/` (la registra el manifiesto). Dos capturas separadas
-   por más de `HORAS_ENTRE_SESIONES` (2 h) son sesiones distintas. Se detectan los círculos en
+0. **Selección de poses** (`sesiones_patron`, `seleccionar_poses`). Agrupa las poses del patrón
+   por **proceso de captura**, el mismo agrupamiento del resto del sistema (§9.1). Se detectan los círculos en
    todas las poses, pero solo calibran las que elige `CALIBRACION_POSES`:
    - `"ultima_sesion"` (por defecto): la sesión más reciente;
    - `"todas"`;
    - una lista, por ejemplo `["pose_08", "pose_09", ...]`.
 
-   En la interfaz es la opción **Poses del patrón** de *Proceso por etapas*. Por línea de
+   En la interfaz es la opción **Poses del patrón** de *Ajustes → Calibración*. Por línea de
    comandos: `calibracion_estereo.py --poses todas` o `--poses pose_08 pose_09 …`.
 1. `calibrateCamera` de la cámara y del proyector **por separado** (`CALIB_FIX_K3` → k1, k2, p1,
    p2).
@@ -1242,7 +1241,17 @@ calibración en uso (*independiente* o *conjunta*, según la opción **Calibraci
 - tabla con los mismos errores, más ΔR, ΔT y la distancia al tablero;
 - al hacer clic en una pose, los **vectores de error** de cada círculo en la cámara y en el
   proyector, ampliados. En gris se ven los círculos de las demás poses, que muestran la
-  cobertura.
+  cobertura;
+- el **mapa de cobertura**: el proyector dividido en 4 × 5 zonas, a la izquierda.
+  - Verde = con círculos.
+  - Rojo = sin círculos y visible para la cámara: ahí el modelo se extrapola.
+  - Gris = fuera del campo de la cámara: no se mide, así que no importa.
+
+  A la derecha, en la imagen de la cámara, círculos naranjas numerados marcan **dónde poner el
+  tablero** en la próxima calibración para cubrir las zonas rojas. La posición se calcula con un
+  ajuste afín proyector → cámara de todas las correspondencias, así que es aproximada. Con la
+  calibración del 24-nov se cubren 11 de 12 zonas visibles; falta el borde izquierdo de la
+  imagen.
 
 Si el error estéreo de la calibración es muy alto, el chip de calibración de la barra superior y
 el ícono de la pestaña se ponen en rojo, y la pestaña explica qué hacer (§16.6). Para ver también
@@ -1286,6 +1295,8 @@ lo indica con `[AJUSTES] Distintos de configuracion.py: …`.
 | Rango de Z válido | `Z_MIN_MM`, `Z_MAX_MM` | 100–1500 mm | sin límite |
 | Tolerancia del plano (RANSAC) | `PLANO_UMBRAL_MM` | 3 mm | — |
 | Calibración / poses del patrón | `CALIBRACION`, `CALIBRACION_POSES` | independiente / última sesión | — |
+| Distancia entre círculos del tablero (columnas – filas) | `PATRON_DISTANCIA_MM` | 15 – 15 mm | — (mídela con un calibre y recalibra) |
+| Exposición de la cámara | `CAM_EXPOSICION_US` | 12 ms | — (también en vivo, §19.3) |
 
 Cada fase guarda con qué parámetros se calculó (`firma` en el `.npz`), y la reconstrucción guarda
 los suyos en su id. Al cambiar un ajuste, la próxima ejecución recalcula solo lo afectado; al
@@ -1338,6 +1349,10 @@ posterior con el trigger del Arduino sin pérdidas (Δt 49.9 ms) y secuencia vá
     y el ejecutor la pasa a `ExposureTime`).
   - Se guarda en Ajustes, así que se mantiene para las poses siguientes y las próximas capturas.
   - En el modo demo se simula escalando el brillo.
+- **Tablero detectado.** Al capturar el **patrón**, el texto bajo la imagen indica cada segundo
+  si se detecta el tablero completo («✔ tablero detectado (108 círculos)»). Si no se detecta
+  («✖ tablero NO detectado», en rojo), esa pose no servirá para calibrar: debe verse entero, sin
+  reflejos.
 - **Nitidez.** Varianza del laplaciano en el centro de la imagen, el máximo de un ciclo de franjas.
   Para enfocar la cámara o el proyector, gira el anillo hasta que la barra llegue al máximo. La
   escala se reinicia al cambiar la exposición.

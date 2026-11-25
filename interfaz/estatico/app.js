@@ -501,8 +501,12 @@ function pintarTextoVivo() {
     : est.ejec.esperando ? t("vivo_pausa") : t("vivo_esperando");
   else if (v.previa) txt.textContent = (pose ? pose + " — " : "") +
     t(est.ejec.etapa === "previa" ? "vivo_previa_sola" : "vivo_previa") +
-    (saturado ? " · " + t("vivo_saturados", { p: (100 * v.saturacion).toFixed(1) }) : "");
+    (saturado ? " · " + t("vivo_saturados", { p: (100 * v.saturacion).toFixed(1) }) : "") +
+    // Al capturar el patrón: ¿se ve el tablero completo? (si no, la pose no servirá para calibrar)
+    (est.ejec.meta?.cat === "patron" && v.tablero != null
+      ? " · " + (v.tablero ? t("vivo_tablero_si", { n: v.tablero }) : t("vivo_tablero_no")) : "");
   else txt.textContent = t("vivo_frame", v);
+  txt.classList.toggle("sin-tablero", est.ejec.meta?.cat === "patron" && v?.tablero === 0);
 }
 
 // Texto bajo el visor: puntos mostrados y controles (se redibuja al cambiar de idioma)
@@ -529,7 +533,7 @@ function conectarEventos() {
     const d = JSON.parse(e.data);
     const vivo = $("#vivo");
     if (d.previa) {
-      est.vivo = { previa: true, saturacion: d.saturacion, nitidez: d.nitidez };
+      est.vivo = { previa: true, saturacion: d.saturacion, nitidez: d.nitidez, tablero: d.tablero };
       pintarNitidez(d.nitidez);
       vivo.classList.add("previa");
     } else {

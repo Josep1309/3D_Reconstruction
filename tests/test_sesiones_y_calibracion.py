@@ -105,3 +105,15 @@ def test_pipeline_no_reconstruye_con_calibracion_rechazada(monkeypatch):
         pipeline.etapa_calibracion()
     monkeypatch.setattr(ce, "ejecutar_calibracion_estereo", lambda *a, **k: {"en_uso": True})
     pipeline.etapa_calibracion()  # aprobada: sigue sin error
+
+
+def test_ajustes_de_la_interfaz(monkeypatch):
+    import ejecutor
+
+    for clave in ("PATRON_DISTANCIA_MM", "GAMMA_TH", "SALTO_MAX_MM", "MED_FILT"):
+        monkeypatch.setattr(cfg, clave, getattr(cfg, clave))  # se restauran al terminar
+    cambios = ejecutor.aplicar_ajustes({"PATRON_DX_MM": 15.0588, "PATRON_DY_MM": 14.909, "GAMMA_TH": None,
+                                        "SALTO_MAX_MM": 7, "MED_FILT": 3.0})
+    assert cfg.PATRON_DISTANCIA_MM == (15.0588, 14.909)
+    assert cfg.GAMMA_TH == 0.0 and cfg.SALTO_MAX_MM == 7.0 and cfg.MED_FILT == 3 and isinstance(cfg.MED_FILT, int)
+    assert any("GAMMA_TH=desactivado" in c for c in cambios)

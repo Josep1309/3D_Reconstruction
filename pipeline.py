@@ -215,7 +215,8 @@ def etapa_calibracion() -> None:
 
     resumen = ce.ejecutar_calibracion_estereo(DIR_FASES, DIR_CALIBRACION, poses_calibracion=CALIBRACION_POSES,
                                     forzar=CALIBRACION_FORZAR,
-                                    gamma_th=cfg.GAMMA_TH, gamma_th_y=cfg.GAMMA_TH_Y, borde=cfg.BORDE_MASCARA)
+                                    gamma_th=cfg.GAMMA_TH, gamma_th_y=cfg.GAMMA_TH_Y, borde=cfg.BORDE_MASCARA,
+                                    center_distance=cfg.PATRON_DISTANCIA_MM)
     if not resumen.get("en_uso") and ETAPAS.get("reconstruccion"):
         # Reconstruir con la calibración anterior daría resultados falsos: es de otro montaje
         raise RuntimeError(

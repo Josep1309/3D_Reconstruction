@@ -62,6 +62,7 @@ en el §16.
 - Error de planitud en los planos de referencia de esa sesión: **≈ 0.62 mm**.
 - Pendiente físico (ver `AUDITORIA.md` §5):
   - medir el tamaño real del tablero, porque hoy hay ~1 % de incertidumbre de escala;
-  - recalibrar con poses que cubran todo el ancho del proyector, porque hoy cubren el 59 %.
+  - agregar alguna pose del tablero en el borde izquierdo de la imagen: hoy se cubren 11 de 12 zonas
+    del proyector que ve la cámara. Ver el mapa de cobertura en la pestaña Calibración.
 - La interfaz web solo muestra y procesa la configuración vigente del montaje (§9.1 del manual).
   Lo anterior queda en la pestaña *Archivos*.

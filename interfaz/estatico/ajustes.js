@@ -15,6 +15,7 @@ const AJUSTES = [
   { clave: "ORDEN_BITS_GRAY", grupo: "fase", opciones: ["auto", "lsb", "msb"], fijo: true },
   { clave: "SALTO_MAX_MM", grupo: "rec", min: 0.5, max: 50, paso: 0.5, unidad: "mm" },
   { clave: "Z_RANGO", grupo: "rec", doble: ["Z_MIN_MM", "Z_MAX_MM"], min: 0, max: 5000, paso: 10, unidad: "mm" },
+  { clave: "TABLERO", grupo: "calib", doble: ["PATRON_DX_MM", "PATRON_DY_MM"], min: 5, max: 50, paso: 0.0001, unidad: "mm", fijo: true },
   { clave: "PLANO_UMBRAL_MM", grupo: "rec", min: 0.5, max: 20, paso: 0.5, unidad: "mm", fijo: true },
 ];
 
@@ -34,6 +35,7 @@ function valorDefecto(a, p) {
 }
 
 function iniciarAjustes(parametros) {
+  parametros = { ...parametros, PATRON_DX_MM: est.config.tablero_mm[0], PATRON_DY_MM: est.config.tablero_mm[1] };
   for (const a of AJUSTES) aj.defecto[a.clave] = valorDefecto(a, parametros);
   const guardados = leerGuardados();
   for (const a of AJUSTES) aj.valores[a.clave] = guardados[a.clave] ?? structuredClone(aj.defecto[a.clave]);
@@ -61,8 +63,8 @@ const igual = (x, y) => JSON.stringify(x) === JSON.stringify(y);
 const modificado = (clave) => !igual(aj.valores[clave], aj.defecto[clave]);
 
 function pintarAjustes() {
-  for (const grupo of ["cam", "fase", "rec"]) {
-    const cont = $({ cam: "#aj-cam", fase: "#aj-fase", rec: "#aj-rec" }[grupo]);
+  for (const grupo of ["cam", "fase", "rec", "calib"]) {
+    const cont = $({ cam: "#aj-cam", fase: "#aj-fase", rec: "#aj-rec", calib: "#aj-calib" }[grupo]);
     cont.innerHTML = "";
     for (const a of AJUSTES.filter((x) => x.grupo === grupo)) cont.appendChild(filaAjuste(a));
   }

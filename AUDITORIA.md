@@ -211,7 +211,13 @@ MATLAB tenía comentada la corrección 15.0588 × 14.909. Un error de escala del
 Medir con calibre la distancia entre el primer y el último círculo de una fila y de una columna,
 y ponerla en `(dx, dy)`.
 
-### 5.2 [P1] Cobertura del proyector
+### 5.2 [P1 → P3] Cobertura del proyector
+
+> **Corrección (Fase 3).** El mapa de cobertura de la pestaña Calibración muestra que 8 de las 9
+> zonas sin cubrir caen **fuera del campo de la cámara**: el proyector ilumina más de lo que la
+> cámara ve. De las zonas visibles, la calibración en uso cubre 11 de 12 (92 %). Falta solo el
+> borde izquierdo de la imagen. Baja a P3.
+
 Las poses del patrón de la calibración en uso cubren `u_p` 224–760 de 912 (59 %) y `v_p`
 176–1073. Fuera de ese rango el modelo se extrapola. El 7–9 % de los puntos de los planos cae
 fuera del rango calibrado.

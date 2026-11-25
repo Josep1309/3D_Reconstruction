@@ -255,39 +255,27 @@ def _mascara_ajuste(mascara_tablero: np.ndarray, calidad: np.ndarray, gamma_th: 
 # ------------------------------------------------------------------------------
 
 
-def sesiones_patron(dir_ordenadas: Path = cfg.DIR_ORDENADAS,
-                    horas: float = cfg.HORAS_ENTRE_SESIONES) -> dict[str, dict]:
-    """Agrupa las poses del patrón en sesiones según la hora de su captura original.
+def sesiones_patron(dir_ordenadas: Path | None = None, horas: float | None = None) -> dict[str, dict]:
+    """Proceso de captura de cada pose del patrón: {"pose_XX": {"fuente", "hora" (ISO), "sesion"}}.
 
-    La hora sale del nombre de la carpeta de `capturas/` (AAAAMMDD_HHMMSS) que registra el
-    manifiesto. Dos capturas separadas por más de `horas` son sesiones distintas: entre ellas el
-    montaje pudo moverse. Devuelve {"pose_XX": {"fuente", "hora" (ISO), "sesion" (0, 1, ...)}}.
+    «Sesión» = número de orden de los procesos de captura que incluyeron el patrón (`sesiones.py`).
+    Es el mismo agrupamiento que usa el resto del sistema: un proceso registrado, o sin registro,
+    capturas seguidas (si el patrón sigue después de una pausa, es el mismo proceso). Los
+    parámetros se aceptan por compatibilidad y se ignoran.
     """
-    try:
-        manifiesto = json.loads((dir_ordenadas / "manifiesto.json").read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    horas_pose: dict[str, datetime] = {}
-    fuentes: dict[str, str] = {}
-    for entrada in manifiesto.get("poses", []):
-        if entrada.get("categoria") != "patron":
-            continue
-        nombre = f"pose_{int(entrada['pose']):02d}"
-        fuente = str(entrada.get("fuente", ""))
-        fuentes[nombre] = fuente
-        for parte in reversed(Path(fuente).parts):
-            try:
-                horas_pose[nombre] = datetime.strptime(parte[:15], "%Y%m%d_%H%M%S")
-                break
-            except ValueError:
-                continue
+    import sesiones
+
     salida: dict[str, dict] = {}
-    sesion, anterior = -1, None
-    for nombre, hora in sorted(horas_pose.items(), key=lambda kv: kv[1]):
-        if anterior is None or (hora - anterior).total_seconds() > horas * 3600:
-            sesion += 1
-        anterior = hora
-        salida[nombre] = {"fuente": fuentes[nombre], "hora": hora.isoformat(timespec="seconds"), "sesion": sesion}
+    k = -1
+    for proceso in sesiones.procesos():
+        items = [it for it in proceso["items"] if it["cat"] == "patron" and it["poses"]]
+        if not items:
+            continue
+        k += 1
+        for it in items:
+            for nombre in it["poses"]:
+                salida[nombre] = {"fuente": f"capturas/{it['carpeta']}", "hora": it["hora"].isoformat(timespec="seconds"),
+                                  "sesion": k}
     return salida
 
 

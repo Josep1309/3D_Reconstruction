@@ -144,7 +144,8 @@ async function usarCalibracion() {
 
 function pintarErroresCalib() {
   const resumen = $("#ec-resumen"), aviso = $("#ec-aviso");
-  for (const id of ["#ec-barras", "#ec-tabla", "#ec-res-cam", "#ec-res-proj", "#ec-tit-cam", "#ec-tit-proj", "#ec-esc-cam", "#ec-esc-proj"]) $(id).innerHTML = "";
+  for (const id of ["#ec-barras", "#ec-tabla", "#ec-res-cam", "#ec-res-proj", "#ec-tit-cam", "#ec-tit-proj", "#ec-esc-cam", "#ec-esc-proj",
+    "#ec-cob-proj", "#ec-cob-cam", "#ec-cob-pct", "#ec-cob-nota"]) $(id).innerHTML = "";
   resumen.innerHTML = "";
   aviso.classList.add("oculto");
   const d = ec.datos;
@@ -196,6 +197,7 @@ function pintarErroresCalib() {
   dibujarBarras(d, umbral);
   dibujarTabla(d, umbral);
   dibujarResiduos(d);
+  dibujarCobertura(d);
 }
 
 function seleccionarPoseCalib(pose) {
@@ -291,6 +293,88 @@ function dibujarTabla(d, umbral) {
     tbody.appendChild(tr);
   }
   tabla.append(thead, tbody);
+}
+
+// ------------------------------------------------------------------ cobertura y siguiente pose
+// El proyector se divide en zonas; una zona está cubierta si caen en ella círculos de las poses
+// usadas. Para las vacías se estima dónde quedarían en la imagen de la cámara con un ajuste afín
+// proyector -> cámara de todas las correspondencias (aproximado, pero basta para orientar).
+const COB_COLS = 4, COB_FILAS = 5, COB_MIN_PUNTOS = 4;
+
+function ajusteAfin(origen, destino) {
+  // Mínimos cuadrados de destino = [x y 1]·M para cada coordenada (ecuaciones normales 3×3)
+  const ata = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], atb = [[0, 0, 0], [0, 0, 0]];
+  origen.forEach(([x, y], i) => {
+    const f = [x, y, 1];
+    for (let a = 0; a < 3; a++) {
+      for (let b = 0; b < 3; b++) ata[a][b] += f[a] * f[b];
+      atb[0][a] += f[a] * destino[i][0]; atb[1][a] += f[a] * destino[i][1];
+    }
+  });
+  const resolver = (m, v) => {  // Cramer 3×3
+    const det = (q) => q[0][0] * (q[1][1] * q[2][2] - q[1][2] * q[2][1]) - q[0][1] * (q[1][0] * q[2][2] - q[1][2] * q[2][0]) + q[0][2] * (q[1][0] * q[2][1] - q[1][1] * q[2][0]);
+    const d = det(m);
+    return [0, 1, 2].map((c) => det(m.map((fila, r) => fila.map((x, k) => (k === c ? v[r] : x)))) / d);
+  };
+  const cx = resolver(ata, atb[0]), cy = resolver(ata, atb[1]);
+  return ([x, y]) => [cx[0] * x + cx[1] * y + cx[2], cy[0] * x + cy[1] * y + cy[2]];
+}
+
+function dibujarCobertura(d) {
+  const usadas = d.poses.filter((p) => p.usada && p.puntos_proj?.length);
+  if (!usadas.length) return;
+  const [PW, PH] = d.proj_wh, [CW, CH] = d.cam_wh;
+  const cuenta = Array.from({ length: COB_FILAS }, () => Array(COB_COLS).fill(0));
+  const proj = usadas.flatMap((p) => p.puntos_proj), cam = usadas.flatMap((p) => p.puntos_cam);
+  for (const [u, v] of proj) {
+    const c = Math.min(COB_COLS - 1, Math.max(0, Math.floor(u / PW * COB_COLS)));
+    const f = Math.min(COB_FILAS - 1, Math.max(0, Math.floor(v / PH * COB_FILAS)));
+    cuenta[f][c]++;
+  }
+  // Zonas que la cámara alcanza a ver (el proyector ilumina más de lo que la cámara ve): solo
+  // esas se pueden cubrir, así que el porcentaje se calcula sobre ellas
+  const aCam = ajusteAfin(proj, cam);
+  const gw = PW / COB_COLS, gh = PH / COB_FILAS;
+  const enCamara = (c, f) => {
+    const [x, y] = aCam([(c + 0.5) * gw, (f + 0.5) * gh]);
+    return x >= -0.05 * CW && x <= 1.05 * CW && y >= -0.05 * CH && y <= 1.05 * CH;
+  };
+  const vacias = [];
+  let cubiertas = 0, visibles = 0;
+  cuenta.forEach((fila, f) => fila.forEach((n, c) => {
+    const visible = enCamara(c, f) || n >= COB_MIN_PUNTOS;
+    visibles += visible;
+    if (n >= COB_MIN_PUNTOS) cubiertas++; else vacias.push([c, f]);
+  }));
+  $("#ec-cob-pct").textContent = t("ec_cob_pct", { c: cubiertas, n: visibles, p: Math.round(100 * cubiertas / Math.max(visibles, 1)) });
+  // Proyector: zonas verdes (cubiertas) y rojas (vacías) con los círculos de las poses
+  const r = PW / 220;
+  let svg = `<svg viewBox="${-PW * 0.02} ${-PH * 0.02} ${PW * 1.04} ${PH * 1.04}" role="img">`;
+  cuenta.forEach((fila, f) => fila.forEach((n, c) => {
+    const ok = n >= COB_MIN_PUNTOS;
+    // verde = cubierta · rojo = vacía y alcanzable · gris = fuera del campo de la cámara
+    const color = ok ? "rgba(92,194,138,.22)" : enCamara(c, f) ? "rgba(239,111,91,.35)" : "rgba(255,255,255,.05)";
+    svg += `<rect x="${c * gw}" y="${f * gh}" width="${gw}" height="${gh}" fill="${color}" stroke="rgba(255,255,255,.25)" stroke-width="${PW / 400}"/>`;
+  }));
+  for (const [u, v] of proj) svg += `<circle cx="${u}" cy="${v}" r="${r}" fill="rgba(255,255,255,.75)"/>`;
+  $("#ec-cob-proj").innerHTML = svg + "</svg>";
+  // Cámara: dónde caerían las zonas vacías -> dónde poner el tablero
+  const rc = CW / 220;
+  let svgc = `<svg viewBox="${-CW * 0.02} ${-CH * 0.02} ${CW * 1.04} ${CH * 1.04}" role="img">`;
+  svgc += `<rect x="0" y="0" width="${CW}" height="${CH}" fill="none" stroke="rgba(255,255,255,.3)" stroke-width="${CW / 500}"/>`;
+  for (const [x, y] of cam) svgc += `<circle cx="${x}" cy="${y}" r="${rc * 0.7}" fill="rgba(255,255,255,.22)"/>`;
+  let fuera = 0, n = 0;
+  for (const [c, f] of vacias) {
+    const [x, y] = aCam([(c + 0.5) * gw, (f + 0.5) * gh]);
+    if (x < -0.05 * CW || x > 1.05 * CW || y < -0.05 * CH || y > 1.05 * CH) { fuera++; continue; }
+    n++;
+    svgc += `<circle cx="${Math.min(Math.max(x, 0), CW)}" cy="${Math.min(Math.max(y, 0), CH)}" r="${CW / 22}" fill="rgba(242,140,40,.18)" stroke="var(--s-est)" stroke-width="${CW / 300}" stroke-dasharray="${CW / 80} ${CW / 120}"/>`;
+    svgc += `<text x="${Math.min(Math.max(x, 0), CW)}" y="${Math.min(Math.max(y, 0), CH) + CW / 70}" text-anchor="middle" font-size="${CW / 28}" fill="#fff">${n}</text>`;
+  }
+  $("#ec-cob-cam").innerHTML = svgc + "</svg>";
+  $("#ec-cob-nota").textContent = n
+    ? t("ec_cob_sugerencia", { n }) + (fuera ? " " + t("ec_cob_fuera", { n: fuera }) : "")
+    : t("ec_cob_completa") + (fuera ? " " + t("ec_cob_fuera", { n: fuera }) : "");
 }
 
 // ------------------------------------------------------------------ vectores de error

@@ -94,7 +94,7 @@ PATRON_TIPO = "symmetric"
 PATRON_COLOR_CIRCULOS = "white"
 # Qué poses del patrón entran a la calibración. Todas deben ser del MISMO montaje: si la cámara o
 # el proyector se movieron entre sesiones, mezclarlas da un error estéreo enorme y planos curvos.
-#   "ultima_sesion" -> solo la última sesión de captura (capturas separadas por > 2 h son otra sesión)
+#   "ultima_sesion" -> solo el último proceso de captura que incluyó el patrón (sesiones.py)
 #   "todas"         -> todas las poses de capturas_ordenadas/patron
 #   ["pose_08", ...] -> una lista explícita
 CALIBRACION_POSES: str | list[str] = "ultima_sesion"
