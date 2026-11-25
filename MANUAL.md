@@ -1235,9 +1235,15 @@ cuando **Seguir la última** está activo:
      en mm) y el informe de la calibración en uso (`.json`).
    - *Ampliar* agranda el mapa sin dejar de medir.
 
-   **Comparar**, debajo, muestra el mapa de **Z actual − Z de una referencia**, píxel a píxel, solo
-   donde las dos tienen dato. También da cuántos puntos tiene cada una y la diferencia media, RMS,
-   P95 y máxima. La referencia puede ser:
+   **Comparar**, debajo, muestra el mapa de **Z actual − Z de una referencia**, píxel a píxel,
+   donde las dos tienen dato. Si no difieren, se ve en gris.
+   - En **rojo**, los píxeles que solo tiene la referencia; en **azul**, los que solo tiene la
+     actual. Por ejemplo, los puntos que quita un filtro.
+   - También da cuántos puntos tiene cada una y la diferencia media, RMS, P95 y máxima.
+   - Ejemplo real: con y sin el filtro de saltos en Z, la nube pasa de 568 794 a 528 929 puntos, sin
+     cambiar los comunes, porque el filtro solo quita atípicos.
+
+   La referencia puede ser:
    - **otra pose** de la misma categoría: repetibilidad entre dos capturas de la misma escena;
    - **una copia guardada** de esta pose. Reprocesar sobrescribe el resultado, así que para
      comparar ajustes:

@@ -113,11 +113,19 @@ def generar_imagen(cat: str, pose: str, tipo: str) -> tuple[np.ndarray, str]:
     archivos = _archivos_pose(cat, pose)
     n, b = cfg.N_PASOS, cfg.N_BITS_GRAY
     if tipo.startswith("dif:"):  # diferencia de Z contra una referencia (comparar)
-        dif, _ = diferencia_z(cat, pose, tipo[4:])
+        dif, _, solo_actual, solo_ref = diferencia_z(cat, pose, tipo[4:], mascaras=True)
         validos = np.isfinite(dif)
-        lim = float(np.percentile(np.abs(dif[validos]), 98)) if np.any(validos) else 1.0
-        img, r = _color(dif, None, cv2.COLORMAP_TURBO, (-max(lim, 1e-3), max(lim, 1e-3)))
-        return img, f"ΔZ ±{lim:.2f} mm"
+        lim = float(np.percentile(np.abs(dif[validos]), 98)) if np.any(validos) else 0.0
+        if lim < 1e-3:  # sin diferencias en los puntos comunes: gris neutro
+            img = np.broadcast_to(FONDO, (*dif.shape, 3)).copy()
+            img[validos] = (150, 150, 150)
+        else:
+            img, _ = _color(dif, None, cv2.COLORMAP_TURBO, (-lim, lim))
+        # Puntos que solo tiene una de las dos (p. ej. los que quita un filtro): rojo / azul
+        img[solo_ref] = (60, 60, 230)
+        img[solo_actual] = (230, 140, 60)
+        escala = f"ΔZ ±{lim:.2f} mm" if lim >= 1e-3 else "ΔZ = 0 (gris)"
+        return img, f"{escala} · rojo: solo en la referencia · azul: solo en la actual"
     m = RE_ORDENADA.match(tipo)
     if m:  # cualquier imagen organizada: img_V_03 = franja vertical, paso 3
         indice = int(m.group(2))
@@ -232,7 +240,7 @@ def _ruta_referencia(cat: str, ref: str) -> Path:
     return ruta
 
 
-def diferencia_z(cat: str, pose: str, ref: str) -> tuple[np.ndarray, dict]:
+def diferencia_z(cat: str, pose: str, ref: str, mascaras: bool = False):
     """Z(actual) − Z(referencia) en los píxeles válidos en ambos, y estadísticas de la comparación."""
     a, b = _xyz(cat, pose), cargar_npz(_ruta_referencia(cat, ref))
     ma = a["Mask"].astype(bool) & np.isfinite(a["Z"])
@@ -245,6 +253,8 @@ def diferencia_z(cat: str, pose: str, ref: str) -> tuple[np.ndarray, dict]:
     if d.size:
         stats.update(media=float(d.mean()), rms=float(np.sqrt(np.mean(d ** 2))), p95=float(np.percentile(np.abs(d), 95)),
                      max=float(np.max(np.abs(d))))
+    if mascaras:
+        return dif, stats, ma & ~mb, mb & ~ma
     return dif, stats
 
 

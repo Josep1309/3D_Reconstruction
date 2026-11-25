@@ -577,6 +577,8 @@ const ESCALAS_EN = [
   [/^bit Gray$/, "Gray bit"],
   [/^orden /, "order "],
   [/^gris: nada · azul: solo X · verde: solo Y · blanco: ambas$/, "gray: none · blue: X only · green: Y only · white: both"],
+  [/ · rojo: solo en la referencia · azul: solo en la actual$/, " · red: reference only · blue: current only"],
+  [/^ΔZ = 0 \(gris\)/, "ΔZ = 0 (gray)"],
 ];
 
 let IDIOMA = (() => {

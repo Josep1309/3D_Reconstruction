@@ -153,7 +153,7 @@ async function pintarComparacion() {
     img.src = URL.createObjectURL(await r.blob());
     img.addEventListener("click", () => fig.classList.toggle("ampliada"));
     fig.prepend(img);
-    $("#cmp-escala").textContent = decodeURIComponent(r.headers.get("X-Escala") || "");
+    $("#cmp-escala").textContent = traducirEscala(decodeURIComponent(r.headers.get("X-Escala") || ""));
     const s = await api(`/api/comparar?cat=${est.cat}&pose=${est.pose}&ref=${encodeURIComponent(ref)}`);
     const filas = [
       t("cmp_puntos", { a: s.puntos_actual.toLocaleString(locale()), b: s.puntos_ref.toLocaleString(locale()), c: s.comunes.toLocaleString(locale()) }),
