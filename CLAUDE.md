@@ -49,7 +49,17 @@ Las etapas corren en un orden fijo desde `pipeline.py` (`ETAPAS`):
 - `configuracion.py`: parámetros físicos y umbrales. Todos los módulos lo importan como `cfg`.
 - `pipeline.py`: qué etapas corren y opciones de flujo. Las etapas son envoltorios
   `etapa_<nombre>()`.
-- Datos:
+- Datos, las tres carpetas **ordenadas por proceso de captura** (`<P>` = `AAAA-MM-DD_HHMM`):
+  `capturas/<P>/<cat>/…` (+ `proceso.json`), `capturas_ordenadas/<P>/<cat>/pose_XX` (+
+  `origen.json`) y `resultados/<P>/{fases,reconstruccion}/<cat>/…`.
+  - **Nunca armes rutas de poses a mano: usa `rutas.py`** (`dir_pose_ordenada`, `fase_absoluta`,
+    `reconstruccion`, `ruta_captura`…). Lee la carpeta del manifiesto y entiende también la
+    estructura anterior (sin `<P>`).
+  - `importar.py` (o la pestaña Archivos) copia una carpeta externa `patron/plano/objeto` como
+    proceso nuevo. `sesiones.fijar_solo_proceso()` la deja en uso (`{"solo_proceso": P}` en
+    `configuracion_elegida.json`).
+  - `migrar_por_proceso.py` pasa los datos viejos a la nueva estructura; hay que correrlo primero
+    sin `--aplicar` y se puede deshacer con `--deshacer`.
   - `capturas/` (crudas). **Tú nunca las modificas ni las borras.** El usuario sí puede, desde la
     pestaña Archivos (`archivos.py` las mueve a `<DATOS>/papelera/`). Para probar borrados, usa
     una copia con `cp -al` y copia aparte el `manifiesto.json`, que se reescribe;

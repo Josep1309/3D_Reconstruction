@@ -135,13 +135,17 @@ def etapa_captura() -> None:
     import sesiones
 
     todas: list[Path] = []
+    # Todo el proceso (patrón, plano y objeto) va a una sola carpeta: capturas/AAAA-MM-DD_HHMM/<cat>/
+    carpeta_proceso = cp.nuevo_proceso(plan, cfg.DIR_CAPTURAS)
+    print(f"[INFO] Proceso de captura: {carpeta_proceso.name}", flush=True)
     try:
         for categoria, poses in plan:
             print(f"\n=== Captura: {categoria} ({poses} poses) ===", flush=True)
-            carpetas = cp.capturar_poses(categoria, poses, CAPTURA_CICLOS, cfg.DIR_CAPTURAS, CAPTURA_ESPERAR_ENTER)
+            carpetas = cp.capturar_poses(categoria, poses, CAPTURA_CICLOS, carpeta_proceso, CAPTURA_ESPERAR_ENTER)
             todas += carpetas
             print(f"[OK] {categoria}: {len(carpetas)} de {poses} poses capturadas.")
     finally:
+        cp.cerrar_proceso(carpeta_proceso, todas)
         # Registro del proceso: define la configuración vigente (sesiones.py), aun si se interrumpe
         sesiones.registrar_proceso(todas, plan)
 
@@ -293,6 +297,10 @@ def main() -> None:
     for etapa in elegidas:
         print(f"\n{'#' * 78}\n# ETAPA: {etapa}\n{'#' * 78}")
         t0 = time.perf_counter()
+        if etapa in ("fase_relativa", "fase_absoluta", "reconstruccion"):
+            import avance  # para la barra de la interfaz: una parte por categoría
+
+            avance.partes(len(_categorias_fase()) if etapa != "reconstruccion" else len([c for c in CATEGORIAS if c != "patron"] or ["objeto"]))
         try:
             FUNCIONES[etapa]()
         except KeyboardInterrupt:

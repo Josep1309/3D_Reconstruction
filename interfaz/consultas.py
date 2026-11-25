@@ -13,12 +13,13 @@ import time
 import zipfile
 from pathlib import Path
 
-from comun import DIR_CALIBRACION, DIR_COMPARACIONES, DIR_RECONSTRUCCION, RAIZ, _archivos_pose, _mtime, listar_poses
+from comun import DIR_CALIBRACION, DIR_COMPARACIONES, RAIZ, _archivos_pose, _mtime, listar_poses
 from ejecucion import difusor, ejecucion
 from imagenes import cargar_npz
 
 import numpy as np
 import configuracion as cfg
+import rutas
 
 
 def _firma_pose(ruta: Path, tipo: str) -> str | None:
@@ -44,7 +45,7 @@ def inventario() -> dict:
     notas = archivos.leer_notas()
     datos = {}
     for cat in cfg.CATEGORIAS:
-        resumen_ruta = DIR_RECONSTRUCCION / cat / f"{cat}_resumen.json"
+        resumen_ruta = rutas.dir_resumen(cat) / f"{cat}_resumen.json"
         resumen = {}
         if resumen_ruta.exists():
             try:
@@ -106,8 +107,8 @@ def listado_archivos() -> dict:
                 estado = {k: _mtime(r) is not None for k, r in _archivos_pose(it["cat"], pose).items()}
                 poses.append({"pose": pose, **estado})
             # Espacio: captura cruda + poses organizadas (lo que se libera al borrarla, sin contar resultados)
-            bytes_item = archivos.tamano(cfg.DIR_CAPTURAS / it["carpeta"]) + sum(
-                archivos.tamano(cfg.DIR_ORDENADAS / it["cat"] / p["pose"]) for p in poses)
+            bytes_item = archivos.tamano(rutas.ruta_captura(it["carpeta"])) + sum(
+                archivos.tamano(rutas.dir_pose_ordenada(it["cat"], p["pose"])) for p in poses)
             items.append({"cat": it["cat"], "carpeta": it["carpeta"], "hora": it["hora"].isoformat(timespec="seconds"),
                           "existe": it["existe"], "poses": poses, "rechazo": it.get("rechazo"),
                           "pureza": it.get("pureza"), "bytes": bytes_item,
@@ -251,13 +252,8 @@ def fuentes_demo() -> list[str]:
     """Capturas existentes que puede reproducir la cámara simulada (solo del montaje vigente)."""
     import sesiones
 
-    salida = []
-    for cat in cfg.CATEGORIAS:
-        carpeta = cfg.DIR_CAPTURAS / cat
-        if carpeta.is_dir():
-            salida += [str(p.relative_to(cfg.DIR_CAPTURAS)) for p in sorted(carpeta.iterdir())
-                       if p.is_dir() and not p.name.endswith("_simulada") and sesiones.captura_vigente(p)]
-    return salida
+    return [str(p.relative_to(cfg.DIR_CAPTURAS)) for _cat, nombre, p, _proc in rutas.capturas_en_disco()
+            if p.is_dir() and not nombre.endswith("_simulada") and sesiones.captura_vigente(p)]
 
 
 def vigilar() -> None:

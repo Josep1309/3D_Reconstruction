@@ -272,7 +272,12 @@ def verificar_datos() -> None:
                  "Libera espacio o usa un disco externo con TESIS_DIR_DATOS.", "§20.6")
     else:
         informar("ok", f"{libre:.0f} GB libres")
-    n = sum(1 for _ in cfg.DIR_CAPTURAS.glob("*/*")) if cfg.DIR_CAPTURAS.exists() else 0
+    import rutas
+
+    n = len(rutas.capturas_en_disco())
+    procesos = sum(1 for p in cfg.DIR_CAPTURAS.glob("*") if p.is_dir() and rutas.es_proceso(p.name)) if cfg.DIR_CAPTURAS.exists() else 0
+    if procesos:
+        informar("info", f"{procesos} carpetas de proceso en {cfg.DIR_CAPTURAS}")
     informar("info", f"{n} capturas crudas en {cfg.DIR_CAPTURAS}")
 
 

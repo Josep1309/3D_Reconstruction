@@ -109,8 +109,11 @@ HORAS_ENTRE_SESIONES = 2.0
 # vigente: desde el último proceso de captura que incluyó el patrón hasta hoy (ver sesiones.py).
 # Lo anterior queda en disco pero se ignora. False: se usa todo.
 SOLO_CONFIGURACION_ACTUAL = True
-# Capturas antiguas sin registro de proceso: una pausa mayor que esto separa dos procesos
+# Capturas antiguas sin registro de proceso: una pausa mayor que esto separa dos procesos, salvo
+# que siga capturándose el patrón tras una pausa menor que MINUTOS_CONTINUACION_PATRON (p. ej. al
+# reacomodar el tablero: el 30-oct hubo 5 min entre dos poses del mismo proceso)
 MINUTOS_ENTRE_PROCESOS = 3.0
+MINUTOS_CONTINUACION_PATRON = 10.0
 
 # ==============================================================================
 # --- RECONSTRUCCIÓN 3D ---

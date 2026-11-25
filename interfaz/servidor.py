@@ -34,7 +34,7 @@ import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlparse
 
-from comun import ARCHIVO_VIVO, DIR_CALIBRACION, DIR_ESTATICO, DIR_RECONSTRUCCION, RAIZ, RE_POSE
+from comun import ARCHIVO_VIVO, DIR_CALIBRACION, DIR_ESTATICO, RAIZ, RE_POSE
 from ejecucion import difusor, ejecucion
 from imagenes import _cache_mapas, _lock_npz, _xyz, diferencia_z, generar_imagen, generar_nube, histograma_plano, perfil_3d, punto_3d
 from consultas import _cache_errores, _lock_errores, configuracion_por_defecto, errores_calibracion, estado_sistema, guardar_comparacion, inventario, listado_archivos, listar_comparaciones, resumen_calibracion, vigilar
@@ -209,6 +209,19 @@ class Manejador(BaseHTTPRequestHandler):
                 cuerpo = self._cuerpo()
                 cat, pose = self._cat_pose({k: str(v) for k, v in cuerpo.items()})
                 return self._json(guardar_comparacion(cat, pose))
+            if url.path == "/api/importar/elegir":  # ventana del sistema para elegir la carpeta
+                import importar
+
+                if self.client_address[0] not in ("127.0.0.1", "::1"):  # se abriría en el equipo del servidor
+                    return self._json({"error": "La ventana para elegir carpetas solo funciona en el equipo del servidor; escribe la ruta"}, 400)
+                try:
+                    return self._json({"ruta": importar.elegir_carpeta(self._cuerpo().get("inicial"))})
+                except RuntimeError as exc:
+                    return self._json({"error": str(exc)}, 500)
+            if url.path == "/api/importar/analizar":  # qué se importaría de una carpeta (sin copiar nada)
+                import importar
+
+                return self._json(importar.analizar(str(self._cuerpo().get("ruta", ""))))
             if url.path == "/api/notas":
                 import archivos
 
@@ -258,7 +271,9 @@ class Manejador(BaseHTTPRequestHandler):
                                 {"Content-Disposition": f'attachment; filename="calibracion_{ruta.stat().st_mtime:.0f}.json"'})
         cat, pose = self._cat_pose(q)
         if tipo == "ply":
-            ruta = DIR_RECONSTRUCCION / cat / f"{cat}_{pose}.ply"
+            import rutas
+
+            ruta = rutas.reconstruccion(cat, pose, "ply")
             if not ruta.exists():
                 raise FileNotFoundError("esta pose aún no tiene reconstrucción")
             return self._enviar(200, ruta.read_bytes(), "application/octet-stream",

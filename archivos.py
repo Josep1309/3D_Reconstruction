@@ -24,6 +24,7 @@ import cv2
 import numpy as np
 
 import configuracion as cfg
+import rutas
 import sesiones
 
 PAPELERA = cfg.DATOS / "papelera"
@@ -32,11 +33,9 @@ EXT_IMAGEN = {".png", ".tif", ".tiff", ".bmp", ".jpg", ".jpeg"}
 
 
 def ruta_captura(clave: str) -> Path:
-    """'patron/20261124_130228' -> ruta dentro de capturas/ (sin permitir salir de ella)."""
-    cat, _, nombre = clave.partition("/")
-    if cat not in cfg.CATEGORIAS or not nombre or "/" in nombre or nombre.startswith("."):
-        raise ValueError(f"captura inválida: {clave}")
-    return cfg.DIR_CAPTURAS / cat / nombre
+    """'patron/20261124_130228' -> su carpeta en capturas/ (en la carpeta de su proceso o en la
+    estructura anterior), sin permitir salir de capturas/."""
+    return rutas.ruta_captura(clave)
 
 
 def frames_captura(clave: str) -> list[Path]:
@@ -58,6 +57,21 @@ def leer_frame(clave: str, indice: int) -> np.ndarray:
     if img.dtype != np.uint8:
         img = (img >> 8).astype(np.uint8) if img.dtype == np.uint16 else np.clip(img, 0, 255).astype(np.uint8)
     return img
+
+
+def _limpiar_vacias(carpeta: Path, destino: Path) -> None:
+    """Quita las carpetas que quedan vacías al mover algo (categoría o proceso), sin salir de las
+    carpetas de datos. Un proceso al que solo le queda su proceso.json también se vacía: el
+    proceso.json va a la papelera con lo demás (para poder restaurarlo)."""
+    raices = {cfg.DIR_CAPTURAS.resolve(), cfg.DIR_ORDENADAS.resolve(), cfg.DIR_RESULTADOS.resolve(), cfg.DATOS.resolve()}
+    actual = carpeta
+    while actual.is_dir() and actual.resolve() not in raices:
+        if any(p.name != "proceso.json" for p in actual.iterdir()):
+            break
+        for resto in list(actual.iterdir()):
+            _mover(resto, destino)
+        actual.rmdir()
+        actual = actual.parent
 
 
 def _mover(origen: Path, destino_raiz: Path) -> bool:
@@ -90,13 +104,12 @@ def _mover_a_papelera(carpetas: list[str]) -> dict:
         poses = items.get(clave, {}).get("poses", [])
         poses_borradas.setdefault(cat, set()).update(poses)
         movidos += _mover(ruta, destino)
+        _limpiar_vacias(ruta.parent, destino)
         for pose in poses:
-            movidos += _mover(cfg.DIR_ORDENADAS / cat / pose, destino)
-            for archivo in (cfg.DIR_RESULTADOS / "fases" / cat).glob(f"{pose}[._]*"):
-                movidos += _mover(archivo, destino)
-            dir_rec = cfg.DIR_RESULTADOS / "reconstruccion" / cat
-            for archivo in [*dir_rec.glob(f"{cat}_{pose}.*"), *dir_rec.glob(f"reconstruccion_{cat}_{pose}.*")]:
-                movidos += _mover(archivo, destino)
+            # Organizada, fases y reconstrucción, donde estén (carpeta de su proceso o estructura anterior)
+            for elemento in rutas.archivos_de_pose(cat, pose):
+                movidos += _mover(elemento, destino)
+                _limpiar_vacias(elemento.parent, destino)
     quitadas = _actualizar_indices(poses_borradas, set(carpetas))
     registro = [e for e in sesiones.leer_registro() if set(e.get("carpetas", [])) & set(carpetas)]
     sesiones.quitar_del_registro(set(carpetas))
@@ -181,18 +194,16 @@ def _restaurar(lote_id: str) -> dict:
 
 
 def _elementos(carpeta: Path) -> list[Path]:
-    """Hojas a mover: las carpetas de captura/pose completas y los archivos sueltos."""
-    salida = []
-    for p in sorted(carpeta.rglob("*")):
-        rel = p.relative_to(carpeta)
-        # capturas/<cat>/<captura> y capturas_ordenadas/<cat>/pose_XX se mueven enteras
-        if p.is_dir() and carpeta.name in ("capturas", "capturas_ordenadas") and len(rel.parts) == 2:
-            salida.append(p)
-        elif p.is_file() and not any(q in salida for q in p.parents):
-            if carpeta.name in ("capturas", "capturas_ordenadas") and len(rel.parts) > 2:
-                continue  # ya va dentro de su carpeta
-            salida.append(p)
-    return salida
+    """Lo que se devuelve de un lote: las carpetas de captura y de pose completas (las que cuelgan
+    de una carpeta de categoría, con o sin carpeta de proceso) y los archivos sueltos."""
+    unidades: list[Path] = []
+    if carpeta.name in ("capturas", "capturas_ordenadas"):
+        for p in sorted(carpeta.rglob("*")):
+            if p.is_dir() and p.parent.name in cfg.CATEGORIAS and not any(u in p.parents for u in unidades):
+                unidades.append(p)
+    sueltos = [p for p in sorted(carpeta.rglob("*"))
+               if p.is_file() and not any(u in p.parents for u in unidades)]
+    return unidades + sueltos
 
 
 def _actualizar_indices(poses_borradas: dict[str, set[str]], carpetas: set[str]) -> dict:

@@ -1,5 +1,5 @@
 {
-  "fecha": "2026-11-24T13:14:59",
+  "fecha": "2026-11-25T11:42:07",
   "poses": [
     "pose_23",
     "pose_24",
@@ -30,7 +30,36 @@
   "rms_proj_px": 0.555193415169329,
   "rms_stereo_indep_px": 0.5911026807823122,
   "rms_stereo_joint_px": 0.6163800850104859,
-  "poses_criterio": "ultima_sesion",
+  "poses_criterio": [
+    "pose_23",
+    "pose_24",
+    "pose_25",
+    "pose_26",
+    "pose_27",
+    "pose_28",
+    "pose_29",
+    "pose_30"
+  ],
+  "seleccion": {
+    "patron": [
+      "pose_23",
+      "pose_24",
+      "pose_25",
+      "pose_26",
+      "pose_27",
+      "pose_28",
+      "pose_29",
+      "pose_30"
+    ],
+    "plano": [
+      "pose_17",
+      "pose_18",
+      "pose_19"
+    ],
+    "objeto": [
+      "pose_09"
+    ]
+  },
   "error_por_pose_cam_px": {
     "pose_23": 0.4941715598106384,
     "pose_24": 0.5401900410652161,
@@ -67,7 +96,7 @@
       "usada": true,
       "fuente": "capturas/patron/20261124_130228",
       "hora": "2026-11-24T13:02:28",
-      "sesion": 2
+      "sesion": 4
     },
     "pose_24": {
       "cam_px": 0.5401910618760872,
@@ -86,7 +115,7 @@
       "usada": true,
       "fuente": "capturas/patron/20261124_130243",
       "hora": "2026-11-24T13:02:43",
-      "sesion": 2
+      "sesion": 4
     },
     "pose_25": {
       "cam_px": 0.5031181273625764,
@@ -105,7 +134,7 @@
       "usada": true,
       "fuente": "capturas/patron/20261124_130308",
       "hora": "2026-11-24T13:03:08",
-      "sesion": 2
+      "sesion": 4
     },
     "pose_26": {
       "cam_px": 0.5274114295429301,
@@ -124,7 +153,7 @@
       "usada": true,
       "fuente": "capturas/patron/20261124_130325",
       "hora": "2026-11-24T13:03:25",
-      "sesion": 2
+      "sesion": 4
     },
     "pose_27": {
       "cam_px": 0.4877778130776651,
@@ -143,7 +172,7 @@
       "usada": true,
       "fuente": "capturas/patron/20261124_130342",
       "hora": "2026-11-24T13:03:42",
-      "sesion": 2
+      "sesion": 4
     },
     "pose_28": {
       "cam_px": 0.7002732995623351,
@@ -162,7 +191,7 @@
       "usada": true,
       "fuente": "capturas/patron/20261124_130405",
       "hora": "2026-11-24T13:04:05",
-      "sesion": 2
+      "sesion": 4
     },
     "pose_30": {
       "cam_px": 0.5591267621811955,
@@ -181,7 +210,7 @@
       "usada": true,
       "fuente": "capturas/patron/20261124_130438",
       "hora": "2026-11-24T13:04:38",
-      "sesion": 2
+      "sesion": 4
     }
   },
   "Ac": [
@@ -262,5 +291,10 @@
   "cobertura_vp_px": [
     175.92162644035307,
     1072.8216195938253
-  ]
+  ],
+  "control_calidad": {
+    "aprobada": true,
+    "motivos": [],
+    "forzada": false
+  }
 }

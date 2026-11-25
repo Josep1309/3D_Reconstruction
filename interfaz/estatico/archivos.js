@@ -267,7 +267,65 @@ async function elegirConfiguracion(proceso) {
   refrescarEstado();
 }
 
+// ------------------------------------------------------------------ importar
+let importacion = null;
+
+async function revisarImportacion() {
+  const ruta = $("#im-ruta").value.trim(), res = $("#im-resumen");
+  importacion = null;
+  $("#im-opciones").classList.add("oculto");
+  if (!ruta) return;
+  res.textContent = t("cargando");
+  try { importacion = await api("/api/importar/analizar", { ruta }); }
+  catch (err) { res.textContent = t("error_x", { m: err.message }); return; }
+  const d = importacion, lineas = [];
+  const cats = Object.entries(d.capturas);
+  if (cats.length) {
+    lineas.push(t("im_proceso", { p: d.proceso, f: fechaHora(d.inicio), t: megas(d.bytes) }));
+    for (const [cat, lista] of cats) lineas.push(`• ${nombreCat(cat)}: ${t("im_n_capturas", { n: lista.length })}`);
+  } else lineas.push(t("im_nada"));
+  if (d.omitidas.length) lineas.push(t("im_omitidas", { n: d.omitidas.length }));
+  if (d.ignoradas.length) lineas.push(t("im_ignoradas", { l: d.ignoradas.join(", ") }));
+  if (cats.length && !d.capturas.patron) lineas.push(t("im_sin_patron"));
+  res.innerHTML = "";
+  for (const l of lineas) { const p = document.createElement("div"); p.textContent = l; res.appendChild(p); }
+  $("#im-opciones").classList.toggle("oculto", !cats.length);
+}
+
+async function elegirCarpetaImportar() {
+  const b = $("#im-elegir");
+  b.disabled = true;
+  $("#im-resumen").textContent = t("im_eligiendo");
+  try {
+    const r = await api("/api/importar/elegir", { inicial: $("#im-ruta").value.trim() || null });
+    if (r.ruta) { $("#im-ruta").value = r.ruta; await revisarImportacion(); }
+    else $("#im-resumen").textContent = "";
+  } catch (err) { $("#im-resumen").textContent = t("error_x", { m: err.message }); }
+  finally { b.disabled = false; }
+}
+
+function ejecutarImportacion() {
+  const d = importacion;
+  if (!d) return;
+  const procesar = $("#im-procesar").checked, hayPatron = !!d.capturas.patron;
+  if ($("#im-mover").checked && !confirm(t("im_confirmar_mover"))) return;
+  ejecutar({
+    importar: { ruta: d.origen, mover: $("#im-mover").checked },
+    etapas: { patrones: false, lightcrafter: false, captura: false, organizar: true, fase_relativa: procesar,
+              fase_absoluta: procesar, calibracion: procesar && hayPatron, reconstruccion: procesar },
+    categorias: ["plano", "objeto"].filter((c) => d.capturas[c]),
+    rehacer: false, fase: $("#a-fase").value, calibracion: $("#a-calib").value, ajustes: ajustesParaEnviar(),
+  });
+  importacion = null;
+  $("#im-opciones").classList.add("oculto");
+  $("#im-resumen").textContent = t("im_en_marcha");
+}
+
 function iniciarArchivos() {
+  $("#im-revisar").addEventListener("click", revisarImportacion);
+  $("#im-elegir").addEventListener("click", elegirCarpetaImportar);
+  $("#im-ruta").addEventListener("keydown", (e) => { if (e.key === "Enter") revisarImportacion(); });
+  $("#im-importar").addEventListener("click", ejecutarImportacion);
   $("#ar-sel-limpiar").addEventListener("click", () => { ar.sel.clear(); pintarArchivos(); });
   $("#ar-sel-borrar").addEventListener("click", borrarSeleccion);
 }

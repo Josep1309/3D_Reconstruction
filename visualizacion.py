@@ -62,16 +62,18 @@ def visualizar_pose(
 ) -> None:
     """Abre la cuadrícula del proceso y la ventana 3D de la pose indicada (o la última)."""
     if pose == "ultima":
-        poses = fase.listar_poses(cfg.DIR_ORDENADAS / categoria)
+        poses = fase.listar_poses(categoria)
         if not poses:
-            raise FileNotFoundError(f"No hay poses organizadas en '{cfg.DIR_ORDENADAS / categoria}'.")
+            raise FileNotFoundError(f"No hay poses organizadas de '{categoria}'.")
         pose = poses[-1].name
         print(f"[INFO] Visualizando la última pose: {categoria}/{pose}")
-    dir_pose = cfg.DIR_ORDENADAS / categoria / pose
-    dir_fases = cfg.DIR_RESULTADOS / "fases" / categoria
+    import rutas
+
+    dir_pose = rutas.dir_pose_ordenada(categoria, pose)  # en la carpeta de su proceso
+    dir_fases = rutas.dir_fases(categoria, pose)
     ruta_rel = dir_fases / f"{pose}_relativa.npz"
     ruta_abs = dir_fases / f"{pose}.npz"
-    ruta_xyz = cfg.DIR_RESULTADOS / "reconstruccion" / categoria / f"{categoria}_{pose}.npz"
+    ruta_xyz = rutas.reconstruccion(categoria, pose)
     for ruta, etapa in ((dir_pose, "organizar"), (ruta_rel, "fase_relativa"), (ruta_abs, "fase_absoluta")):
         if not ruta.exists():
             raise FileNotFoundError(f"No existe '{ruta}'. Ejecuta antes la etapa '{etapa}'.")

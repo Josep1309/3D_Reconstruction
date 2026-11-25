@@ -141,6 +141,18 @@
 
   <!-- ===================== VISUALIZACIÓN ===================== -->
   <main class="vista">
+    <!-- Avance de la ejecución en curso: visible desde cualquier pestaña -->
+    <section id="avance" class="avance oculto" aria-live="polite">
+      <div class="av-cab">
+        <b id="av-titulo"></b>
+        <span id="av-tiempo" class="av-tiempo"></span>
+        <button type="button" id="av-cerrar" class="av-x" data-i18n-aria="cerrar">×</button>
+      </div>
+      <progress id="av-total" max="1000" value="0"></progress>
+      <ol id="av-etapas" class="av-etapas"></ol>
+      <div class="av-paso"><span id="av-paso"></span><span id="av-detalle" class="av-detalle"></span></div>
+      <progress id="av-etapa"></progress>
+    </section>
     <div class="cabecera-pose">
       <div class="selector">
         <select id="v-categoria" data-i18n-aria="categoria"></select>
@@ -310,6 +322,21 @@
 
     <section class="panel" data-panel="archivos">
       <p class="explica" data-i18n="explica_archivos">Todas las capturas guardadas, agrupadas por proceso de captura y por configuración del montaje (cada configuración empieza en un proceso que capturó el patrón). Solo la configuración en uso se procesa y aparece en las demás pestañas. «Ver» muestra las imágenes crudas de una captura; lo que borres va a la papelera, de donde se puede recuperar hasta vaciarla.</p>
+      <details class="tarjeta im" id="im">
+        <summary><b data-i18n="im_titulo">Importar capturas de otra carpeta</b></summary>
+        <p class="nota" data-i18n="im_explica">Para procesar capturas tomadas antes o en otro equipo: indica la carpeta que tiene las subcarpetas patron, plano y objeto. Se copian al sistema como un proceso nuevo (tu carpeta no se toca), quedan como la configuración en uso y se procesan: organizar, fases, calibración si hay patrón, y reconstrucción.</p>
+        <div class="im-fila">
+          <input id="im-ruta" type="text" spellcheck="false" placeholder="/home/usuario/capturas_viejas" data-i18n-aria="im_ruta">
+          <button type="button" id="im-elegir" data-i18n="im_elegir">📁 Elegir carpeta…</button>
+          <button type="button" id="im-revisar" data-i18n="im_revisar">Revisar</button>
+        </div>
+        <div id="im-resumen" class="im-resumen"></div>
+        <div id="im-opciones" class="im-fila oculto">
+          <label class="casilla"><input id="im-procesar" type="checkbox" checked> <span data-i18n="im_procesar">Procesar todo después de importar</span></label>
+          <label class="casilla"><input id="im-mover" type="checkbox"> <span data-i18n="im_mover">Mover en vez de copiar</span></label>
+          <button type="button" id="im-importar" class="primario" data-i18n="im_importar">Importar</button>
+        </div>
+      </details>
       <div id="ar-barra" class="ar-barra"></div>
       <div id="ar-contenido" class="explorador"></div>
       <div id="ar-seleccion" class="ar-seleccion oculto" role="region" aria-live="polite">

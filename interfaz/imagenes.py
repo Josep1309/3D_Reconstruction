@@ -86,7 +86,9 @@ def cargar_npz(ruta: Path) -> _Npz:
 def _leer_ordenada(cat: str, pose: str, orient: str, indice: int) -> np.ndarray:
     import fase
 
-    return fase.leer_gris(fase.buscar_imagen_patron(cfg.DIR_ORDENADAS / cat / pose / orient / cfg.PREFIJO_ORDENADAS, indice))
+    import rutas
+
+    return fase.leer_gris(fase.buscar_imagen_patron(rutas.dir_pose_ordenada(cat, pose) / orient / cfg.PREFIJO_ORDENADAS, indice))
 
 
 FONDO = np.array([38, 34, 32], dtype=np.uint8)  # BGR de los píxeles sin dato

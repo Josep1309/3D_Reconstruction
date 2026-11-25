@@ -35,6 +35,7 @@ import numpy as np
 
 import configuracion as cfg
 import fase
+import rutas
 
 
 # ==============================================================================
@@ -441,7 +442,7 @@ def puntos_desde_fases(info: dict, dir_fases: Path = cfg.DIR_RESULTADOS / "fases
     world = generar_puntos_mundo_circulos(size, tuple(distancia) if np.ndim(distancia) else distancia, cfg.PATRON_TIPO)
     poses, cam, proj, faltan = [], [], [], []
     for nombre in info.get("poses", []):
-        ruta = dir_fases / "patron" / f"{nombre}.npz"
+        ruta = rutas.fase_absoluta("patron", nombre)  # en la carpeta de su proceso
         if not ruta.exists():
             faltan.append(nombre)
             continue
@@ -481,6 +482,9 @@ def ejecutar_calibracion_estereo(
     `poses_calibracion` (por defecto la última sesión de captura). Los errores de reproyección se
     calculan para todas, así se ve si las poses de otra sesión son coherentes con el montaje actual.
     """
+    import avance
+
+    avance.paso("Cargando las fases del patrón")
     nombres, poses = fase.cargar_fases_categoria(dir_fases, "patron")
     sesiones = sesiones_patron()
     elegidas = set(seleccionar_poses(nombres, poses_calibracion, sesiones))
@@ -550,6 +554,7 @@ def ejecutar_calibracion_estereo(
 
     # En MATLAB: NRcoef = 2, SkewFlag = 0, EstimateTangentialDistortion = true -> (k1, k2, p1, p2)
     flags_indep = cv2.CALIB_FIX_K3
+    avance.paso("Calibrando la cámara y el proyector")
     rms_cam, k_cam, dist_cam, rvecs_cam, tvecs_cam = cv2.calibrateCamera(
         obj_pts, cam_pts, cam_size_wh, None, None, flags=flags_indep
     )
@@ -560,6 +565,7 @@ def ejecutar_calibracion_estereo(
     err_proj = _errores_por_pose(obj_pts, proj_pts, k_proj, dist_proj, rvecs_proj, tvecs_proj)
 
     # 1) Línea base con intrínsecos fijos (estimateStereoBaseline en MATLAB)
+    avance.paso("Calibración estéreo (cámara + proyector)")
     rms_st, k_cam_1, dist_cam_1, k_proj_1, dist_proj_1, r_mat, t_vec, e_mat, f_mat = cv2.stereoCalibrate(
         obj_pts, cam_pts, proj_pts, k_cam.copy(), dist_cam.copy(), k_proj.copy(), dist_proj.copy(),
         cam_size_wh, flags=cv2.CALIB_FIX_INTRINSIC,
@@ -577,6 +583,7 @@ def ejecutar_calibracion_estereo(
     print(f"  Error RMS Estéreo (fijo, TSC_0_2)  : {rms_st:.4f} px")
     print(f"  Error RMS Estéreo (conjunto, _J)   : {rms_st_j:.4f} px")
     calib_tsc = _parametros(k_cam_1, dist_cam_1, k_proj_1, dist_proj_1, r_mat, t_vec, e_mat, f_mat)
+    avance.paso("Errores de reproyección por pose")
     por_pose = dict(zip(detectados, errores_reproyeccion(calib_tsc, det_cam, det_proj, world_points)))
     mediana = float(np.median([por_pose[n]["estereo_px"] for n in usados]))
     print("  Por pose (px)      cámara  proyector  estéreo   ΔR      ΔT")
@@ -618,6 +625,7 @@ def ejecutar_calibracion_estereo(
         proj_size_wh=np.array(proj_size_wh), fringe_pitch=cfg.PERIODO,
         cobertura_up=cobertura_up, cobertura_vp=cobertura_vp,
     )
+    avance.paso("Control de calidad y guardado")
     # Todo se escribe primero en el historial; se pone en uso solo si pasa el control de calidad
     historial = dir_salida / "historial" / datetime.now().strftime("%Y%m%d_%H%M%S")
     historial.mkdir(parents=True, exist_ok=True)
@@ -685,6 +693,7 @@ def ejecutar_calibracion_estereo(
     ruta_json = historial / "Estereo_TSC_0_2.json"
     ruta_json.write_text(json.dumps(resumen, indent=2), encoding="utf-8")
     guardar_puntos(historial / ARCHIVO_PUNTOS, detectados, usados, det_cam, det_proj, world_points)
+    avance.paso("Figura de diagnóstico")
     _guardar_figura_diagnostico(dir_diagnostico, texturas[0], pts_cam[0], residuos[0], usados[0])
 
     print(f"[OK] Calibración guardada en {historial} (diagnósticos en {dir_diagnostico})")
@@ -782,7 +791,7 @@ def _origen_poses(info: dict) -> list[dict]:
         d = detalle.get(nombre, {})
         salida.append({"pose": nombre, "hora": d.get("hora"), "fuente": d.get("fuente"),
                        "estereo_px": d.get("estereo_px"),
-                       "existe": (cfg.DIR_ORDENADAS / "patron" / nombre).is_dir()})
+                       "existe": rutas.dir_pose_ordenada("patron", nombre).is_dir()})
     return salida
 
 
@@ -795,6 +804,11 @@ def usar_configuracion_de(calib: dict) -> str:
         sesiones.fijar_seleccion(calib["seleccion"])
         return "la selección manual con la que se calibró"
     proceso = sesiones.proceso_de_poses("patron", calib["poses"])
+    carpeta = next((p.get("carpeta") for p in sesiones.procesos() if p["id"] == proceso), None)
+    if carpeta and rutas.leer_proceso_json(carpeta).get("importado"):
+        # Un proceso importado puede tener fecha en medio de otros: solo él, no «desde él en adelante»
+        sesiones.fijar_solo_proceso(carpeta)
+        return f"solo el proceso importado {carpeta}"
     sesiones.fijar_configuracion(proceso)
     return f"la del proceso {proceso}" if proceso else "la última"
 

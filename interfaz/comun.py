@@ -29,27 +29,24 @@ def _mtime(ruta: Path) -> float | None:
 
 
 def _archivos_pose(cat: str, pose: str) -> dict[str, Path]:
+    """Archivos de cada paso de una pose, en la carpeta de su proceso (rutas.py)."""
+    import rutas
+
     return {
-        "organizada": cfg.DIR_ORDENADAS / cat / pose / "H" / f"{cfg.PREFIJO_ORDENADAS}{cfg.IMAGENES_POR_ORIENTACION + 1:02d}.tiff",
-        "relativa": DIR_FASES / cat / f"{pose}_relativa.npz",
-        "absoluta": DIR_FASES / cat / f"{pose}.npz",
-        "reconstruida": DIR_RECONSTRUCCION / cat / f"{cat}_{pose}.npz",
+        "organizada": rutas.dir_pose_ordenada(cat, pose) / "H" / f"{cfg.PREFIJO_ORDENADAS}{cfg.IMAGENES_POR_ORIENTACION + 1:02d}.tiff",
+        "relativa": rutas.fase_relativa(cat, pose),
+        "absoluta": rutas.fase_absoluta(cat, pose),
+        "reconstruida": rutas.reconstruccion(cat, pose),
     }
 
 
 def listar_poses(cat: str) -> list[str]:
     """Poses de la categoría en la configuración vigente del montaje (sesiones.py)."""
+    import rutas
     import sesiones
 
     vigentes = sesiones.poses_vigentes(cat)
-    nombres = set()
-    for carpeta in (cfg.DIR_ORDENADAS / cat, DIR_FASES / cat):
-        if carpeta.is_dir():
-            for p in carpeta.iterdir():
-                nombre = p.name.split("_relativa")[0].removesuffix(".npz").removesuffix(".png")
-                if RE_POSE.match(nombre) and (vigentes is None or nombre in vigentes):
-                    nombres.add(nombre)
-    return sorted(nombres, key=lambda n: int(n[5:]))
+    return [p for p in rutas.poses(cat) if vigentes is None or p in vigentes]
 
 
 # ------------------------------------------------------------------ comparar resultados

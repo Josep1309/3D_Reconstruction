@@ -30,6 +30,9 @@ RE_CALIDAD = re.compile(r"^@@calidad (\{.*\})$")  # control de una pose recién 
 # «=== Calibración Estéreo Tradicional (8 poses, …» y una línea «  [pose_XX] …» por pose terminada
 RE_TOTAL = re.compile(r"^=+ *[^:(]+?(?:: '(\w+)')? \((\d+) poses")
 RE_POSE_HECHA = re.compile(r"^\s+\[pose_\d+\]")
+RE_AVANCE = re.compile(r"^@@avance (\{.*\})$")  # avance.py: paso actual y/o contador i/n
+RE_PLAN = re.compile(r"^\[PIPELINE\] Etapas: (.+)$")
+RE_ETAPA_FIN = re.compile(r"^\[PIPELINE\] '(\w+)' terminada en ([\d.]+) s")
 
 
 class Difusor:
@@ -76,6 +79,13 @@ class Ejecucion:
         self.ultimo_codigo: int | None = None
         self.meta: dict | None = None       # datos de la pregunta en curso (tipo, pose, motivos…)
         self.progreso: dict | None = None   # {"cat", "i", "n", "t0"} de la etapa en curso
+        self.partes = [0, 1]                 # [partes terminadas, total] de la etapa (categorías)
+        self.plan: list[str] = []            # etapas de esta ejecución, en orden
+        self.hechas: dict[str, float] = {}   # etapa terminada -> segundos que tardó
+        self.paso = ""                       # qué se hace ahora dentro de la etapa
+        self.t_etapa: float | None = None
+        self.fin: float | None = None
+        self.fallida: str | None = None      # etapa en la que terminó con error
         self.calidades: list[dict] = []      # control de cada pose capturada en esta ejecución
         self.ultimo_error = ""               # última línea [ERROR] (se muestra si el proceso falla)
         self.lock = threading.Lock()
@@ -90,6 +100,10 @@ class Ejecucion:
             "pregunta": self.pregunta if self.esperando else "",
             "meta": self.meta if self.esperando else None,
             "progreso": self._progreso(),
+            "plan": self.plan, "hechas": self.hechas, "paso": self.paso if self.activa else "",
+            "segundos_etapa": round(time.time() - self.t_etapa, 1) if self.t_etapa and self.activa else None,
+            "fallida": self.fallida if not self.activa else None,
+            "duracion": round(self.fin - self.inicio, 1) if self.inicio and not self.activa and self.fin else None,
             "calidades": self.calidades[-60:],
             "error": self.ultimo_error if self.ultimo_codigo not in (None, 0) else "",
             "codigo": self.ultimo_codigo,
@@ -102,7 +116,13 @@ class Ejecucion:
             return None
         transcurrido = time.time() - p["t0"]
         restante = transcurrido / p["i"] * (p["n"] - p["i"]) if p["i"] else None
-        return {"cat": p["cat"], "i": p["i"], "n": p["n"], "restante_s": round(restante) if restante is not None else None}
+        hechas, total = self.partes
+        return {"cat": p["cat"], "i": p["i"], "n": p["n"], "restante_s": round(restante) if restante is not None else None,
+                "fraccion_etapa": min((hechas + (p["i"] / p["n"] if p["n"] else 0)) / total, 1.0)}
+
+    def _marcar_hecha(self, etapa: str | None) -> None:
+        if etapa and etapa not in self.hechas and self.t_etapa:
+            self.hechas[etapa] = round(time.time() - self.t_etapa, 1)
 
     def _emitir_estado(self) -> None:
         difusor.emitir("estado", self.estado())
@@ -120,6 +140,7 @@ class Ejecucion:
             )
             self.etapa, self.esperando, self.inicio, self.ultimo_codigo = None, False, time.time(), None
             self.meta, self.progreso, self.calidades, self.ultimo_error = None, None, [], ""
+            self.plan, self.hechas, self.paso, self.t_etapa, self.fin, self.fallida = [], {}, "", None, None, None
         difusor.emitir("log", {"texto": f"\n▶ Ejecución iniciada {time.strftime('%H:%M:%S')}"})
         self._emitir_estado()
         threading.Thread(target=self._leer_salida, args=(self.proc, ruta), daemon=True).start()
@@ -153,9 +174,39 @@ class Ejecucion:
             self.calidades.append(calidad)
             difusor.emitir("calidad", calidad)
             return
+        m = RE_AVANCE.match(linea.strip())
+        if m:
+            try:
+                d = json.loads(m.group(1))
+            except json.JSONDecodeError:
+                return
+            if d.get("partes"):
+                self.partes = [0, max(int(d["partes"]), 1)]
+                return
+            if d.get("paso"):
+                self.paso = str(d["paso"])
+            if d.get("n"):
+                previo = self.progreso if self.progreso and self.progreso.get("n") == d["n"] and self.progreso["cat"] is None else None
+                self.progreso = {"cat": None, "i": int(d.get("i", 0)), "n": int(d["n"]), "t0": previo["t0"] if previo else time.time()}
+            elif d.get("paso"):
+                self.progreso = None  # paso sin contador: la barra queda «en curso»
+            self._emitir_estado()
+            return
+        m = RE_PLAN.match(linea.strip())
+        if m:
+            nuevas = [e.strip() for e in m.group(1).split("->") if e.strip()]
+            self.plan = [e for e in self.plan if e not in nuevas] + nuevas  # «importar» va antes
+            self._emitir_estado()
+        m = RE_ETAPA_FIN.match(linea.strip())
+        if m:
+            self.hechas[m.group(1)] = float(m.group(2))
         m = RE_TOTAL.match(linea.strip())
         if m:
+            if self.progreso and self.progreso.get("cat"):  # empieza otra categoría de la misma etapa
+                self.partes[0] = min(self.partes[0] + 1, self.partes[1] - 1)
             self.progreso = {"cat": (m.group(1) or "patron").lower(), "i": 0, "n": int(m.group(2)), "t0": time.time()}
+            paso = re.sub(r"\s*\(\d+ poses.*$", "", linea.strip().strip("= ")).strip()
+            self.paso = paso.capitalize().replace("3d", "3D") if paso.isupper() else paso
             self._emitir_estado()
         elif self.progreso and RE_POSE_HECHA.match(linea):
             self.progreso["i"] = min(self.progreso["i"] + 1, self.progreso["n"])
@@ -171,8 +222,11 @@ class Ejecucion:
             return
         m = re.match(r"# ETAPA: (\w+)", linea)
         if m:
+            self._marcar_hecha(self.etapa)
             self.etapa = m.group(1)
-            self.progreso = None
+            if self.etapa not in self.plan:
+                self.plan.append(self.etapa)
+            self.progreso, self.paso, self.t_etapa, self.partes = None, "", time.time(), [0, 1]
             self._emitir_estado()
         if set(linea.strip()) == {"#"}:
             return  # separadores decorativos
@@ -194,6 +248,11 @@ class Ejecucion:
             self._linea(pendiente)
         codigo = proc.wait()
         ruta_conf.unlink(missing_ok=True)
+        if codigo == 0:
+            self._marcar_hecha(self.etapa)
+        else:
+            self.fallida = self.etapa
+        self.fin = time.time()
         self.ultimo_codigo, self.esperando, self.etapa = codigo, False, None
         texto = "✔ Proceso terminado correctamente" if codigo == 0 else f"✖ Proceso terminado con código {codigo}"
         difusor.emitir("log", {"texto": f"{texto} ({time.time() - (self.inicio or time.time()):.1f} s)"})

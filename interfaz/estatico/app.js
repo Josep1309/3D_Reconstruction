@@ -157,6 +157,7 @@ function pintarEjecucion(e) {
   // Mientras la cámara está activa se muestra su pestaña (aunque «seguir» esté desactivado)
   if (capturando) mostrarPaso("camara");
   marcarEtapaEnCurso(e.ejecutando ? e.etapa : null, e.progreso);
+  pintarAvance(e);
   actualizarBotonUsar();
   if (rc.datos) pintarResumenRc();
   pintarPasos();
@@ -607,6 +608,89 @@ function construirSecuencia(etapas) {
   }
 }
 
+// ------------------------------------------------------------------ panel de avance
+// Etapas de la ejecución (✓ hechas, la actual, las que faltan), barra total, paso actual y barra
+// de la etapa (poses/capturas i de n, o «en curso» si la etapa no tiene contador).
+const av = { recibido: 0, cerrado: false, ocultar: null, ultimo: null };
+const reloj = (s) => (s < 60 ? `${Math.floor(s)} s` : `${Math.floor(s / 60)} min ${String(Math.floor(s % 60)).padStart(2, "0")} s`);
+
+function pintarAvance(e) {
+  const panel = $("#avance");
+  if (e.ejecutando && av.ultimo && !av.ultimo.ejecutando) av.cerrado = false;  // ejecución nueva
+  av.ultimo = e;
+  av.recibido = Date.now();
+  clearTimeout(av.ocultar);
+  const plan = e.plan || [];
+  const visible = plan.length > 0 && e.etapa !== "previa" && !av.cerrado;
+  panel.classList.toggle("oculto", !visible);
+  if (!visible) return;
+  const hechas = e.hechas || {};
+  const terminado = !e.ejecutando, ok = terminado && e.codigo === 0;
+  panel.classList.toggle("ok", ok);
+  panel.classList.toggle("error", terminado && !ok);
+
+  // etapas
+  const lista = $("#av-etapas");
+  lista.innerHTML = "";
+  plan.forEach((et, k) => {
+    const li = document.createElement("li");
+    const estado = et in hechas ? "hecha" : e.ejecutando && et === e.etapa ? "actual" : terminado && et === e.fallida ? "fallo" : "pendiente";
+    li.className = estado;
+    li.innerHTML = `<i></i><span></span><small></small>`;
+    $("i", li).textContent = estado === "hecha" ? "✓" : estado === "fallo" ? "✕" : String(k + 1);
+    $("span", li).textContent = nombreEtapa(et);
+    if (et in hechas) $("small", li).textContent = reloj(hechas[et]);
+    lista.appendChild(li);
+  });
+
+  // barra total: etapas hechas + fracción de la actual
+  const p = e.progreso;
+  const frac = e.ejecutando && p && p.n ? (p.fraccion_etapa ?? p.i / p.n) : 0;
+  const nHechas = plan.filter((et) => et in hechas).length;
+  $("#av-total").value = ok ? 1000 : Math.round(1000 * (nHechas + frac) / plan.length);
+
+  if (terminado) {
+    $("#av-titulo").textContent = ok ? t("av_terminado") : t("av_fallo", { etapa: nombreEtapa(e.fallida || "") });
+    $("#av-tiempo").textContent = e.duracion ? reloj(e.duracion) : "";
+    $("#av-paso").textContent = ok ? t("av_listo") : (e.error || "");
+    $("#av-detalle").textContent = "";
+    $("#av-etapa").classList.add("oculto");
+    if (ok) av.ocultar = setTimeout(() => { av.cerrado = true; panel.classList.add("oculto"); }, 20000);
+    return;
+  }
+  const k = Math.max(plan.indexOf(e.etapa), 0);
+  $("#av-titulo").textContent = e.etapa
+    ? t("av_etapa_de", { k: k + 1, n: plan.length, etapa: nombreEtapa(e.etapa) }) + (e.esperando ? ` · ${t("estado_esperando")}` : "")
+    : t("estado_iniciando");
+  $("#av-paso").textContent = e.paso || (e.etapa ? nombreEtapa(e.etapa) : "");
+  const barra = $("#av-etapa");
+  barra.classList.remove("oculto");
+  if (p && p.n) {
+    barra.max = p.n; barra.value = p.i;
+    $("#av-detalle").textContent = `${p.cat ? nombreCat(p.cat) + " · " : ""}${p.i}/${p.n}` +
+      (p.restante_s ? ` · ${t("av_restante", { t: formatoDuracion(p.restante_s) })}` : "");
+  } else {
+    barra.removeAttribute("value");  // indeterminada: la etapa avanza sin contador
+    $("#av-detalle").textContent = "";
+  }
+  tickAvance();
+}
+
+// Tiempo transcurrido, actualizado cada segundo mientras corre (el servidor solo avisa en cambios)
+function tickAvance() {
+  const e = av.ultimo;
+  if (!e?.ejecutando) return;
+  const extra = (Date.now() - av.recibido) / 1000;
+  const total = e.segundos != null ? e.segundos + extra : null, etapa = e.segundos_etapa != null ? e.segundos_etapa + extra : null;
+  $("#av-tiempo").textContent = [etapa != null ? t("av_en_etapa", { t: reloj(etapa) }) : "",
+                                 total != null ? t("av_total", { t: reloj(total) }) : ""].filter(Boolean).join(" · ");
+}
+
+function iniciarAvance() {
+  $("#av-cerrar").addEventListener("click", () => { av.cerrado = true; $("#avance").classList.add("oculto"); });
+  setInterval(tickAvance, 1000);
+}
+
 function marcarEtapaEnCurso(etapa, progreso) {
   for (const li of $$("#etapas li")) {
     const activa = li.dataset.etapa === etapa;
@@ -789,6 +873,7 @@ async function iniciar() {
   $("#a-fase").value = c.fase; $("#a-calib").value = c.calibracion; $("#a-rehacer").checked = c.rehacer;
   iniciarVisor();
   iniciarArchivos();
+  iniciarAvance();
   if (Array.isArray(c.calib_poses)) {  // lista explícita en pipeline.py
     const o = document.createElement("option");
     o.value = "lista"; o.dataset.i18n = "calib_poses_lista"; o.textContent = t("calib_poses_lista");

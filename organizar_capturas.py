@@ -49,6 +49,7 @@ import cv2
 import numpy as np
 
 import configuracion as cfg
+import rutas
 
 
 EXT_IMAGEN = {".tiff", ".tif", ".png", ".bmp", ".jpg", ".jpeg", ".pgm"}
@@ -505,6 +506,55 @@ def describir_rechazo(frames: list[np.ndarray], avisos: list[str]) -> str:
     return "; ".join(avisos) or "sin ciclos completos"
 
 
+def _poses_en_disco(dir_salida: Path, cat: str) -> list[Path]:
+    """Carpetas pose_XX de una categoría, en carpetas de proceso o en la estructura anterior."""
+    bases = [dir_salida / cat, *(p / cat for p in sorted(dir_salida.glob("*")) if p.is_dir() and rutas.es_proceso(p.name))]
+    return [p for b in bases if b.is_dir() for p in sorted(b.glob("pose_*")) if p.is_dir()]
+
+
+def escribir_origen(dir_pose: Path, entrada: dict) -> None:
+    """`origen.json` dentro de cada pose organizada: de qué captura y proceso salió (para quien
+    navega las carpetas a mano). Se le pone la fecha de las imágenes para que la caché de fases,
+    que compara fechas, no la tome como un cambio."""
+    datos = {k: entrada.get(k) for k in ("categoria", "pose", "fuente", "carpeta", "segmento", "frames_fuente",
+                                         "ciclos_promediados", "calidad", "fecha")}
+    datos["proceso"] = rutas.proceso_en_ruta(entrada.get("fuente", ""))
+    datos["hora_captura"] = (hora := _hora_fuente(entrada.get("fuente", ""))) and hora.isoformat(timespec="seconds")
+    ruta = dir_pose / "origen.json"
+    ruta.write_text(json.dumps(datos, indent=1, ensure_ascii=False), encoding="utf-8")
+    imagenes = list((dir_pose / "H").glob("*"))
+    if imagenes:
+        m = min(i.stat().st_mtime for i in imagenes)
+        os.utime(ruta, (m, m))
+
+
+def _hora_fuente(fuente: str) -> datetime | None:
+    for parte in reversed(Path(fuente).parts):
+        try:
+            return datetime.strptime(parte[:15], "%Y%m%d_%H%M%S")
+        except ValueError:
+            continue
+    return None
+
+
+def anotar_pose_en_proceso(proceso: str, categoria: str, pose: str) -> None:
+    """Agrega la pose organizada al `proceso.json` de su carpeta de proceso."""
+    import sesiones
+
+    ruta = cfg.DIR_CAPTURAS / proceso / "proceso.json"
+    with sesiones.ESCRITURA:
+        try:
+            datos = json.loads(ruta.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            datos = {"proceso": proceso}
+        lista = datos.setdefault("poses", {}).setdefault(categoria, [])
+        if pose not in lista:
+            lista.append(pose)
+            lista.sort(key=lambda n: int(n[5:]))
+        if ruta.parent.is_dir():
+            sesiones.escribir_json(ruta, datos)
+
+
 def _a_papelera_ordenadas(dir_salida: Path, categorias: Sequence[str]) -> None:
     """Mueve las poses organizadas existentes a la papelera antes de reorganizar desde cero."""
     import shutil
@@ -512,9 +562,10 @@ def _a_papelera_ordenadas(dir_salida: Path, categorias: Sequence[str]) -> None:
     destino = cfg.DATOS / "papelera" / (datetime.now().strftime("%Y%m%d_%H%M%S") + "_reorganizar")
     movidas = 0
     for cat in categorias:
-        for pose in sorted((dir_salida / cat).glob("pose_*")) if (dir_salida / cat).is_dir() else []:
-            (destino / cat).mkdir(parents=True, exist_ok=True)
-            shutil.move(str(pose), str(destino / cat / pose.name))
+        for pose in _poses_en_disco(dir_salida, cat):  # en carpetas de proceso o en la estructura anterior
+            relativa = pose.relative_to(dir_salida)
+            (destino / relativa).parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(pose), str(destino / relativa))
             movidas += 1
     if movidas:
         print(f"[INFO] {movidas} poses organizadas anteriores movidas a {destino}")
@@ -539,9 +590,7 @@ def _siguiente_pose(dir_salida: Path, categoria: str, manifiesto: dict) -> int:
     # Índices de poses borradas desde la interfaz (archivos.py): no se reutilizan, para que una pose
     # nueva nunca tome el nombre de una vieja (las calibraciones guardan los nombres de sus poses)
     usados |= set(range(int(manifiesto.get("ultimo_indice", {}).get(categoria, -1)) + 1))
-    existentes = {
-        int(p.name[5:]) for p in (dir_salida / categoria).glob("pose_*") if p.name[5:].isdigit()
-    } if (dir_salida / categoria).is_dir() else set()
+    existentes = {int(p.name[5:]) for p in _poses_en_disco(dir_salida, categoria) if p.name[5:].isdigit()}
     todos = usados | existentes
     return max(todos) + 1 if todos else 0
 
@@ -565,7 +614,7 @@ def organizar(
         # En la interfaz web stdin no es una terminal, pero las preguntas llegan como botones
         interactivo = sys.stdin.isatty() or os.environ.get("TESIS_INTERACTIVO") == "1"
     manifiesto = cargar_manifiesto(dir_salida)
-    hay_poses_previas = any((dir_salida / c).glob("pose_*") for c in cfg.CATEGORIAS if (dir_salida / c).is_dir())
+    hay_poses_previas = any(_poses_en_disco(dir_salida, c) for c in cfg.CATEGORIAS)
     if not manifiesto["poses"] and hay_poses_previas and not rehacer:
         print(
             "[INFO] Hay poses organizadas sin manifiesto (versión anterior del organizador): "
@@ -597,7 +646,10 @@ def organizar(
     print(f"[INFO] {len(fuentes)} fuentes de captura encontradas en: {', '.join(map(str, entradas))}")
 
     nuevas: dict[str, list[str]] = {}
-    for fuente in fuentes:
+    import avance
+
+    for k, fuente in enumerate(fuentes):
+        avance.contador(k, len(fuentes), f"Captura {k + 1} de {len(fuentes)}: {_ruta_relativa(fuente.ruta)}")
         firma = fuente.firma()
         if f"{firma}#0" in ya_registradas and not rehacer:
             print(f"  [=] '{_ruta_relativa(fuente.ruta)}' ya organizada, se omite.")
@@ -642,7 +694,9 @@ def organizar(
                 pose = siguiente[categoria]
                 siguiente[categoria] += 1
             nombre_pose = f"pose_{pose:02d}"
-            dir_pose = dir_salida / categoria / nombre_pose
+            # Misma carpeta de proceso que la captura cruda (capturas/<proceso>/<cat>/…)
+            proceso = rutas.proceso_en_ruta(_ruta_relativa(fuente.ruta))
+            dir_pose = (dir_salida / proceso if proceso else dir_salida) / categoria / nombre_pose
 
             estado = "SIMULADO" if simular else "OK"
             print(
@@ -690,6 +744,9 @@ def organizar(
             )
             nuevas.setdefault(categoria, []).append(nombre_pose)
             guardar_manifiesto(dir_salida, manifiesto)
+            escribir_origen(dir_pose, manifiesto["poses"][-1])
+            if proceso:
+                anotar_pose_en_proceso(proceso, categoria, nombre_pose)
 
     if not simular:
         guardar_manifiesto(dir_salida, manifiesto)

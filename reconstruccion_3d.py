@@ -35,6 +35,7 @@ import numpy as np
 
 import configuracion as cfg
 import fase
+import rutas
 import sesiones
 from calibracion_estereo import normalizar_mapa_color
 
@@ -344,19 +345,23 @@ def procesar_reconstruccion(
     salidas: dict[str, list[Path]] = {}
     for categoria in categorias:
         vigentes = sesiones.poses_vigentes(categoria)  # solo el montaje actual (sesiones.py)
-        rutas_fase = [r for r in sorted((dir_fases / categoria).glob("pose_??.npz"))
-                      if vigentes is None or r.stem in vigentes]
+        # Cada pose en la carpeta de su proceso (rutas.py); `dir_fases`/`dir_salida` quedan por compatibilidad
+        rutas_fase = [rutas.fase_absoluta(categoria, p) for p in rutas.poses(categoria)
+                      if vigentes is None or p in vigentes]
+        rutas_fase = [r for r in rutas_fase if r.exists()]
         if not rutas_fase:
-            print(f"[AVISO] No hay fases absolutas en '{dir_fases / categoria}'. Ejecuta antes 'fase_absoluta'.")
+            print(f"[AVISO] No hay fases absolutas de '{categoria}'. Ejecuta antes 'fase_absoluta'.")
             continue
-        dir_cat = dir_salida / categoria
-        dir_cat.mkdir(parents=True, exist_ok=True)
-        ruta_resumen = dir_cat / f"{categoria}_resumen.json"
+        dir_resumen = rutas.dir_resumen(categoria)  # resumen de todas las poses de la categoría
+        dir_resumen.mkdir(parents=True, exist_ok=True)
+        ruta_resumen = dir_resumen / f"{categoria}_resumen.json"
         resumen = json.loads(ruta_resumen.read_text(encoding="utf-8")) if ruta_resumen.exists() else {}
         print(f"\n================ RECONSTRUCCIÓN 3D: '{categoria.upper()}' ({len(rutas_fase)} poses) ================")
 
         for ruta_fase in rutas_fase:
             nombre = ruta_fase.stem
+            dir_cat = rutas.dir_reconstruccion(categoria, nombre)
+            dir_cat.mkdir(parents=True, exist_ok=True)
             ruta_ply = dir_cat / f"{categoria}_{nombre}.ply"
             ruta_xyz = dir_cat / f"{categoria}_{nombre}.npz"
             salidas.setdefault(categoria, []).append(ruta_ply)
@@ -411,14 +416,15 @@ def procesar_reconstruccion(
             resumen[nombre] = info
             ruta_resumen.write_text(json.dumps(resumen, indent=2), encoding="utf-8")
 
-        # Se olvidan poses que ya no existen (p. ej. si se reorganizó desde cero)
-        vigentes = {r.stem for r in rutas_fase}
-        resumen = {k: v for k, v in resumen.items() if k in vigentes}
+        # Se olvidan solo las poses que ya no existen (no las de otra configuración: al volver a ellas
+        # su resumen sigue sirviendo y la caché evita recalcularlas)
+        existentes = set(rutas.poses(categoria))
+        resumen = {k: v for k, v in resumen.items() if k in existentes}
         ruta_resumen.write_text(json.dumps(resumen, indent=2), encoding="utf-8")
         errores = [v["erms_mm"] for v in resumen.values() if v.get("erms_mm") is not None]
         if errores:
             print(f"  -> Error RMS promedio en planos: {float(np.mean(errores)):.4f} mm")
-        print(f"[OK] Resultados 3D de '{categoria}' en '{dir_cat}'")
+        print(f"[OK] Resultados 3D de '{categoria}' en la carpeta de cada proceso dentro de '{cfg.DIR_RESULTADOS}'")
     return salidas
 
 

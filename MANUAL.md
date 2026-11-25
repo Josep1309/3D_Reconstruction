@@ -191,18 +191,85 @@ Tesis/
 ├── instalar.sh, verificar.py, requirements.txt, instalacion/  ← instalación (§20)
 ├── interfaz/                 ← interfaz web (§19)
 ├── patterns/secuencia_completa_bmp/   f_00.bmp … f_49.bmp
+│   (las tres carpetas de datos se ordenan igual: una carpeta por PROCESO de captura, §4.1)
 ├── capturas/                 ← CRUDAS: el código no las modifica; solo tú desde «Archivos» (a la papelera)
-│   └── <categoria>/<AAAAMMDD_HHMMSS>/ *_frame_XXX.tiff + captura_50_frames.avi
+│   └── <AAAA-MM-DD_HHMM>/                 ← un proceso de captura
+│       ├── proceso.json                   ← plan, hora, capturas y poses que salieron de él
+│       └── <categoria>/<AAAAMMDD_HHMMSS>/ *_frame_XXX.tiff
 ├── capturas_ordenadas/       ← DERIVADAS (se pueden borrar y regenerar)
 │   ├── manifiesto.json
-│   └── <categoria>/pose_XX/{H,V}/P18_F00 … P18_F25.tiff
+│   └── <AAAA-MM-DD_HHMM>/<categoria>/pose_XX/{H,V}/P18_F00 … P18_F25.tiff + origen.json
 ├── resultados/               ← DERIVADOS
-│   ├── fases/<categoria>/pose_XX_relativa.npz|.png, pose_XX.npz|.png
-│   ├── calibracion/patron_PhasesData.npz, diagnóstico (no versionado)
-│   ├── reconstruccion/<categoria>/<cat>_pose_XX.ply|.npz, <cat>_resumen.json, figuras
-│   └── visualizacion/*.png
+│   ├── <AAAA-MM-DD_HHMM>/fases/<categoria>/pose_XX_relativa.npz|.png, pose_XX.npz|.png
+│   ├── <AAAA-MM-DD_HHMM>/reconstruccion/<categoria>/<cat>_pose_XX.ply|.npz, figura
+│   ├── reconstruccion/<categoria>/<cat>_resumen.json   ← resumen de todas las poses
+│   ├── calibracion/ comparaciones/ visualizacion/     ← lo que no es de una pose
+│   └── …
 └── Matlab_Codes/             ← código original de referencia (no se ejecuta)
 ```
+
+### 4.1 Una carpeta por proceso de captura
+
+Cada vez que capturas (un **proceso**: por ejemplo patrón × 8, plano × 3 y objeto × 1), todo va a
+una carpeta con su fecha y hora de inicio, `AAAA-MM-DD_HHMM`. Esa misma carpeta existe en
+`capturas/`, `capturas_ordenadas/` y `resultados/`. Para encontrar las poses de un día, se abre esa
+carpeta en cualquiera de las tres.
+
+- `capturas/<proceso>/proceso.json`: inicio y fin, plan, capturas por categoría y las poses
+  organizadas que salieron de ellas.
+- `capturas_ordenadas/<proceso>/<cat>/pose_XX/origen.json`: de qué captura y proceso salió cada pose.
+- Los **nombres de pose** (`pose_23`) siguen siendo únicos dentro de su categoría en todo el
+  sistema: las calibraciones, notas y selecciones los usan.
+- La carpeta del proceso es solo dónde están: el módulo `rutas.py` la lee del manifiesto. Todo el
+  sistema la usa, también la interfaz.
+- Lo que no es de una pose queda fuera de las carpetas de proceso: calibraciones, comparaciones,
+  resumen por categoría.
+
+**Datos con la estructura anterior** (`capturas/<cat>/…`, sin carpeta de proceso): siguen
+funcionando. Para pasarlos a la nueva estructura, usa `migrar_por_proceso.py`:
+
+```bash
+.env/bin/python migrar_por_proceso.py              # modo de prueba: muestra qué movería
+.env/bin/python migrar_por_proceso.py --aplicar    # lo hace
+.env/bin/python migrar_por_proceso.py --deshacer respaldo_migracion_<fecha>
+```
+
+- Agrupa los procesos igual que la pestaña Archivos.
+- Solo **mueve** carpetas (renombra, en el mismo disco): no modifica ninguna imagen y conserva las
+  fechas, así que no hay que recalcular nada.
+- Actualiza el manifiesto (rutas y firmas) y escribe `proceso.json` y `origen.json`.
+- Deja en `<DATOS>/respaldo_migracion_<fecha>/` el manifiesto, el registro y la lista de
+  movimientos, para poder deshacerlo.
+
+### 4.2 Importar capturas tomadas antes o en otro equipo
+
+Si tienes una carpeta con subcarpetas `patron/`, `plano/` y `objeto/` (no hace falta que estén las tres):
+
+- **Interfaz:** pestaña Archivos → *Importar capturas de otra carpeta*.
+  1. Pulsa **📁 Elegir carpeta…** para buscarla en la ventana del sistema, o escribe la ruta y
+     pulsa *Revisar*. La ventana se abre en el equipo donde corre el servidor y puede quedar detrás
+     del navegador. Desde otro equipo de la red hay que escribir la ruta.
+  2. Revisa lo que encontró (todavía no se copia nada) y pulsa *Importar*.
+- **Terminal:**
+  ```bash
+  .env/bin/python importar.py /ruta/carpeta                       # muestra qué importaría
+  .env/bin/python importar.py /ruta/carpeta --aplicar --procesar  # importa y procesa todo
+  ```
+
+Qué hace:
+
+- **Copia** las capturas como un proceso nuevo, `capturas/<fecha>/…`, con su `proceso.json`. Tu
+  carpeta no se toca, salvo con *Mover en vez de copiar* o `--mover`.
+- Dentro de cada categoría, cada captura puede ser una subcarpeta con imágenes, un video o, si no
+  hay subcarpetas, las imágenes sueltas (una sola captura).
+- También reconoce nombres como `pattern`, `calib`, `plane` u `object`, e ignora las carpetas que
+  no reconoce.
+- La fecha del proceso sale del nombre de las capturas (`AAAAMMDD_HHMMSS`) o de la fecha de sus
+  archivos.
+- Omite las capturas que ya están en el sistema, así que importar dos veces no duplica nada.
+- Deja como configuración en uso **solo ese proceso** y lo procesa: organizar, fases, calibración
+  (si trae patrón) y reconstrucción.
+- Si no trae patrón, reconstruye con la calibración en uso, que debe ser del mismo montaje.
 
 **Categorías de captura:**
 
@@ -1109,28 +1176,33 @@ No se portaron las calibraciones híbridas ni la recalibración (`HybridCalibCod
 
 ## 18. Referencia de archivos de salida
 
+En esta tabla, `<P>` es la carpeta del proceso de captura (`AAAA-MM-DD_HHMM`, §4.1).
+
 | Archivo | Contenido | Lo genera |
 |---|---|---|
-| `capturas/<cat>/<fecha>/*.tiff, *.avi` | Frames crudos | `captura` |
-| `capturas_ordenadas/manifiesto.json` | Origen y calidad de cada pose | `organizar` |
-| `capturas_ordenadas/<cat>/pose_XX/{H,V}/P18_FYY.tiff` | 26 imágenes por orientación | `organizar` |
-| `resultados/fases/<cat>/pose_XX_relativa.npz` | `phiX/Y, AX/Y, BX/Y, qX/Y` | `fase_relativa` |
-| `resultados/fases/<cat>/pose_XX.npz` | `Fx, Fy, up, vp, kX, kY, qFx, qFy, BX, BY, Itex, MaskX/Y/C` | `fase_absoluta` |
+| `capturas/<P>/<cat>/<fecha>/*.tiff` | Frames crudos | `captura` |
+| `capturas/<P>/proceso.json` | Plan, horas, capturas y poses del proceso | `captura`, `organizar` |
+| `capturas_ordenadas/manifiesto.json` | Origen, carpeta y calidad de cada pose | `organizar` |
+| `capturas_ordenadas/<P>/<cat>/pose_XX/{H,V}/P18_FYY.tiff` | 26 imágenes por orientación | `organizar` |
+| `capturas_ordenadas/<P>/<cat>/pose_XX/origen.json` | De qué captura y proceso salió la pose | `organizar` |
+| `resultados/<P>/fases/<cat>/pose_XX_relativa.npz` | `phiX/Y, AX/Y, BX/Y, qX/Y` | `fase_relativa` |
+| `resultados/<P>/fases/<cat>/pose_XX.npz` | `Fx, Fy, up, vp, kX, kY, qFx, qFy, BX, BY, Itex, MaskX/Y/C` | `fase_absoluta` |
 | `calibraciones/Estereo_TSC_0_2.npz` | Calibración (intrínsecos fijos) — versionada | `calibracion` |
 | `calibraciones/Estereo_TSC_0_2_J.npz` | Calibración conjunta — versionada | `calibracion` |
 | `calibraciones/Estereo_TSC_0_2.json` | Resumen legible — versionado | `calibracion` |
 | `calibraciones/historial/<fecha>/` | Copia de cada calibración anterior | `calibracion` |
 | `resultados/calibracion/patron_PhasesData.npz` | Correspondencias del tablero | `calibracion` |
-| `resultados/reconstruccion/<cat>/<cat>_pose_XX.ply` | Nube de puntos | `reconstruccion` |
-| `resultados/reconstruccion/<cat>/<cat>_pose_XX.npz` | `X, Y, Z, Mask` (y `E` en planos) | `reconstruccion` |
-| `resultados/reconstruccion/<cat>/<cat>_resumen.json` | Estadísticas por pose, `erms_mm` | `reconstruccion` |
+| `resultados/<P>/reconstruccion/<cat>/<cat>_pose_XX.ply` | Nube de puntos | `reconstruccion` |
+| `resultados/<P>/reconstruccion/<cat>/<cat>_pose_XX.npz` | `X, Y, Z, Mask` (y `E` en planos) | `reconstruccion` |
+| `resultados/reconstruccion/<cat>/<cat>_resumen.json` | Estadísticas de todas las poses, `erms_mm` | `reconstruccion` |
 | `resultados/visualizacion/*.png` | Figuras del proceso y 3D | `visualizacion` |
 
 Para leer un `.npz` en Python:
 
 ```python
 import numpy as np
-d = np.load("resultados/reconstruccion/objeto/objeto_pose_00.npz")
+d = np.load("resultados/2026-11-24_1302/reconstruccion/objeto/objeto_pose_06.npz")
+# o, sin saber en qué proceso está:  import rutas; d = np.load(rutas.reconstruccion("objeto", "pose_06"))
 Z = d["Z"]                   # mapa de profundidad (mm), NaN donde no hay medida
 ```
 
@@ -1201,6 +1273,21 @@ está escrito en WebGL puro, así que funciona sin internet.
   del proyector.
 
 ### 19.2 Visualización (derecha)
+
+**Panel de avance:** mientras algo se ejecuta, arriba de la vista aparece un panel que se queda
+fijo al bajar por la página, en cualquier pestaña. Esto incluye capturar, recalibrar con capturas
+elegidas, importar y el proceso por etapas. El panel muestra:
+
+- todas las etapas de esa ejecución: ✓ las terminadas, con su duración, y la actual resaltada;
+- una barra con el avance total;
+- qué se está haciendo ahora, por ejemplo «Calibrando la cámara y el proyector» o «Reconstrucción
+  3D: 'plano'»;
+- una barra de la etapa con poses o capturas «i/n» y el tiempo restante estimado. Si el paso no
+  se puede contar, la barra queda en movimiento;
+- el tiempo de la etapa y el total.
+
+Al terminar, el panel indica si todo salió bien (se oculta a los 20 s) o en qué etapa se detuvo.
+Se cierra con ×.
 
 Seis pestañas de pasos y tres aparte: **Sistema** (estado del equipo, lista de comprobación antes
 de medir y espacio en disco), **Archivos** y **Calibración**. Arriba a la derecha están el

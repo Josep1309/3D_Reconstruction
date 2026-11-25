@@ -277,15 +277,35 @@ def _al_detener(_senal, _marco) -> None:
     raise KeyboardInterrupt
 
 
+def importar_y_elegir(opciones: dict) -> None:
+    """Importa una carpeta de capturas como proceso nuevo y lo deja como configuración en uso, para
+    que las etapas siguientes procesen exactamente esas capturas (pestaña Archivos → Importar)."""
+    import importar
+    import sesiones
+
+    print("# ETAPA: importar", flush=True)
+    print(f"[INFO] Importando {opciones['ruta']}", flush=True)
+    try:
+        res = importar.importar(opciones["ruta"], opciones.get("nombre") or None, bool(opciones.get("mover")))
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"[ERROR] No se pudo importar: {exc}") from None
+    # Solo este proceso: sus capturas pueden ser de fechas en medio de otros procesos
+    sesiones.fijar_solo_proceso(res["proceso"])
+    print(f"[PIPELINE] Configuración en uso: solo el proceso importado {res['proceso']}", flush=True)
+
+
 def main() -> None:
     signal.signal(signal.SIGTERM, _al_detener)
     builtins.input = _input_marcado
+    os.environ["TESIS_MARCAS_AVANCE"] = "1"  # avance.py: marcas @@avance para la barra de progreso
     os.environ["TESIS_INTERACTIVO"] = "1"  # organizar puede preguntar (la interfaz muestra botones)
     conf = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     if conf.get("solo_previa"):
         solo_vista_previa(conf)
         return
     try:
+        if conf.get("importar"):
+            importar_y_elegir(conf["importar"])
         configurar(conf)
         pipeline.main()
     except SystemExit as exc:

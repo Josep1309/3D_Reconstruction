@@ -26,6 +26,8 @@ from typing import Sequence
 import cv2
 import numpy as np
 
+import rutas
+
 
 EXTENSIONES_IMAGEN = (".tiff", ".tif", ".png", ".bmp", ".jpg", ".jpeg")
 
@@ -269,21 +271,25 @@ def mascara_valida(
 # ==============================================================================
 
 
-def listar_poses(directorio_categoria: Path) -> list[Path]:
-    """Carpetas `pose_XX` de una categoría organizada, en orden.
+def listar_poses(categoria: str | Path) -> list[Path]:
+    """Carpetas `pose_XX` de una categoría organizada, en orden, donde estén (`rutas.py`: en la
+    carpeta de su proceso o en la estructura anterior).
 
     Solo las de la configuración vigente del montaje (`sesiones.py`), salvo que
-    `SOLO_CONFIGURACION_ACTUAL = False`.
+    `SOLO_CONFIGURACION_ACTUAL = False`. Acepta también la ruta de la categoría (uso anterior).
     """
+    import rutas
     import sesiones
 
-    if not directorio_categoria.is_dir():
-        return []
-    vigentes = sesiones.poses_vigentes(directorio_categoria.name)
-    return sorted(
-        p for p in directorio_categoria.iterdir()
-        if p.is_dir() and p.name.startswith("pose_") and (vigentes is None or p.name in vigentes)
-    )
+    cat = categoria.name if isinstance(categoria, Path) else categoria
+    vigentes = sesiones.poses_vigentes(cat)
+    dirs = [rutas.dir_pose_ordenada(cat, p) for p in rutas.poses(cat) if vigentes is None or p in vigentes]
+    return [d for d in dirs if d.is_dir()]
+
+
+def _imagenes_pose(dir_pose: Path) -> list[Path]:
+    """Lo que, si cambia, obliga a recalcular la fase: las imágenes H/ y V/ (no origen.json)."""
+    return [dir_pose / "H", dir_pose / "V"]
 
 
 def _firma_guardada(ruta: Path) -> str | None:
@@ -369,16 +375,16 @@ def etapa_fase_relativa(
     firma = firma_relativa(n_step, suavizado)
     generados = []
     for categoria in categorias:
-        poses = listar_poses(dir_ordenadas / categoria)
+        poses = listar_poses(categoria)
         if not poses:
-            print(f"[AVISO] No hay poses organizadas en '{dir_ordenadas / categoria}', se omite.")
+            print(f"[AVISO] No hay poses organizadas de '{categoria}', se omite.")
             continue
         print(f"\n=== Fase relativa: '{categoria}' ({len(poses)} poses) ===")
         pendientes = []
         for dir_pose in poses:
-            ruta = dir_salida / categoria / f"{dir_pose.name}_relativa.npz"
+            ruta = rutas.fase_relativa(categoria, dir_pose.name)  # en la carpeta de su proceso
             generados.append(ruta)
-            if not rehacer and _actualizado(ruta, [dir_pose], firma):
+            if not rehacer and _actualizado(ruta, _imagenes_pose(dir_pose), firma):
                 print(f"  [{dir_pose.name}] sin cambios, se reutiliza '{ruta.name}'")
             else:
                 pendientes.append((dir_pose, ruta))
@@ -477,23 +483,23 @@ def etapa_fase_absoluta(
     gamma_th_y = gamma_th if gamma_th_y is None else gamma_th_y
     generados = []
     for categoria in categorias:
-        poses = listar_poses(dir_ordenadas / categoria)
+        poses = listar_poses(categoria)
         if not poses:
-            print(f"[AVISO] No hay poses organizadas en '{dir_ordenadas / categoria}', se omite.")
+            print(f"[AVISO] No hay poses organizadas de '{categoria}', se omite.")
             continue
         print(f"\n=== Fase absoluta: '{categoria}' ({len(poses)} poses) ===")
         firma = firma_absoluta(fringe_pitch, n_bits, gamma_th, gamma_th_y, med_filt_size, orden_bits,
                                umbral_intensidad, borde)
         pendientes = []
         for dir_pose in poses:
-            ruta_rel = dir_salida / categoria / f"{dir_pose.name}_relativa.npz"
+            ruta_rel = rutas.fase_relativa(categoria, dir_pose.name)
             if not ruta_rel.exists():
                 raise FileNotFoundError(
                     f"Falta '{ruta_rel}'. Ejecuta antes la etapa 'fase_relativa'."
                 )
-            ruta = dir_salida / categoria / f"{dir_pose.name}.npz"
+            ruta = rutas.fase_absoluta(categoria, dir_pose.name)
             generados.append(ruta)
-            if not rehacer and _actualizado(ruta, [dir_pose, ruta_rel], firma):
+            if not rehacer and _actualizado(ruta, [*_imagenes_pose(dir_pose), ruta_rel], firma):
                 print(f"  [{dir_pose.name}] sin cambios, se reutiliza '{ruta.name}'")
             else:
                 pendientes.append((dir_pose, ruta_rel, ruta))
@@ -594,14 +600,14 @@ def cargar_fases_pose(ruta: Path) -> dict[str, np.ndarray]:
 
 
 def cargar_fases_categoria(dir_fases: Path, categoria: str) -> tuple[list[str], list[dict[str, np.ndarray]]]:
-    """Carga los `pose_XX.npz` (fase absoluta) de una categoría (de la configuración vigente)."""
+    """Carga los `pose_XX.npz` (fase absoluta) de una categoría (de la configuración vigente),
+    estén en la carpeta de su proceso o en la estructura anterior. `dir_fases` se ignora: queda
+    por compatibilidad."""
     import sesiones
 
     vigentes = sesiones.poses_vigentes(categoria)
-    rutas = [r for r in sorted((dir_fases / categoria).glob("pose_??.npz"))
-             if vigentes is None or r.stem in vigentes]
-    if not rutas:
-        raise FileNotFoundError(
-            f"No hay fases absolutas en '{dir_fases / categoria}'. Ejecuta antes 'fase_absoluta'."
-        )
-    return [r.stem for r in rutas], [cargar_fases_pose(r) for r in rutas]
+    archivos = [rutas.fase_absoluta(categoria, p) for p in rutas.poses(categoria) if vigentes is None or p in vigentes]
+    archivos = [r for r in archivos if r.exists()]
+    if not archivos:
+        raise FileNotFoundError(f"No hay fases absolutas de '{categoria}'. Ejecuta antes 'fase_absoluta'.")
+    return [r.stem for r in archivos], [cargar_fases_pose(r) for r in archivos]

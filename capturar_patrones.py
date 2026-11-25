@@ -361,10 +361,59 @@ def _a_papelera(carpeta: Path) -> None:
     """Una pose descartada no se borra: va a <DATOS>/papelera/ (recuperable)."""
     import shutil
 
-    destino = cfg.DATOS / "papelera" / (datetime.now().strftime("%Y%m%d_%H%M%S") + "_repetida") / "capturas" / carpeta.parent.name
-    destino.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(carpeta), str(destino / carpeta.name))
+    lote = cfg.DATOS / "papelera" / (datetime.now().strftime("%Y%m%d_%H%M%S") + "_repetida")
+    try:  # misma ruta relativa que en los datos (capturas/<proceso>/<cat>/…), para poder restaurarla
+        destino = lote / carpeta.resolve().relative_to(cfg.DATOS.resolve())
+    except ValueError:
+        destino = lote / "capturas" / carpeta.parent.name / carpeta.name
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(carpeta), str(destino))
     print(f"    [OK] Pose descartada: {carpeta.name} movida a la papelera")
+
+
+def nuevo_proceso(plan: list[tuple[str, int]], salida: Path = cfg.DIR_CAPTURAS) -> Path:
+    """Crea la carpeta de un proceso de captura (`capturas/AAAA-MM-DD_HHMM/`) con su `proceso.json`.
+
+    Todas las poses del proceso (patrón, plano, objeto) se guardan dentro, en una subcarpeta por
+    categoría: así se encuentran juntas al buscar a mano. Ver rutas.py."""
+    import rutas
+
+    nombre = rutas.nombre_proceso(datetime.now())
+    carpeta = salida / nombre
+    carpeta.mkdir(parents=True, exist_ok=False)
+    datos = {"proceso": nombre, "inicio": datetime.now().isoformat(timespec="seconds"),
+             "plan": {c: n for c, n in plan}, "capturas": {}, "poses": {}}
+    (carpeta / "proceso.json").write_text(json.dumps(datos, indent=1, ensure_ascii=False), encoding="utf-8")
+    return carpeta
+
+
+def cerrar_proceso(carpeta: Path, capturas: list[Path]) -> None:
+    """Completa el `proceso.json` al terminar: hora de fin y capturas guardadas por categoría
+    (las poses organizadas las agrega `organizar`)."""
+    import sesiones
+
+    ruta = carpeta / "proceso.json"
+    with sesiones.ESCRITURA:
+        try:
+            datos = json.loads(ruta.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            datos = {"proceso": carpeta.name}
+        datos["fin"] = datetime.now().isoformat(timespec="seconds")
+        por_cat: dict[str, list[str]] = {}
+        for c in capturas:
+            if c.exists():
+                por_cat.setdefault(c.parent.name, []).append(c.name)
+        datos["capturas"] = por_cat
+        sesiones.escribir_json(ruta, datos)
+    if not capturas and not any(p for p in carpeta.iterdir() if p.name != "proceso.json"):
+        shutil_rmtree_seguro(carpeta)  # proceso sin ninguna captura: no deja carpetas vacías
+
+
+def shutil_rmtree_seguro(carpeta: Path) -> None:
+    import shutil
+
+    if carpeta.is_dir() and carpeta.resolve().parent == cfg.DIR_CAPTURAS.resolve():
+        shutil.rmtree(carpeta)
 
 
 def capturar_poses(
@@ -469,7 +518,13 @@ def main() -> None:
     parser.add_argument("--salida", type=Path, default=cfg.DIR_CAPTURAS)
     parser.add_argument("--sin-pausa", action="store_true", help="No esperar Enter entre poses")
     args = parser.parse_args()
-    carpetas = capturar_poses(args.categoria, args.poses, args.ciclos, args.salida, not args.sin_pausa)
+    proceso = nuevo_proceso([(args.categoria, args.poses)], args.salida)
+    carpetas = []
+    try:
+        carpetas = capturar_poses(args.categoria, args.poses, args.ciclos, proceso, not args.sin_pausa)
+    finally:
+        cerrar_proceso(proceso, carpetas)
+    print(f"[OK] Proceso de captura: {proceso}")
     print(f"\nAdquisición terminada: {len(carpetas)} poses guardadas.")
 
 

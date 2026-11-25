@@ -136,25 +136,23 @@ def capturas(dir_capturas: Path | None = None, dir_ordenadas: Path | None = None
         cal = e.get("calidad") or {}
         if "pureza_H" in cal:
             pureza_de[clave] = min(pureza_de.get(clave, 1.0), cal["pureza_H"], cal["pureza_V"])
+    import rutas
+
     items: dict[str, dict] = {}
-    for cat in cfg.CATEGORIAS:
-        carpeta_cat = dir_capturas / cat
-        if not carpeta_cat.is_dir():
-            continue
-        for p in carpeta_cat.iterdir():
-            if p.name.startswith("."):
-                continue
-            clave = f"{cat}/{p.name}"
-            hora = hora_de_carpeta(p.name) or datetime.fromtimestamp(p.stat().st_mtime)
-            items[clave] = {"cat": cat, "carpeta": clave, "hora": hora, "existe": True,
-                            "poses": sorted(poses_de.get(clave, [])), "rechazo": rechazo_de.get(clave),
-                            "pureza": pureza_de.get(clave)}
+    # capturas/<proceso>/<cat>/<captura> (estructura actual) y capturas/<cat>/<captura> (anterior)
+    for cat, nombre, p, proceso_dir in rutas.capturas_en_disco():
+        clave = f"{cat}/{nombre}"
+        hora = hora_de_carpeta(nombre) or datetime.fromtimestamp(p.stat().st_mtime)
+        items[clave] = {"cat": cat, "carpeta": clave, "hora": hora, "existe": True,
+                        "poses": sorted(poses_de.get(clave, [])), "rechazo": rechazo_de.get(clave),
+                        "pureza": pureza_de.get(clave), "proceso_dir": proceso_dir}
     for clave, poses in poses_de.items():
         if clave not in items:
             cat = clave.split("/")[0]
             hora = hora_de_carpeta(clave)
             if hora is not None and cat in cfg.CATEGORIAS:
-                items[clave] = {"cat": cat, "carpeta": clave, "hora": hora, "existe": False, "poses": sorted(poses)}
+                items[clave] = {"cat": cat, "carpeta": clave, "hora": hora, "existe": False, "poses": sorted(poses),
+                                "proceso_dir": rutas.proceso_de_pose(cat, sorted(poses)[0])}
     return sorted(items.values(), key=lambda i: (i["hora"], i["carpeta"]))
 
 
@@ -167,17 +165,22 @@ def procesos(dir_capturas: Path | None = None, dir_ordenadas: Path | None = None
         for carpeta in entrada.get("carpetas", []):
             proceso_de[carpeta] = i
     registrados: dict[int, list[dict]] = {}
+    por_carpeta: dict[str, list[dict]] = {}
     sueltos: list[dict] = []
     for item in capturas(dir_capturas, dir_ordenadas):
+        if item.get("proceso_dir"):  # estructura actual: la carpeta del proceso manda
+            por_carpeta.setdefault(item["proceso_dir"], []).append(item)
+            continue
         i = proceso_de.get(item["carpeta"])
         (registrados.setdefault(i, []) if i is not None else sueltos).append(item)
     grupos = [(items, True) for items in registrados.values()]
+    grupos += [(items, True) for items in por_carpeta.values()]
     actual: list[dict] = []
     for item in sueltos:  # sin registro: una pausa larga separa procesos...
         if actual:
             pausa = (item["hora"] - actual[-1]["hora"]).total_seconds()
             # ...salvo que siga capturándose el patrón: el orden de un proceso es patrón → plano → objeto
-            sigue_patron = actual[-1]["cat"] == item["cat"] == "patron" and pausa < cfg.HORAS_ENTRE_SESIONES * 3600
+            sigue_patron = actual[-1]["cat"] == item["cat"] == "patron" and pausa < cfg.MINUTOS_CONTINUACION_PATRON * 60
             if pausa > cfg.MINUTOS_ENTRE_PROCESOS * 60 and not sigue_patron:
                 grupos.append((actual, False))
                 actual = []
@@ -190,7 +193,7 @@ def procesos(dir_capturas: Path | None = None, dir_ordenadas: Path | None = None
         inicio = items[0]["hora"]
         salida.append({"id": inicio.isoformat(timespec="seconds"), "inicio": inicio, "fin": items[-1]["hora"],
                        "items": items, "patron": any(x["cat"] == "patron" for x in items),
-                       "registrado": registrado})
+                       "registrado": registrado, "carpeta": items[0].get("proceso_dir")})
     return sorted(salida, key=lambda p: p["inicio"])
 
 
@@ -214,6 +217,14 @@ def fijar_seleccion(seleccion: dict[str, list[str]]) -> None:
     _cache.clear()
 
 
+def fijar_solo_proceso(carpeta: str) -> None:
+    """Configuración = exactamente las capturas de una carpeta de proceso (p. ej. una importación),
+    sin sumar los procesos siguientes. Sus poses se toman del manifiesto al momento de usarlas, así
+    que sirve antes de organizar."""
+    _escribir_json(ELEGIDA, {"solo_proceso": carpeta})
+    _cache.clear()
+
+
 def seleccion_manual() -> dict[str, list[str]] | None:
     """La selección manual en uso, o None si la configuración es por procesos."""
     return _leer_json(ELEGIDA, {}).get("seleccion")
@@ -230,8 +241,12 @@ def configuraciones(lista: list[dict] | None = None) -> list[tuple[int, int]]:
 
 def _clave_cache() -> tuple:
     marcas = []
-    for ruta in (cfg.DIR_ORDENADAS / "manifiesto.json", REGISTRO, ELEGIDA,
-                 *(cfg.DIR_CAPTURAS / c for c in cfg.CATEGORIAS)):
+    carpetas = [cfg.DIR_CAPTURAS, *(cfg.DIR_CAPTURAS / c for c in cfg.CATEGORIAS)]
+    if cfg.DIR_CAPTURAS.is_dir():  # carpetas de proceso y sus categorías
+        for p in cfg.DIR_CAPTURAS.iterdir():
+            if p.is_dir() and p.name[:1].isdigit():
+                carpetas += [p, *(p / c for c in cfg.CATEGORIAS)]
+    for ruta in (cfg.DIR_ORDENADAS / "manifiesto.json", REGISTRO, ELEGIDA, *carpetas):
         try:
             marcas.append(ruta.stat().st_mtime_ns)
         except OSError:
@@ -250,7 +265,15 @@ def configuracion_vigente() -> dict | None:
         resultado = None
         rangos = configuraciones(lista)
         manual = seleccion_manual()
-        if manual and lista:
+        solo = _leer_json(ELEGIDA, {}).get("solo_proceso")
+        if solo and lista:
+            items = [it for p in lista if p.get("carpeta") == solo for it in p["items"]]
+            manual = {c: [pose for it in items if it["cat"] == c for pose in it["poses"]] for c in cfg.CATEGORIAS}
+            resultado = _vigente_manual(lista, manual)
+            resultado["carpetas"] |= {it["carpeta"] for it in items}
+            resultado["proceso"] = next((p["id"] for p in lista if p.get("carpeta") == solo), "solo_proceso")
+            resultado["manual"] = False
+        elif manual and lista:
             resultado = _vigente_manual(lista, manual)
         elif rangos:
             elegida = _leer_json(ELEGIDA, {}).get("proceso")
