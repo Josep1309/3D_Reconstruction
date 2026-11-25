@@ -231,13 +231,10 @@ class Manejador(BaseHTTPRequestHandler):
                 except FileNotFoundError as exc:
                     return self._error(404, str(exc))
                 # Se ven y procesan las poses de la configuración de la que salió esa calibración
-                import sesiones
-
-                proceso = sesiones.proceso_de_poses("patron", elegida["poses"])
-                sesiones.fijar_configuracion(proceso)
-                difusor.emitir("log", {"texto": f"[OK] Calibración en uso: {ident}. Configuración vigente: la "
-                                                f"del proceso {proceso or '(última)'}. Las poses se "
-                                                f"reconstruirán con ella en la próxima ejecución."})
+                descripcion = ce.usar_configuracion_de(elegida)
+                difusor.emitir("log", {"texto": f"[OK] Calibración en uso: {ident}. Configuración vigente: "
+                                                f"{descripcion}. Las poses se reconstruirán con ella en la próxima "
+                                                f"ejecución."})
                 return self._json(elegida)
             if url.path == "/api/entrada":
                 ejecucion.entrada(str(self._cuerpo().get("texto", "")))

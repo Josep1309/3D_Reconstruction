@@ -599,3 +599,21 @@ a.boton:hover { border-color: var(--texto-2); }
 #cmp-fig img { aspect-ratio: 5 / 4; }
 #cmp-ref { width: auto; max-width: 420px; }
 @media (max-width: 860px) { .cmp-cuerpo { grid-template-columns: 1fr; } }
+
+/* ---------- Recalibrar con capturas elegidas ---------- */
+.rc > summary { cursor: pointer; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.rc > summary small { color: var(--texto-2); }
+.rc-grupos { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 14px; margin: 10px 0; }
+.rc-cat h4 { margin: 0 0 6px; font-size: 13px; }
+.rc-proceso { border: 1px solid var(--borde); border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; }
+.rc-cab { font-size: 12.5px; }
+.rc-cab small { color: var(--texto-2); }
+.rc-poses { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.rc-pose { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--borde); border-radius: 6px; font-size: 11.5px; cursor: pointer; position: relative; }
+.rc-pose img { width: 64px; height: 51px; object-fit: cover; border-radius: 4px; background: var(--lienzo); }
+.rc-pose input { position: absolute; top: 4px; left: 4px; margin: 0; }
+.rc-pose.sel { border-color: var(--acento); background: color-mix(in srgb, var(--acento) 10%, transparent); }
+.rc-pose.dudosa span { color: var(--aviso); font-weight: 600; }
+.rc-pie { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.rc-pie span { flex: 1; font-size: 13px; }
+.rc-pie span.aviso { color: var(--aviso); }

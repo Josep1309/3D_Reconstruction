@@ -473,6 +473,7 @@ def ejecutar_calibracion_estereo(
     dir_diagnostico: Path = cfg.DIR_RESULTADOS / "calibracion",
     poses_calibracion: str | list[str] = cfg.CALIBRACION_POSES,
     forzar: bool = False,
+    seleccion: dict | None = None,
 ) -> dict:
     """Ejecuta el flujo de `Traditional_StereoCalib.m` sobre las fases del patrón de calibración.
 
@@ -662,6 +663,8 @@ def ejecutar_calibracion_estereo(
         "rms_stereo_indep_px": float(rms_st),
         "rms_stereo_joint_px": float(rms_st_j),
         "poses_criterio": poses_calibracion,
+        # Si se calibró con una selección manual de poses, se recuerda para volver a ella al activarla
+        **({"seleccion": seleccion} if seleccion else {}),
         "error_por_pose_cam_px": dict(zip(usados, map(float, err_cam))),
         "error_por_pose_proj_px": dict(zip(usados, map(float, err_proj))),
         "errores_por_pose": {n: {**por_pose[n], "usada": n in usados, **sesiones.get(n, {})} for n in detectados},
@@ -762,6 +765,7 @@ def listar_calibraciones(dir_calibracion: Path = cfg.DIR_CALIBRACION) -> list[di
             "rms_stereo_px": info.get("rms_stereo_indep_px"),
             "linea_base_mm": info.get("linea_base_mm"),
             "poses_info": _origen_poses(info),
+            "seleccion": info.get("seleccion"),
             "control": info.get("control_calidad") or {"aprobada": not control_calidad(info), "motivos": control_calidad(info)},
             "activa": contenido_activo is not None and (carpeta / "Estereo_TSC_0_2.npz").read_bytes() == contenido_activo
                       and (json_activo is None or not (carpeta / "Estereo_TSC_0_2.json").exists()
@@ -780,6 +784,19 @@ def _origen_poses(info: dict) -> list[dict]:
                        "estereo_px": d.get("estereo_px"),
                        "existe": (cfg.DIR_ORDENADAS / "patron" / nombre).is_dir()})
     return salida
+
+
+def usar_configuracion_de(calib: dict) -> str:
+    """Pone en uso la configuración de la que salió una calibración: su selección manual de poses,
+    si se calibró así, o el proceso de captura de sus poses del patrón. Devuelve una descripción."""
+    import sesiones
+
+    if calib.get("seleccion"):
+        sesiones.fijar_seleccion(calib["seleccion"])
+        return "la selección manual con la que se calibró"
+    proceso = sesiones.proceso_de_poses("patron", calib["poses"])
+    sesiones.fijar_configuracion(proceso)
+    return f"la del proceso {proceso}" if proceso else "la última"
 
 
 def activar_calibracion(ident: str, dir_calibracion: Path = cfg.DIR_CALIBRACION) -> dict:
@@ -901,11 +918,7 @@ def main() -> None:
         return
     if args.activar:
         elegida = activar_calibracion(args.activar, args.salida)
-        import sesiones
-
-        proceso = sesiones.proceso_de_poses("patron", elegida["poses"])
-        sesiones.fijar_configuracion(proceso)  # se ven y procesan las poses de esa configuración
-        print(f"[OK] Configuración vigente: la del proceso {proceso or '(última)'}")
+        print(f"[OK] Configuración vigente: {usar_configuracion_de(elegida)}")
         return
 
     ejecutar_calibracion_estereo(

@@ -78,6 +78,12 @@ Las etapas corren en un orden fijo desde `pipeline.py` (`ETAPAS`):
   - `etapa_captura` registra cada proceso en `<DATOS>/procesos_captura.json`. Sin registro, una
     pausa > 3 min separa procesos, salvo que siga el patrón.
   - Al activar una calibración también cambia la configuración, y viceversa.
+  - **Selección manual**: `sesiones.fijar_seleccion({cat: [poses]})` se guarda en
+    `configuracion_elegida.json` con la clave `seleccion`.
+    - La interfaz la arma en *Calibración → Recalibrar con capturas elegidas* y la envía como
+      `conf.seleccion` + `calib_poses`.
+    - La calibración la guarda en su `.json` y `usar_configuracion_de()` la restaura al
+      activarla.
 - **Ajustes de la interfaz:** `conf["ajustes"]` sobrescribe variables de `cfg`
   (`ejecutor.aplicar_ajustes`, null = desactivado).
   - Las fases guardan una `firma` de sus parámetros. Si falta, se asume la de

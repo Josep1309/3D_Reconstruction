@@ -203,6 +203,22 @@ def fijar_configuracion(proceso_id: str | None) -> None:
     _cache.clear()
 
 
+def fijar_seleccion(seleccion: dict[str, list[str]]) -> None:
+    """Configuración elegida a mano: exactamente estas poses ({cat: ["pose_XX", ...]}), de
+    cualquier proceso. Sirve para recalibrar y reconstruir con capturas tomadas antes, sin
+    depender de cómo se agrupan los procesos. «Volver a la última» o capturar un patrón nuevo la quitan."""
+    limpia = {c: sorted({str(p) for p in seleccion.get(c, []) if str(p).startswith("pose_")}) for c in cfg.CATEGORIAS}
+    if not any(limpia.values()):
+        raise ValueError("la selección está vacía")
+    _escribir_json(ELEGIDA, {"seleccion": limpia})
+    _cache.clear()
+
+
+def seleccion_manual() -> dict[str, list[str]] | None:
+    """La selección manual en uso, o None si la configuración es por procesos."""
+    return _leer_json(ELEGIDA, {}).get("seleccion")
+
+
 def configuraciones(lista: list[dict] | None = None) -> list[tuple[int, int]]:
     """Rangos [desde, hasta) de índices de `procesos()` que forman cada configuración."""
     lista = procesos() if lista is None else lista
@@ -233,7 +249,10 @@ def configuracion_vigente() -> dict | None:
         lista = procesos()
         resultado = None
         rangos = configuraciones(lista)
-        if rangos:
+        manual = seleccion_manual()
+        if manual and lista:
+            resultado = _vigente_manual(lista, manual)
+        elif rangos:
             elegida = _leer_json(ELEGIDA, {}).get("proceso")
             rango = next((r for r in rangos if lista[r[0]]["id"] == elegida), None)
             auto = rango is None
@@ -251,6 +270,21 @@ def configuracion_vigente() -> dict | None:
         _cache.clear()
         _cache[clave] = resultado
         return resultado
+
+
+def _vigente_manual(lista: list[dict], seleccion: dict[str, list[str]]) -> dict:
+    poses = {c: set(seleccion.get(c, [])) for c in cfg.CATEGORIAS}
+    carpetas, horas, usados = set(), [], set()
+    for i, p in enumerate(lista):
+        for item in p["items"]:
+            if poses.get(item["cat"], set()) & set(item["poses"]):
+                carpetas.add(item["carpeta"])
+                horas.append(item["hora"])
+                usados.add(i)
+    desde = min(horas) if horas else lista[-1]["inicio"]
+    return {"desde": desde, "hasta": max(horas) if horas else desde, "proceso": "seleccion", "auto": False,
+            "manual": True, "poses": poses, "carpetas": carpetas,
+            "procesos_ocultos": len(lista) - len(usados), "es_ultima": False}
 
 
 def poses_vigentes(categoria: str) -> set[str] | None:
@@ -274,7 +308,7 @@ def resumen_texto() -> str:
     if conf is None:
         return ""
     cuenta = ", ".join(f"{c} {len(p)}" for c, p in conf["poses"].items() if p)
-    tipo = "elegida" if not conf["auto"] else "la última"
+    tipo = "selección manual" if conf.get("manual") else "elegida" if not conf["auto"] else "la última"
     oculto = f"; se ignoran {conf['procesos_ocultos']} proceso(s)" if conf["procesos_ocultos"] else ""
     return f"Configuración vigente ({tipo}) desde {conf['desde']:%Y-%m-%d %H:%M} ({cuenta}{oculto})"
 
@@ -285,7 +319,7 @@ def info_vigente() -> dict | None:
     if conf is None:
         return None
     return {"desde": conf["desde"].isoformat(timespec="seconds"), "proceso": conf["proceso"],
-            "auto": conf["auto"], "es_ultima": conf["es_ultima"],
+            "auto": conf["auto"], "es_ultima": conf["es_ultima"], "manual": bool(conf.get("manual")),
             "poses": {c: len(p) for c, p in conf["poses"].items()},
             "procesos_ocultos": conf["procesos_ocultos"]}
 

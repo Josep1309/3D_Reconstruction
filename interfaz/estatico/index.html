@@ -321,6 +321,16 @@
 
     <section class="panel" data-panel="calibracion">
       <p class="explica" data-i18n="explica_calib">Error de reproyección de cada pose del tablero con la calibración en uso: cuántos píxeles separan los círculos medidos de los que predice el modelo. «Cámara» y «proyector» evalúan cada uno por separado; «estéreo» usa una sola pose del tablero vista por los dos a través de la línea base R, T, y es el que importa para reconstruir. Si el estéreo es mucho mayor que los otros dos, esa pose no es coherente con el montaje (casi siempre porque la cámara o el proyector se movieron).</p>
+      <details class="tarjeta rc" id="rc">
+        <summary><b data-i18n="rc_titulo">Recalibrar con capturas elegidas</b> <small id="rc-resumen-corto"></small></summary>
+        <p class="nota" data-i18n="rc_explica">Elige tú qué poses usar, de cualquier fecha o proceso: las del patrón para calibrar y las de plano y objeto para reconstruir con esa calibración. La selección queda como la configuración en uso (las demás pestañas muestran solo esas poses) y la calibración la recuerda. Se calibra solo si eliges poses del patrón; si no, se reconstruye con la calibración en uso.</p>
+        <div id="rc-grupos" class="rc-grupos"></div>
+        <div class="rc-pie">
+          <span id="rc-resumen"></span>
+          <button type="button" id="rc-limpiar" data-i18n="rc_limpiar">Quitar selección</button>
+          <button type="button" id="rc-ejecutar" class="primario" data-i18n="rc_ejecutar">Procesar la selección</button>
+        </div>
+      </details>
       <div class="ec-elegir">
         <span class="etiqueta"><label for="ec-elegir" data-i18n="ec_en_uso">Calibración en uso</label>
           <button type="button" class="ayuda" data-i18n-ayuda="ayuda_ec_elegir" data-i18n-etiqueta="ec_en_uso">?</button></span>
@@ -486,6 +496,7 @@
 <script src="/estatico/archivos.js"></script>
 <script src="/estatico/sistema.js"></script>
 <script src="/estatico/medicion.js"></script>
+<script src="/estatico/recalibrar.js"></script>
 <script src="/estatico/calibracion.js"></script>
 <script src="/estatico/app.js"></script>
 </body>

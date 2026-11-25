@@ -31,7 +31,9 @@ function pintarArchivos() {
   const v = d.vigente;
   const info = document.createElement("span");
   info.className = "ar-vigente";
-  info.textContent = v ? t(v.auto ? "ar_vigente_auto" : "ar_vigente_elegida", { f: fechaHora(v.desde) }) : t("ar_sin_capturas");
+  info.textContent = !v ? t("ar_sin_capturas") : v.manual
+    ? t("ar_vigente_manual", { l: Object.entries(v.poses).filter(([, n]) => n).map(([c, n]) => `${nombreCat(c)} ${n}`).join(", ") })
+    : t(v.auto ? "ar_vigente_auto" : "ar_vigente_elegida", { f: fechaHora(v.desde) });
   barra.appendChild(info);
   if (v && !v.auto) {
     const b = boton(t("ar_volver_ultima"), () => elegirConfiguracion(null));

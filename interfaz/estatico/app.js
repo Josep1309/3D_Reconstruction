@@ -158,6 +158,7 @@ function pintarEjecucion(e) {
   if (capturando) mostrarPaso("camara");
   marcarEtapaEnCurso(e.ejecutando ? e.etapa : null, e.progreso);
   actualizarBotonUsar();
+  if (rc.datos) pintarResumenRc();
   pintarPasos();
   if (!e.ejecutando) refrescarEstado();
 }
@@ -231,7 +232,7 @@ function pintarListaPoses() {
     const nota = document.createElement("p");
     nota.className = "nota vigente";
     const desde = new Date(v.desde).toLocaleString(locale(), { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
-    nota.textContent = t(v.auto ? "vigente_nota" : "vigente_nota_elegida", { f: desde }) + (v.procesos_ocultos ? " " + t("vigente_ocultos", { n: v.procesos_ocultos }) : "");
+    nota.textContent = (v.manual ? t("vigente_nota_manual") : t(v.auto ? "vigente_nota" : "vigente_nota_elegida", { f: desde })) + (v.procesos_ocultos && !v.manual ? " " + t("vigente_ocultos", { n: v.procesos_ocultos }) : "");
     nota.title = t("vigente_title");
     cont.appendChild(nota);
   }
@@ -329,7 +330,7 @@ function cargarPanel() {
   const panel = $(`.panel[data-panel="${est.paso}"]`);
   if (!panel) return;
   if (est.paso === "nube") return cargarNube();
-  if (est.paso === "calibracion") return cargarErroresCalib();
+  if (est.paso === "calibracion") { cargarRecalibrar(); return cargarErroresCalib(); }
   if (est.paso === "captura") return cargarCarpetasPose();
   if (est.paso === "archivos") return cargarArchivos();
   if (est.paso === "sistema") return cargarSistema();
@@ -819,6 +820,7 @@ async function iniciar() {
   iniciarManual();
   iniciarSistema();
   iniciarMedicion();
+  iniciarRecalibrar();
   $("#b-previa").addEventListener("click", () =>
     ejecutar({ solo_previa: true, simular: $("#m-demo").checked ? $("#m-fuente").value : null }));
   for (const id of ["#m-categoria", "#m-demo"]) $(id).addEventListener("change", notaMedir);

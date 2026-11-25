@@ -478,6 +478,10 @@ interfaz solo usan y muestran la configuración vigente**:
   revés: al elegir una calibración en la pestaña **Calibración**, la vigente pasa a ser la
   configuración de la que salió. La elección se guarda en `configuracion_elegida.json`, en la
   carpeta de datos. *Volver a la última* la borra, y capturar un patrón nuevo también.
+- **Selección manual** (pestaña Calibración → *Recalibrar con capturas elegidas*): en vez de una
+  configuración por procesos, eliges tú las poses exactas, de cualquier fecha (§19.2). Se guarda en
+  `configuracion_elegida.json` como `{"seleccion": {cat: [poses]}}`, y las etapas y la interfaz
+  usan solo esas poses. *Volver a la última* o capturar un patrón nuevo la quitan.
 - Calibrar con la etapa *Calibración* usa solo las poses del patrón de la configuración vigente.
   Por eso, después de un proceso completo (patrón + plano + objeto), basta marcar *Calibración*
   para calibrar solo con ese proceso.
@@ -1259,7 +1263,26 @@ cuando **Seguir la última** está activo:
    - rueda = acercar;
    - doble clic = vista inicial.
 
-**Calibración** (pestaña aparte, a la derecha). Arriba, **Calibración en uso** permite elegir
+**Calibración** (pestaña aparte, a la derecha).
+
+**Recalibrar con capturas elegidas** (tarjeta plegable, arriba). Sirve para recalibrar y reconstruir
+con capturas tomadas antes, sin depender de cómo el sistema agrupa los procesos.
+1. Lista **todas** las poses organizadas, agrupadas por la fecha de su proceso, cada una con la
+   **miniatura** de su imagen blanca (tablero, plano u objeto) para reconocerla. Las **dudosas**
+   (pureza < 0.5) se marcan con ⚠.
+2. Marca poses sueltas o un proceso entero (su casilla): del **patrón** para calibrar y de
+   **plano / objeto** para reconstruir.
+3. **Procesar la selección**:
+   - calcula las fases que falten;
+   - calibra con esas poses del patrón (si elegiste alguna; si no, usa la calibración en uso);
+   - reconstruye los planos y objetos elegidos.
+
+La calibración pasa por el mismo control de calidad (§12.4) y **recuerda su selección**: al
+activarla más adelante, vuelve a esas mismas poses. Ejemplo: con las 8 poses del patrón del 30-oct
+y los 8 planos de ese día se obtiene 0.509 px y 0.498 mm de planitud media, como en la sesión
+original.
+
+Más abajo, **Calibración en uso** permite elegir
 cualquier calibración del historial (fecha, poses y error estéreo; ⚠ = error estéreo muy alto) y
 ponerla en uso con **Usar esta calibración** (§20.5). Al calibrar en *Proceso por etapas*, la
 nueva queda en uso sola. Debajo, los errores de reproyección de cada pose del tablero con la

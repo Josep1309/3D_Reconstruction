@@ -207,6 +207,17 @@ def configurar(conf: dict) -> None:
     p.FASE_TRIANGULACION = conf.get("fase", p.FASE_TRIANGULACION)
     p.CALIBRACION_USADA = conf.get("calibracion", p.CALIBRACION_USADA)
     p.CALIBRACION_POSES = conf.get("calib_poses", p.CALIBRACION_POSES)
+    if conf.get("seleccion"):
+        # Selección manual de poses (pestaña Calibración): pasa a ser la configuración en uso, así las
+        # etapas procesan exactamente esas poses y la calibración usa esas del patrón
+        import sesiones
+
+        sesiones.fijar_seleccion(conf["seleccion"])
+        patron = conf["seleccion"].get("patron") or []
+        if patron:
+            p.CALIBRACION_POSES = list(patron)
+        print("[PIPELINE] Selección manual: " + ", ".join(
+            f"{c} {len(v)}" for c, v in conf["seleccion"].items() if v), flush=True)
 
     # Captura: vista en vivo y, opcionalmente, cámara simulada
     import capturar_patrones as cp

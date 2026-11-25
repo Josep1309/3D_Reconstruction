@@ -131,3 +131,17 @@ def test_ajustes_guardados_y_firmas(tmp_path):
     por_defecto = ajustes.firmas_esperadas({})
     assert rel != por_defecto[0] and absoluta != por_defecto[1]
     assert "γX≥0.2" in ajustes.describir_firma(absoluta)
+
+
+def test_seleccion_manual_de_poses(datos):
+    # Patrón de la primera sesión + objeto medido mucho después: no forman una configuración por procesos
+    sesiones.fijar_seleccion({"patron": ["pose_00", "pose_02"], "objeto": ["pose_01"]})
+    conf = sesiones.configuracion_vigente()
+    assert conf["manual"] and conf["poses"]["patron"] == {"pose_00", "pose_02"}
+    assert conf["poses"]["objeto"] == {"pose_01"} and conf["poses"]["plano"] == set()
+    assert sesiones.poses_vigentes("patron") == {"pose_00", "pose_02"}
+    assert "selección manual" in sesiones.resumen_texto()
+    sesiones.fijar_configuracion(None)
+    assert not sesiones.configuracion_vigente().get("manual")
+    with pytest.raises(ValueError):
+        sesiones.fijar_seleccion({"patron": []})
