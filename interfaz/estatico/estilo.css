@@ -584,3 +584,5 @@ a.boton:hover { border-color: var(--texto-2); }
 .me-grafico .eje { stroke: var(--borde); }
 .me-grafico .me-curva { fill: none; stroke: var(--s-est); stroke-width: 1.6; }
 .me-grafico .me-barra { fill: var(--s-proj); }
+.pose-btn.otros-ajustes { border-style: dashed; border-color: var(--aviso); }
+.metrica.aviso b { color: var(--aviso); }

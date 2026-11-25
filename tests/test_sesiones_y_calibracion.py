@@ -117,3 +117,17 @@ def test_ajustes_de_la_interfaz(monkeypatch):
     assert cfg.PATRON_DISTANCIA_MM == (15.0588, 14.909)
     assert cfg.GAMMA_TH == 0.0 and cfg.SALTO_MAX_MM == 7.0 and cfg.MED_FILT == 3 and isinstance(cfg.MED_FILT, int)
     assert any("GAMMA_TH=desactivado" in c for c in cambios)
+
+
+def test_ajustes_guardados_y_firmas(tmp_path):
+    import ajustes
+
+    ruta = tmp_path / "ajustes.json"
+    ajustes.guardar({"efectivos": {"SUAVIZADO_FASE_PX": None, "GAMMA_TH": 0.2, "MED_FILT": 3}}, ruta)
+    efectivos = ajustes.leer(ruta)["efectivos"]
+    v = ajustes.valores(efectivos)
+    assert v["SUAVIZADO_FASE_PX"] == 0.0 and v["GAMMA_TH"] == 0.2 and v["MED_FILT"] == 3
+    rel, absoluta = ajustes.firmas_esperadas(efectivos)
+    por_defecto = ajustes.firmas_esperadas({})
+    assert rel != por_defecto[0] and absoluta != por_defecto[1]
+    assert "γX≥0.2" in ajustes.describir_firma(absoluta)

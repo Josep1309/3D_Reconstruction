@@ -304,7 +304,24 @@ def listar_poses(cat: str) -> list[str]:
     return sorted(nombres, key=lambda n: int(n[5:]))
 
 
+def _firma_pose(ruta: Path, tipo: str) -> str | None:
+    """Parámetros con los que se calculó la fase de una pose (los anteriores a la firma: los de
+    configuracion.py). None si la pose aún no tiene esa fase."""
+    import fase
+
+    if _mtime(ruta) is None:
+        return None
+    try:
+        npz = cargar_npz(ruta)
+        return str(npz["firma"]) if "firma" in npz else fase._firma_original(tipo)
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile):
+        return None
+
+
 def inventario() -> dict:
+    import ajustes
+
+    esperada_rel, esperada_abs = ajustes.firmas_esperadas()
     datos = {}
     for cat in cfg.CATEGORIAS:
         resumen_ruta = DIR_RECONSTRUCCION / cat / f"{cat}_resumen.json"
@@ -316,10 +333,16 @@ def inventario() -> dict:
                 pass
         poses = []
         for pose in listar_poses(cat):
-            estado = {k: _mtime(r) is not None for k, r in _archivos_pose(cat, pose).items()}
+            archivos = _archivos_pose(cat, pose)
+            estado = {k: _mtime(r) is not None for k, r in archivos.items()}
             info = resumen.get(pose, {})
+            # Procedencia: ¿se calculó con los ajustes actuales? (si no, hay que volver a procesar)
+            f_rel, f_abs = _firma_pose(archivos["relativa"], "rel"), _firma_pose(archivos["absoluta"], "abs")
+            distintos = [f for f, esperada in ((f_rel, esperada_rel), (f_abs, esperada_abs)) if f and f != esperada]
             poses.append({"pose": pose, **estado, "puntos": info.get("puntos"), "erms_mm": info.get("erms_mm"),
-                          "z": [info.get("z_p1_mm"), info.get("z_p99_mm")]})
+                          "z": [info.get("z_p1_mm"), info.get("z_p99_mm")],
+                          "ajustes_ok": not distintos,
+                          "calculada_con": " · ".join(ajustes.describir_firma(f) for f in (f_rel, f_abs) if f)})
         datos[cat] = poses
     return datos
 
@@ -880,6 +903,10 @@ class Manejador(BaseHTTPRequestHandler):
                 return self._json(histograma_plano(cat, pose))
             if url.path == "/api/descargar":
                 return self._descargar(q)
+            if url.path == "/api/ajustes":
+                import ajustes
+
+                return self._json(ajustes.leer())
             if url.path == "/api/sistema":
                 return self._json(estado_sistema(q.get("hw", "1") == "1", q.get("forzar") == "1"))
             if url.path == "/api/manual":  # MANUAL.md, que la interfaz muestra con su índice
@@ -926,6 +953,14 @@ class Manejador(BaseHTTPRequestHandler):
                 return self._json({"ok": True})
             if url.path == "/api/detener":
                 ejecucion.detener()
+                return self._json({"ok": True})
+            if url.path == "/api/ajustes":  # los guarda la interfaz al cambiar cualquier ajuste
+                import ajustes
+
+                cuerpo = self._cuerpo()
+                if not isinstance(cuerpo.get("efectivos"), dict):
+                    raise ValueError("faltan los ajustes efectivos")
+                ajustes.guardar({k: cuerpo.get(k) for k in ("efectivos", "valores", "selects")})
                 return self._json({"ok": True})
             if url.path == "/api/camara":  # exposición en vivo: la aplica el ejecutor (VistaEnVivo)
                 us = float(self._cuerpo().get("exposicion_us", 0))

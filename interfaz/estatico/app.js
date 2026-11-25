@@ -243,10 +243,12 @@ function pintarListaPoses() {
     $("h3", bloque).textContent = `${nombreCat(cat)} · ${poses.length}`;
     for (const p of poses) {
       const b = document.createElement("button");
-      b.className = "pose-btn" + (cat === est.cat && p.pose === est.pose ? " sel" : "");
+      b.className = "pose-btn" + (cat === est.cat && p.pose === est.pose ? " sel" : "") + (p.ajustes_ok === false ? " otros-ajustes" : "");
       const etapas = ["organizada", "relativa", "absoluta", "reconstruida"];
       b.title = `${nombreCat(cat)}/${p.pose}` + (p.puntos ? ` · ${t("pose_puntos", { n: p.puntos.toLocaleString(locale()) })}` : "") +
-        (p.erms_mm ? ` · ${t("pose_planitud", { v: fmt(p.erms_mm, 3) })}` : "");
+        (p.erms_mm ? ` · ${t("pose_planitud", { v: fmt(p.erms_mm, 3) })}` : "") +
+        (p.calculada_con ? `\n${t("pose_calculada_con", { a: p.calculada_con })}` : "") +
+        (p.ajustes_ok === false ? `\n⚠ ${t("pose_otros_ajustes")}` : "");
       b.innerHTML = `${p.pose.replace("pose_", "")}<span class="puntitos">${etapas.map((k) => `<i class="${p[k] ? "si" : ""}"></i>`).join("")}</span>`;
       b.addEventListener("click", () => { $("#v-seguir").checked = false; seleccionar(cat, p.pose); });
       $(".poses", bloque).appendChild(b);
@@ -280,9 +282,11 @@ function pintarMetricas() {
   if (p.puntos) items.push([t("met_puntos"), p.puntos.toLocaleString(locale())]);
   if (p.z && p.z[0] !== null && p.z[0] !== undefined) items.push(["Z", `${fmt(p.z[0])}–${fmt(p.z[1])} mm`]);
   if (p.erms_mm) items.push([t("met_planitud"), `${fmt(p.erms_mm, 3)} mm`]);
-  for (const [k, v] of items) {
+  if (p.ajustes_ok === false) items.push([t("met_ajustes"), t("met_ajustes_otros"), "aviso", p.calculada_con]);
+  for (const [k, v, clase, titulo] of items) {
     const d = document.createElement("span");
-    d.className = "metrica";
+    d.className = "metrica" + (clase ? ` ${clase}` : "");
+    if (titulo) d.title = titulo;
     d.textContent = k;
     const b = document.createElement("b"); b.textContent = v; d.appendChild(b);
     m.appendChild(d);
@@ -791,7 +795,7 @@ async function iniciar() {
   $("#ec-elegir").addEventListener("change", actualizarBotonUsar);
   $("#ec-usar").addEventListener("click", usarCalibracion);
   $("#b-ver-calib").addEventListener("click", () => mostrarPaso("calibracion"));
-  iniciarAjustes(c.parametros);  // después de fijar los selects con los valores de pipeline.py
+  await iniciarAjustes(c.parametros);  // después de fijar los selects con los valores de pipeline.py
   iniciarExposicion();
   $("#m-ciclos").value = c.captura.ciclos;
   const fuentes = c.fuentes_demo;

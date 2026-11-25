@@ -1288,8 +1288,13 @@ las poses que salieron de ella, con cuatro puntos: organizada · fase envuelta �
     una calibración nunca apunta a una pose distinta de la que usó.
 
 **Ajustes** (botón ⚙ de la barra superior). Un punto naranja indica que hay valores distintos de
-los de `configuracion.py`. Se guardan en el navegador y se envían con cada ejecución; el registro
-lo indica con `[AJUSTES] Distintos de configuracion.py: …`.
+los de `configuracion.py`.
+- Se guardan en `<DATOS>/ajustes.json` (módulo `ajustes.py`). Los usan la interfaz, cualquier
+  navegador y **también `pipeline.py` por terminal**.
+- El registro lo indica con `[AJUSTES] … distintos de configuracion.py: …`.
+- **Procedencia:** cada pose sabe con qué parámetros se calculó. Si fue con otros ajustes, se
+  marca con borde punteado en *Poses* y con la métrica «Ajustes: distintos de los actuales»; el
+  detalle aparece al pasar el mouse. Se actualiza en la próxima ejecución.
 
 | Ajuste | Variable | Por defecto | Desactivado = |
 |---|---|---|---|

@@ -91,6 +91,10 @@ VIS_POSE = "ultima"                          # "ultima" o un nombre como "pose_0
 VIS_COLOR_3D = "profundidad"                 # "profundidad" o "textura"
 # ==============================================================================
 
+# Los ajustes de la interfaz (⚙) se guardan en <DATOS>/ajustes.json y también se aplican aquí. El
+# ejecutor de la interfaz pone esto en True porque ya los aplicó
+AJUSTES_APLICADOS = False
+
 DIR_FASES = cfg.DIR_RESULTADOS / "fases"
 DIR_CALIBRACION = cfg.DIR_CALIBRACION
 DIR_RECONSTRUCCION = cfg.DIR_RESULTADOS / "reconstruccion"
@@ -275,6 +279,12 @@ def main() -> None:
         _verificar_calibracion_existente()
     import sesiones
 
+    if not AJUSTES_APLICADOS:  # por terminal: los mismos ajustes que la interfaz (<DATOS>/ajustes.json)
+        import ajustes
+
+        cambios = ajustes.aplicar_guardados()
+        if cambios:
+            print(f"[AJUSTES] De la interfaz ({ajustes.RUTA.name}), distintos de configuracion.py: {', '.join(cambios)}")
     if sesiones.resumen_texto():
         print(f"[PIPELINE] {sesiones.resumen_texto()}")
     t_total = time.perf_counter()

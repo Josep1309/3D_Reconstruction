@@ -21,12 +21,25 @@ const AJUSTES = [
 
 const aj = { defecto: {}, valores: {} };  // valores: {clave: {on, v}} (v: número, par o texto)
 
-function leerGuardados() {
+// Los ajustes viven en el servidor (<DATOS>/ajustes.json): los ven pipeline.py y cualquier navegador.
+// Los que había en este navegador (versión anterior) se migran la primera vez.
+async function leerGuardados() {
+  try {
+    const servidor = await api("/api/ajustes");
+    if (servidor?.valores) return servidor.valores;
+  } catch (_) { /* servidor sin ajustes */ }
   try { return JSON.parse(localStorage.getItem("ajustes") || "{}"); } catch (_) { return {}; }
 }
+let temporizadorAjustes = null;
 function guardarAjustes() {
-  try { localStorage.setItem("ajustes", JSON.stringify(aj.valores)); } catch (_) { /* sin almacenamiento */ }
   marcarCambios();
+  clearTimeout(temporizadorAjustes);
+  temporizadorAjustes = setTimeout(async () => {
+    try {
+      await api("/api/ajustes", { efectivos: ajustesParaEnviar(), valores: aj.valores });
+      refrescarEstado();  // las poses calculadas con otros ajustes se marcan en la lista
+    } catch (err) { agregarLog(`[ERROR] ajustes: ${err.message}`); }
+  }, 400);
 }
 
 function valorDefecto(a, p) {
@@ -34,10 +47,10 @@ function valorDefecto(a, p) {
   return { on: true, v: p[a.clave] };
 }
 
-function iniciarAjustes(parametros) {
+async function iniciarAjustes(parametros) {
   parametros = { ...parametros, PATRON_DX_MM: est.config.tablero_mm[0], PATRON_DY_MM: est.config.tablero_mm[1] };
   for (const a of AJUSTES) aj.defecto[a.clave] = valorDefecto(a, parametros);
-  const guardados = leerGuardados();
+  const guardados = await leerGuardados();
   for (const a of AJUSTES) aj.valores[a.clave] = guardados[a.clave] ?? structuredClone(aj.defecto[a.clave]);
   // Triangulación y calibración (selects del diálogo): también se recuerdan
   for (const id of ["a-fase", "a-calib", "a-calib-poses"]) {
@@ -46,6 +59,7 @@ function iniciarAjustes(parametros) {
     $(`#${id}`).addEventListener("change", () => { aj.valores[`#${id}`] = $(`#${id}`).value; guardarAjustes(); });
   }
   pintarAjustes();
+  if (Object.keys(guardados).length) guardarAjustes();  // migra lo del navegador y deja efectivos al día
   $("#b-ajustes").addEventListener("click", () => $("#ajustes").showModal());
   $("#aj-restablecer").addEventListener("click", () => {
     for (const a of AJUSTES) aj.valores[a.clave] = structuredClone(aj.defecto[a.clave]);
