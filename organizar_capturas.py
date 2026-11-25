@@ -62,6 +62,8 @@ PALABRAS_CATEGORIA = {
 
 UMBRAL_MISMA_ESCENA = 0.98   # correlación mínima entre imágenes blancas de ciclos de una misma pose
 UMBRAL_ESTABILIDAD = 0.97    # correlación mínima entre el fondo de H y de V dentro de un ciclo
+CONTRASTE_MIN = 8.0          # diferencia mínima de brillo medio entre frames (niveles de gris). Capturas buenas: ~80;
+                             # sin proyección: 0.3–7.5 (medido el 2026-11-24). Un objeto muy oscuro da ~10
 NOMBRE_MANIFIESTO = "manifiesto.json"
 
 
@@ -242,6 +244,9 @@ def segmentar_secuencias(frames: list[np.ndarray], largo: int) -> tuple[list[Sec
         return [], [f"solo {n} frames; se necesitan al menos {largo}"]
 
     medias = np.array([float(np.mean(f)) for f in frames])
+    if medias.max() - medias.min() < CONTRASTE_MIN:
+        # Sin proyección no hay par negro/blanco: no confundir el ruido (29 -> 30) con uno
+        return [], [f"brillo casi constante ({medias.min():.0f}–{medias.max():.0f}): sin secuencia proyectada"]
 
     if n == largo:
         # Un ciclo exacto capturado desde cualquier punto del loop del proyector
@@ -297,6 +302,10 @@ def _ciclo_estable(ciclo: np.ndarray) -> float:
     n = cfg.N_PASOS
     a_h = ciclo[:n].astype(np.float32).mean(axis=0)
     a_v = ciclo[cfg.IMAGENES_POR_ORIENTACION : cfg.IMAGENES_POR_ORIENTACION + n].astype(np.float32).mean(axis=0)
+    # Una escena sin textura (fondo casi uniforme) no tiene nada que correlacionar: la correlación
+    # sería ruido. Si los dos fondos son uniformes y parecidos, la escena no se movió
+    if a_h.std() < 1.0 and a_v.std() < 1.0:
+        return 1.0 if abs(float(a_h.mean() - a_v.mean())) < 2.0 else 0.0
     return _correlacion(a_h, a_v)
 
 
@@ -490,7 +499,7 @@ def describir_rechazo(frames: list[np.ndarray], avisos: list[str]) -> str:
     if len(frames) < cfg.IMAGENES_POR_CICLO:
         return f"solo {len(frames)} frames (se necesitan {cfg.IMAGENES_POR_CICLO})"
     medias = np.array([float(np.mean(f)) for f in frames])
-    if medias.max() - medias.min() < 15:
+    if medias.max() - medias.min() < CONTRASTE_MIN:
         return (f"brillo casi constante ({medias.min():.0f}–{medias.max():.0f}): el proyector no estaba "
                 f"proyectando la secuencia o la cámara no está sincronizada")
     return "; ".join(avisos) or "sin ciclos completos"

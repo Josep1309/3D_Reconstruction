@@ -26,8 +26,12 @@ de `Matlab_Codes/Codes/`, que son solo referencia y no se ejecutan. El manual co
 - `.env/bin/python verificar.py [--sin-hardware]` diagnostica la instalación. La guía de problemas
   por etapa está en MANUAL.md §16 e instalación/PySpin en §20. Si agregas un error nuevo,
   documéntalo en la tabla de su etapa.
-- No hay tests automáticos. La verificación se hace corriendo el pipeline sobre las capturas
-  existentes y mirando:
+- Pruebas: `.env/bin/python -m pytest` (≈ 2 s; `tests/`, con datos temporales vía
+  `TESIS_DIR_DATOS`, nunca los reales).
+  - Cubren decodificación exacta de los patrones, organizar, sesiones, control de calidad de la
+    calibración y la seguridad del servidor.
+  - Dependencias de desarrollo: `requirements-dev.txt` (`pytest`, `ruff`).
+  - Además, verificar con datos reales corriendo el pipeline y mirando:
   - el error de planitud de `plano`, que da ≈ 0.5 mm con la calibración de la misma sesión
     (planos `pose_08`–`15` del 24-nov: 0.45–0.79 mm; los `00`–`07` son del montaje del 30-oct y
     dan ~1.3 mm con la calibración actual)

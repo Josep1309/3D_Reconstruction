@@ -105,12 +105,16 @@ def capturas(dir_capturas: Path | None = None, dir_ordenadas: Path | None = None
     manifiesto = _leer_json(dir_ordenadas / "manifiesto.json", {})
     rechazo_de = {clave_carpeta(r.get("fuente", "")): r.get("motivo", "") for r in manifiesto.get("rechazadas", {}).values()}
     poses_de: dict[str, list[str]] = {}
+    pureza_de: dict[str, float] = {}  # la peor pureza de las secuencias de cada captura (organizar)
     for e in manifiesto.get("poses", []):
         clave = clave_carpeta(str(e.get("fuente", "")))
         nombre = f"pose_{int(e['pose']):02d}"
         if e.get("categoria") and not clave.startswith(e["categoria"] + "/"):
             clave = f"{e['categoria']}/{Path(clave).name}"
         poses_de.setdefault(clave, []).append(nombre)
+        cal = e.get("calidad") or {}
+        if "pureza_H" in cal:
+            pureza_de[clave] = min(pureza_de.get(clave, 1.0), cal["pureza_H"], cal["pureza_V"])
     items: dict[str, dict] = {}
     for cat in cfg.CATEGORIAS:
         carpeta_cat = dir_capturas / cat
@@ -122,7 +126,8 @@ def capturas(dir_capturas: Path | None = None, dir_ordenadas: Path | None = None
             clave = f"{cat}/{p.name}"
             hora = hora_de_carpeta(p.name) or datetime.fromtimestamp(p.stat().st_mtime)
             items[clave] = {"cat": cat, "carpeta": clave, "hora": hora, "existe": True,
-                            "poses": sorted(poses_de.get(clave, [])), "rechazo": rechazo_de.get(clave)}
+                            "poses": sorted(poses_de.get(clave, [])), "rechazo": rechazo_de.get(clave),
+                            "pureza": pureza_de.get(clave)}
     for clave, poses in poses_de.items():
         if clave not in items:
             cat = clave.split("/")[0]

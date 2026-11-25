@@ -5,6 +5,7 @@
 
 // clave: variable de configuracion.py · grupo: sección · unidad · límites del campo
 const AJUSTES = [
+  { clave: "CAM_EXPOSICION_US", grupo: "cam", min: 100, max: 49000, paso: 100, unidad: "µs", fijo: true },
   { clave: "SUAVIZADO_FASE_PX", grupo: "fase", min: 0.5, max: 6, paso: 0.5, unidad: "px" },
   { clave: "GAMMA_TH", grupo: "fase", min: 0.01, max: 0.9, paso: 0.01, unidad: "γ" },
   { clave: "GAMMA_TH_Y", grupo: "fase", min: 0.005, max: 0.9, paso: 0.005, unidad: "γ" },
@@ -60,8 +61,8 @@ const igual = (x, y) => JSON.stringify(x) === JSON.stringify(y);
 const modificado = (clave) => !igual(aj.valores[clave], aj.defecto[clave]);
 
 function pintarAjustes() {
-  for (const grupo of ["fase", "rec"]) {
-    const cont = $(grupo === "fase" ? "#aj-fase" : "#aj-rec");
+  for (const grupo of ["cam", "fase", "rec"]) {
+    const cont = $({ cam: "#aj-cam", fase: "#aj-fase", rec: "#aj-rec" }[grupo]);
     cont.innerHTML = "";
     for (const a of AJUSTES.filter((x) => x.grupo === grupo)) cont.appendChild(filaAjuste(a));
   }
@@ -153,6 +154,14 @@ function ajustesParaEnviar() {
     else salida[a.clave] = val.on || a.fijo ? val.v : null;
   }
   return salida;
+}
+
+// Exposición: la cambia también el control de la vista previa (se aplica en vivo a la cámara)
+function exposicionActual() { return aj.valores.CAM_EXPOSICION_US?.v ?? 12000; }
+function fijarExposicion(us) {
+  aj.valores.CAM_EXPOSICION_US = { on: true, v: Math.round(us) };
+  guardarAjustes();
+  if ($("#ajustes").open) pintarAjustes();
 }
 
 // Textos del diálogo que se generan aquí (al cambiar de idioma)

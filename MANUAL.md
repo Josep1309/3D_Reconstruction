@@ -364,8 +364,26 @@ Tras regenerar los patrones hay que cargarlos en el LightCrafter con el software
   Δt entre frames y avisa si hay un salto (pulso perdido).
 - **`guardar_captura(frames, salida, categoria)`**: crea `capturas/<categoria>/<fecha_hora>/`
   con un `.tiff` por frame y, opcionalmente, un `.avi` FFV1 sin pérdida.
-- **`capturar_poses(categoria, poses, ciclos)`**: pide Enter antes de cada pose (`q` termina) y
-  captura `50 × ciclos` frames.
+- **`capturar_poses(categoria, poses, ciclos)`**: pide Enter antes de cada pose y captura
+  `50 × ciclos` frames. En la pausa:
+  - `q` termina;
+  - `r` **repite la pose anterior**: la descartada va a la papelera.
+- **Control de cada pose al capturarla** (`organizar_capturas.evaluar_captura`, ~0.1 s). Usa la
+  misma segmentación que *Organizar* y revisa:
+  - que esté el par negro/blanco y haya contraste. Sin proyección, el brillo medio varía < 8
+    niveles; en una captura buena, ~80;
+  - la pureza de las franjas H y V (< 0.5 = frame perdido o secuencia distinta);
+  - la modulación V;
+  - el % saturado en la imagen blanca y si la escena se movió (estos dos son avisos, no
+    invalidan la pose).
+
+  Si la pose **no sirve**, el proceso pregunta: Enter/`r` = repetirla (la mala va a la papelera),
+  `s` = guardarla igual, `q` = terminar. En la interfaz son botones, y el resultado de cada pose
+  aparece en la pestaña Cámara.
+- **Sin trigger** (Arduino apagado o desconectado): en vez de abortar todo el plan, pregunta si
+  reintentar esa pose.
+- La exposición inicial es `CAM_EXPOSICION_US`, o la de **Ajustes → Cámara**. Durante la vista
+  previa se puede cambiar en vivo (§19.3).
 
 **Varios ciclos.** Con `CICLOS_POR_CAPTURA = 2` o más, el organizador promedia los ciclos de la
 misma escena. El ruido baja ∝ 1/√ciclos, lo que ayuda sobre todo con las franjas H de bajo
@@ -975,6 +993,7 @@ corresponde. Cada subsección es una tabla de **síntoma → causa probable → 
 | `pureza baja` / `corrimientos poco sinusoidales` | Frame perdido, o la secuencia del proyector no coincide | Repite la pose; verifica la secuencia cargada (§16.2) |
 | `la escena se movió … se descarta` | El objeto o el soporte se movieron durante los 2.5 s | Fija bien el objeto y repite |
 | `modulación H baja` | Franjas horizontales por debajo de `GAMMA_TH_Y` | Desenfoque o exposición. Mejora con `CICLOS_POR_CAPTURA` 2–4 o enfocando mejor |
+| En *Archivos* una captura aparece como **dudosa · pureza 0.3** | Se organizó antes de los controles actuales, pero su secuencia no se parece a la proyectada | Muévela a la papelera; no la uses para calibrar |
 | `brillo casi constante …: el proyector no estaba proyectando la secuencia` (captura **rechazada**) | Proyector apagado, en otro modo, sin la secuencia cargada, o el Arduino no dispara a los dos | Revisa el proyector y el Arduino y repite la pose. La captura queda en *Archivos* como rechazada; muévela a la papelera |
 | Una pose quedó en la categoría equivocada | El nombre de la carpeta no tenía la palabra clave | Mueve la captura cruda a `capturas/<categoria>/`, borra `capturas_ordenadas/` y reorganiza (§9) |
 | La interfaz no pregunta si es plano u objeto | Sin terminal interactiva se asigna `objeto` | Guarda las capturas en `capturas/plano/` u `objeto/` |
@@ -1314,6 +1333,21 @@ posterior con el trigger del Arduino sin pérdidas (Δt 49.9 ms) y secuencia vá
   ángulo para evitar brillos. Con las capturas de referencia el objeto tenía ~4.5 % de píxeles
   saturados en alguna imagen de franjas (el brillo de la madera), y eso se ve como una mancha
   ruidosa en los mapas de fase.
+- **Exposición en vivo.** Control deslizante de 0.1 a 49 ms, en escala logarítmica.
+  - Se aplica a la cámara en ~0.2 s (el servidor deja la orden en `resultados/.vivo/control.json`
+    y el ejecutor la pasa a `ExposureTime`).
+  - Se guarda en Ajustes, así que se mantiene para las poses siguientes y las próximas capturas.
+  - En el modo demo se simula escalando el brillo.
+- **Nitidez.** Varianza del laplaciano en el centro de la imagen, el máximo de un ciclo de franjas.
+  Para enfocar la cámara o el proyector, gira el anillo hasta que la barra llegue al máximo. La
+  escala se reinicia al cambiar la exposición.
+- **Botones de la pausa** según el caso:
+  - antes de cada pose: *Continuar* y *Terminar*, más *Repetir la anterior* desde la segunda;
+  - si la pose no sirve: *Repetir la pose*, *Guardarla igual* y *Terminar*, con el motivo;
+  - sin trigger: *Reintentar* y *Terminar*;
+  - al organizar una captura sin categoría: *Plano*, *Objeto* y *Omitir*.
+- **Control de las poses capturadas.** Lista en la pestaña Cámara, con ✔ / ⚠ / ✖, la modulación
+  H/V y el % saturado de cada pose.
 - Con *Terminar (q)* se sale sin capturar, así que la vista previa también sirve solo para
   revisar el encuadre o el enfoque.
 
@@ -1321,6 +1355,14 @@ Funciona igual en el modo demo, que reproduce la captura elegida. Solo está dis
 interfaz web: `pipeline.py` en la terminal sigue pidiendo Enter sin vista previa.
 
 ### 19.4 Cómo funciona
+
+**Progreso y errores.**
+- El estado de la barra superior muestra la etapa, la categoría, «N/M» poses y el tiempo
+  restante estimado. La etapa en curso tiene su barra de progreso en *Proceso por etapas*.
+- Si el proceso termina con error, aparece un **aviso destacado** sobre las pestañas con la causa
+  y, si el pipeline la indica, la sección del manual.
+- El **registro** se puede filtrar (todo, avisos y errores, solo errores), descargar como `.txt`
+  y limpiar.
 
 **Seguridad.**
 - El servidor escucha solo en `127.0.0.1` y rechaza:

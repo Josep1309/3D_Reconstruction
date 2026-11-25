@@ -269,6 +269,7 @@ class CamaraSimulada:
     def __enter__(self) -> CamaraSimulada:
         global camara_activa
         camara_activa = self
+        self.fijar_exposicion(cfg.CAM_EXPOSICION_US)  # la elegida en Ajustes
         return self
 
     def __exit__(self, *_exc) -> None:

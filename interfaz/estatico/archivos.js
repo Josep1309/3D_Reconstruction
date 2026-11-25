@@ -139,6 +139,11 @@ function filaCaptura(it) {
   if (!it.existe) poses.textContent = t("ar_captura_borrada");
   else if (it.rechazo) { const e = etiqueta(t("ar_rechazada"), "error"); e.title = it.rechazo; poses.append(e, Object.assign(document.createElement("small"), { className: "ar-motivo", textContent: it.rechazo })); }
   else if (!it.poses.length) poses.appendChild(etiqueta(t("ar_no_organizada"), "aviso"));
+  if (it.pureza != null && it.pureza < 0.5) {  // secuencia poco confiable: frame perdido o sin proyección
+    const e = etiqueta(t("ar_dudosa", { p: it.pureza.toFixed(2) }), "aviso");
+    e.title = t("ar_dudosa_title");
+    poses.appendChild(e);
+  }
   for (const p of it.poses) {
     const s = document.createElement("span");
     s.className = "ar-pose";

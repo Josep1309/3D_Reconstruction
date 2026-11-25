@@ -360,7 +360,8 @@ def listado_archivos() -> dict:
                 estado = {k: _mtime(r) is not None for k, r in _archivos_pose(it["cat"], pose).items()}
                 poses.append({"pose": pose, **estado})
             items.append({"cat": it["cat"], "carpeta": it["carpeta"], "hora": it["hora"].isoformat(timespec="seconds"),
-                          "existe": it["existe"], "poses": poses, "rechazo": it.get("rechazo")})
+                          "existe": it["existe"], "poses": poses, "rechazo": it.get("rechazo"),
+                          "pureza": it.get("pureza")})
         salida.append({
             "id": p["id"], "fin": p["fin"].isoformat(timespec="seconds"), "registrado": p["registrado"],
             "patron": p["patron"], "configuracion": config, "vigente": bool(conf) and config == conf["proceso"],
@@ -796,6 +797,16 @@ class Manejador(BaseHTTPRequestHandler):
             if url.path == "/api/detener":
                 ejecucion.detener()
                 return self._json({"ok": True})
+            if url.path == "/api/camara":  # exposición en vivo: la aplica el ejecutor (VistaEnVivo)
+                us = float(self._cuerpo().get("exposicion_us", 0))
+                if not 50 <= us <= 1_000_000:
+                    raise ValueError("exposición fuera de rango")
+                dir_vivo = cfg.DIR_RESULTADOS / ".vivo"
+                dir_vivo.mkdir(parents=True, exist_ok=True)
+                tmp = dir_vivo / "control.tmp"
+                tmp.write_text(json.dumps({"exposicion_us": us}), encoding="utf-8")
+                tmp.replace(dir_vivo / "control.json")
+                return self._json({"ok": True, "activa": ejecucion.estado()["ejecutando"]})
             if url.path in ("/api/archivos/borrar", "/api/archivos/vaciar_papelera", "/api/configuracion/elegir"):
                 if ejecucion.estado()["ejecutando"]:
                     raise RuntimeError("hay un proceso en curso: espera a que termine")

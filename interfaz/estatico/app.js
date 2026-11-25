@@ -63,6 +63,39 @@ function agregarLog(texto) {
   if (abajo) log.scrollTop = log.scrollHeight;
 }
 
+// ============================== exposición y nitidez (vista previa) ==============================
+// Escala logarítmica: 100 µs … 49 ms en el control deslizante (0…1000)
+const EXP_MIN = 100, EXP_MAX = 49000;
+const expAControl = (us) => Math.round(1000 * Math.log(us / EXP_MIN) / Math.log(EXP_MAX / EXP_MIN));
+const controlAExp = (v) => Math.round(EXP_MIN * (EXP_MAX / EXP_MIN) ** (v / 1000) / 100) * 100;
+let temporizadorExp = null;
+
+function iniciarExposicion() {
+  const control = $("#v-exposicion");
+  const mostrar = (us) => { $("#v-exposicion-valor").textContent = `${(us / 1000).toFixed(1)} ms`; };
+  control.value = expAControl(exposicionActual());
+  mostrar(exposicionActual());
+  control.addEventListener("input", () => {
+    const us = controlAExp(+control.value);
+    mostrar(us);
+    clearTimeout(temporizadorExp);
+    temporizadorExp = setTimeout(async () => {  // se aplica al soltar o tras una pausa breve
+      fijarExposicion(us);
+      try { await api("/api/camara", { exposicion_us: us }); } catch (err) { agregarLog(`[ERROR] ${err.message}`); }
+      est.nitidezMax = 0;  // la escala de nitidez cambia con la exposición
+    }, 250);
+  });
+}
+
+function pintarNitidez(valor) {
+  if (valor == null) return;
+  est.nitidezMax = Math.max(est.nitidezMax || 0, valor);
+  const m = $("#v-nitidez");
+  m.max = est.nitidezMax || 1; m.value = valor;
+  m.optimum = est.nitidezMax; m.high = 0.9 * est.nitidezMax; m.low = 0.6 * est.nitidezMax;
+  $("#v-nitidez-valor").textContent = `${Math.round(valor)}`;
+}
+
 // Herramientas del registro: filtro, descarga y limpieza
 function iniciarRegistro() {
   $("#log-filtro").addEventListener("change", (e) => { log.dataset.filtro = e.target.value; });
@@ -496,7 +529,8 @@ function conectarEventos() {
     const d = JSON.parse(e.data);
     const vivo = $("#vivo");
     if (d.previa) {
-      est.vivo = { previa: true, saturacion: d.saturacion };
+      est.vivo = { previa: true, saturacion: d.saturacion, nitidez: d.nitidez };
+      pintarNitidez(d.nitidez);
       vivo.classList.add("previa");
     } else {
       est.vivo = { i: d.i, n: d.n };
@@ -752,6 +786,7 @@ async function iniciar() {
   $("#ec-usar").addEventListener("click", usarCalibracion);
   $("#b-ver-calib").addEventListener("click", () => mostrarPaso("calibracion"));
   iniciarAjustes(c.parametros);  // después de fijar los selects con los valores de pipeline.py
+  iniciarExposicion();
   $("#m-ciclos").value = c.captura.ciclos;
   const fuentes = c.fuentes_demo;
   $("#m-fuente").innerHTML = fuentes.map((f) => `<option>${f}</option>`).join("") || `<option value=''>${t("sin_capturas")}</option>`;

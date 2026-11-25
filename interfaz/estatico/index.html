@@ -182,6 +182,17 @@
           <progress id="vivo-progreso" max="50" value="0"></progress>
           <label class="casilla"><input id="v-reticula" type="checkbox" checked> <span data-i18n="reticula">Retícula</span></label>
         </div>
+        <div class="vivo-ajustes">
+          <label class="vivo-exp"><span data-i18n="exposicion">Exposición</span>
+            <input id="v-exposicion" type="range" min="0" max="1000" step="1" data-i18n-aria="exposicion">
+            <output id="v-exposicion-valor"></output>
+            <button type="button" class="ayuda" data-i18n-ayuda="ayuda_exposicion" data-i18n-etiqueta="exposicion">?</button>
+          </label>
+          <span class="vivo-nitidez"><span data-i18n="nitidez">Nitidez</span>
+            <meter id="v-nitidez" min="0" max="1" value="0"></meter><output id="v-nitidez-valor"></output>
+            <button type="button" class="ayuda" data-i18n-ayuda="ayuda_nitidez" data-i18n-etiqueta="nitidez">?</button>
+          </span>
+        </div>
         <div class="vivo-acciones">
           <span id="vivo-pausa" class="botones oculto"></span>
           <button id="b-cerrar-previa" class="oculto" data-i18n="cerrar_previa">Cerrar vista previa</button>
@@ -316,6 +327,10 @@
             <button type="button" data-tema="dark" data-i18n="aj_tema_oscuro">Oscuro</button>
           </div>
         </div>
+      </section>
+      <section>
+        <h3 data-i18n="aj_camara">Cámara</h3>
+        <div id="aj-cam" class="aj-lista"></div>
       </section>
       <section>
         <h3 data-i18n="aj_fase">Fase y máscaras</h3>
