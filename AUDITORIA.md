@@ -195,7 +195,7 @@ Medido en `objeto/20261124_132424`:
 - **Propuesta:** cachear solo las claves que pide cada imagen (2–3 mapas), o usar un límite por
   tamaño de ~300 MB. **Esfuerzo S.**
 
-### 4.3 [P3] Servidor en un solo archivo de 840 líneas
+### 4.3 [P3] Servidor en un solo archivo de 840 líneas — **hecho (Fase 4)**: `comun`, `ejecucion`, `imagenes`, `consultas`, `servidor`
 `interfaz/servidor.py` mezcla HTTP, ejecución, imágenes, nube, calibración y archivos. Propuesta:
 separarlo en `rutas.py`, `imagenes.py`, `ejecucion.py`, `consultas.py`. **Esfuerzo M** (sin
 cambios de comportamiento).

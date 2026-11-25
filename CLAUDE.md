@@ -95,8 +95,12 @@ Las etapas corren en un orden fijo desde `pipeline.py` (`ETAPAS`):
 - Las poses se procesan en hilos (`fase._en_paralelo`, máximo 4; ~200 MB por pose).
 
 - `interfaz/`:
-  - `servidor.py`: HTTP con la librería estándar, SSE, `vigilar()` sobre los archivos de
-    resultados, imágenes generadas desde los `.npz`;
+  - servidor HTTP con la librería estándar, en módulos que se importan en este orden:
+    - `comun.py`: rutas, `_archivos_pose` y `listar_poses`;
+    - `ejecucion.py`: subproceso del pipeline, SSE y marcas `@@…`;
+    - `imagenes.py`: imágenes, nube y medición, con una caché de mapas de 400 MB;
+    - `consultas.py`: inventario, archivos, calibración, sistema, comparaciones y `vigilar()`;
+    - `servidor.py`: rutas HTTP (`Manejador`, con la seguridad: host y POST JSON) y `main()`;
   - `ejecutor.py`: corre `pipeline.main()` en un subproceso y aplica la configuración JSON;
   - `estatico/`: HTML, CSS y JS sin dependencias, en scripts clásicos que comparten globales y se
     cargan antes que `app.js`:
