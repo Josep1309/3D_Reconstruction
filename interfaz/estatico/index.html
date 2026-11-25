@@ -163,6 +163,7 @@
       <button role="tab" data-paso="desenvuelta"><span>4</span><b data-i18n="paso_desenvuelta">Fase desenvuelta</b></button>
       <button role="tab" data-paso="profundidad"><span>5</span><b data-i18n="paso_profundidad">Profundidad</b></button>
       <button role="tab" data-paso="nube"><span>6</span><b data-i18n="paso_nube">Nube de puntos</b></button>
+      <button role="tab" data-paso="sistema" class="paso-aparte"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2h12v9H9.5l.5 2H12v1.5H4V13h2l.5-2H2Zm1.5 1.5v6h9v-6Z"/></svg><b data-i18n="paso_sistema">Sistema</b></button>
       <button role="tab" data-paso="archivos" class="paso-aparte"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3A1.5 1.5 0 0 1 3 1.5h3.2l1.5 1.8H13A1.5 1.5 0 0 1 14.5 4.8v7.7A1.5 1.5 0 0 1 13 14H3a1.5 1.5 0 0 1-1.5-1.5Zm1.5 0v9.5h10V4.8H7l-1.5-1.8Z"/></svg><b data-i18n="paso_archivos">Archivos</b></button>
       <button role="tab" data-paso="calibracion" class="paso-aparte"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Zm0 2.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z"/></svg><b data-i18n="paso_calibracion">Calibración</b></button>
     </nav>
@@ -253,6 +254,26 @@
         <p id="n-info" class="visor-info">arrastra para girar · clic derecho o Shift para desplazar · rueda para acercar</p>
         <p id="n-vacio" class="visor-vacio oculto">Esta pose aún no tiene reconstrucción 3D.</p>
       </div>
+    </section>
+
+    <section class="panel" data-panel="sistema">
+      <p class="explica" data-i18n="explica_sistema">Estado del equipo y lista de comprobación antes de medir. Las comprobaciones son las de verificar.py; con «Buscar cámara y proyector» también se prueba el hardware (no durante una captura).</p>
+      <div class="ar-barra">
+        <span id="si-resumen" class="ar-vigente"></span>
+        <button type="button" id="si-hw" class="primario" data-i18n="si_hw">Buscar cámara y proyector</button>
+        <button type="button" id="si-recargar" data-i18n="si_recargar">Comprobar de nuevo</button>
+      </div>
+      <div class="si-columnas">
+        <section class="tarjeta si-lista">
+          <h3 data-i18n="si_antes">Antes de medir</h3>
+          <ul id="si-checklist"></ul>
+        </section>
+        <section class="tarjeta si-lista">
+          <h3 data-i18n="si_disco">Espacio en disco</h3>
+          <div id="si-disco"></div>
+        </section>
+      </div>
+      <div id="si-grupos" class="si-grupos"></div>
     </section>
 
     <section class="panel" data-panel="archivos">
@@ -431,6 +452,7 @@
 <script src="/estatico/galeria.js"></script>
 <script src="/estatico/ajustes.js"></script>
 <script src="/estatico/archivos.js"></script>
+<script src="/estatico/sistema.js"></script>
 <script src="/estatico/calibracion.js"></script>
 <script src="/estatico/app.js"></script>
 </body>

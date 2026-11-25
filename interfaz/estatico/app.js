@@ -324,6 +324,7 @@ function cargarPanel() {
   if (est.paso === "calibracion") return cargarErroresCalib();
   if (est.paso === "captura") return cargarCarpetasPose();
   if (est.paso === "archivos") return cargarArchivos();
+  if (est.paso === "sistema") return cargarSistema();
   for (const fig of $$("figure[data-tipo]", panel)) cargarFigura(fig);
 }
 
@@ -807,6 +808,7 @@ async function iniciar() {
   $("#aviso-error-manual").addEventListener("click", () => window.abrirManual?.($("#aviso-error-manual").dataset.seccion));
   iniciarRegistro();
   iniciarManual();
+  iniciarSistema();
   $("#b-previa").addEventListener("click", () =>
     ejecutar({ solo_previa: true, simular: $("#m-demo").checked ? $("#m-fuente").value : null }));
   for (const id of ["#m-categoria", "#m-demo"]) $(id).addEventListener("change", notaMedir);

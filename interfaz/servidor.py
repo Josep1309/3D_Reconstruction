@@ -372,6 +372,57 @@ def listado_archivos() -> dict:
     return {"procesos": salida, "vigente": sesiones.info_vigente(), "papelera": archivos.info_papelera()}
 
 
+def _tamano(ruta: Path) -> int:
+    total = 0
+    pila = [ruta]
+    while pila:
+        try:
+            with os.scandir(pila.pop()) as it:
+                for e in it:
+                    if e.is_dir(follow_symlinks=False):
+                        pila.append(e.path)
+                    elif e.is_file(follow_symlinks=False):
+                        total += e.stat(follow_symlinks=False).st_size
+        except OSError:
+            pass
+    return total
+
+
+_cache_sistema: dict = {}
+
+
+def estado_sistema(con_hardware: bool, forzar: bool = False) -> dict:
+    """Comprobación del sistema (verificar.py --json) más el espacio en disco. Se cachea 60 s.
+
+    Con un proceso en curso no se busca el hardware: la cámara está ocupada por el pipeline."""
+    con_hardware = con_hardware and not ejecucion.estado()["ejecutando"]
+    clave = con_hardware
+    if not forzar and clave in _cache_sistema and time.time() - _cache_sistema[clave]["t"] < 60:
+        return _cache_sistema[clave]["datos"]
+    comando = [sys.executable, str(RAIZ / "verificar.py"), "--json"] + ([] if con_hardware else ["--sin-hardware"])
+    try:
+        r = subprocess.run(comando, capture_output=True, text=True, timeout=90, cwd=RAIZ, env={**os.environ})
+        verif = json.loads(r.stdout.strip().splitlines()[-1])
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, IndexError) as exc:
+        verif = {"resumen": {"ok": 0, "aviso": 0, "error": 1},
+                 "resultados": [{"grupo": "verificar.py", "nivel": "error", "texto": f"No se pudo ejecutar: {exc}",
+                                 "solucion": "", "seccion": "§20"}]}
+    import shutil
+
+    disco = shutil.disk_usage(cfg.DATOS)
+    import archivos
+
+    datos = {
+        **verif, "con_hardware": con_hardware, "hora": time.strftime("%H:%M:%S"),
+        "disco": {"libre": disco.free, "total": disco.total,
+                  "carpetas": {nombre: _tamano(ruta) for nombre, ruta in (
+                      ("capturas", cfg.DIR_CAPTURAS), ("capturas_ordenadas", cfg.DIR_ORDENADAS),
+                      ("resultados", cfg.DIR_RESULTADOS), ("papelera", archivos.PAPELERA))}},
+    }
+    _cache_sistema[clave] = {"t": time.time(), "datos": datos}
+    return datos
+
+
 _cache_errores: dict = {}
 _lock_errores = threading.Lock()
 
@@ -761,6 +812,8 @@ class Manejador(BaseHTTPRequestHandler):
                 return self._enviar(200, ARCHIVO_VIVO.read_bytes(), "image/jpeg")
             if url.path == "/api/imagen":
                 return self._imagen(q)
+            if url.path == "/api/sistema":
+                return self._json(estado_sistema(q.get("hw", "1") == "1", q.get("forzar") == "1"))
             if url.path == "/api/manual":  # MANUAL.md, que la interfaz muestra con su índice
                 return self._enviar(200, (RAIZ / "MANUAL.md").read_bytes(), "text/markdown; charset=utf-8")
             if url.path == "/api/calibraciones":

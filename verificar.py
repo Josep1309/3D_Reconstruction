@@ -27,12 +27,15 @@ sys.path.insert(0, str(RAIZ))
 USA_COLOR = sys.stdout.isatty()
 SIMBOLOS = {"ok": ("✔", "32"), "aviso": ("⚠", "33"), "error": ("✖", "31"), "info": ("·", "0")}
 resumen = {"ok": 0, "aviso": 0, "error": 0}
+resultados: list[dict] = []   # para --json (la pestaña Sistema de la interfaz)
+_grupo = ""
 
 
 def informar(nivel: str, texto: str, solucion: str = "", seccion: str = "") -> None:
     simbolo, color = SIMBOLOS[nivel]
     if nivel in resumen:
         resumen[nivel] += 1
+    resultados.append({"grupo": _grupo, "nivel": nivel, "texto": texto, "solucion": solucion, "seccion": seccion})
     marca = f"\033[{color}m{simbolo}\033[0m" if USA_COLOR else simbolo
     print(f"  {marca} {texto}")
     if solucion:
@@ -42,6 +45,8 @@ def informar(nivel: str, texto: str, solucion: str = "", seccion: str = "") -> N
 
 
 def titulo(texto: str) -> None:
+    global _grupo
+    _grupo = texto
     print(f"\n{texto}")
 
 
@@ -223,11 +228,18 @@ def verificar_calibracion(tamano_camara: tuple[int, int] | None) -> None:
     if tamano_camara and "cam_size_wh" in datos and tuple(int(v) for v in datos["cam_size_wh"]) != tamano_camara:
         informar("error", f"La calibración es para una cámara de {tuple(datos['cam_size_wh'])} px y la conectada "
                           f"mide {tamano_camara}", "¿Es otra cámara o cambió la resolución? Recalibra.", "§20.5")
-    if "cobertura_up" in datos:
-        ancho = (datos["cobertura_up"][1] - datos["cobertura_up"][0]) / cfg.PROYECTOR_ANCHO
-        if ancho < 0.7:
-            informar("aviso", f"La calibración cubre solo el {100 * ancho:.0f}% del ancho del proyector",
-                     "Conviene recalibrar con poses del tablero en los bordes del campo.", "§16.6")
+    try:  # el mismo control de calidad que decide si una calibración nueva se pone en uso
+        import calibracion_estereo as ce
+
+        resumen_json = json.loads((cfg.DIR_CALIBRACION / "Estereo_TSC_0_2.json").read_text(encoding="utf-8"))
+        motivos = ce.control_calidad(resumen_json)
+    except (OSError, ValueError):
+        motivos = []
+    if motivos:
+        informar("aviso", "La calibración en uso no pasa el control de calidad: " + "; ".join(motivos),
+                 "Revisa la pestaña Calibración de la interfaz (errores por pose y mapa de cobertura).", "§12.4")
+    else:
+        informar("ok", "La calibración en uso pasa el control de calidad (cobertura: ver el mapa en la pestaña Calibración)")
     historial = sorted((cfg.DIR_CALIBRACION / "historial").glob("*"))
     informar("info", f"{len(historial)} calibración(es) en el historial")
     try:
@@ -277,10 +289,35 @@ def verificar_interfaz(puerto: int = 8000) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--sin-hardware", action="store_true", help="No intenta detectar la cámara ni el proyector")
+    parser.add_argument("--json", action="store_true", help="Solo imprime el resultado en JSON (para la interfaz)")
     args = parser.parse_args()
     con_hw = not args.sin_hardware
+    if args.json:
+        import contextlib
+        import io
+        import json
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            try:
+                _comprobar(con_hw)
+            except SystemExit:
+                pass
+        print(json.dumps({"resumen": resumen, "resultados": resultados}, ensure_ascii=False))
+        return
 
     print(f"Verificación del sistema de reconstrucción 3D por franjas — {RAIZ}")
+    _comprobar(con_hw)
+    print(f"\nResumen: {resumen['ok']} correctos, {resumen['aviso']} advertencias, {resumen['error']} errores.")
+    if resumen["error"]:
+        print("Corrige los errores (✖) antes de usar el sistema. Detalles en MANUAL.md §20 y §16.")
+    elif resumen["aviso"]:
+        print("Se puede usar; revisa las advertencias (⚠) si necesitas capturar o configurar el proyector.")
+    else:
+        print("Todo listo.")
+    raise SystemExit(1 if resumen["error"] else 0)
+
+
+def _comprobar(con_hw: bool) -> None:
     verificar_python()
     if not verificar_paquetes():
         print("\nFaltan paquetes básicos: corrige eso primero (./instalar.sh) y vuelve a verificar.")
@@ -291,15 +328,6 @@ def main() -> None:
     verificar_calibracion(tamano)
     verificar_datos()
     verificar_interfaz()
-
-    print(f"\nResumen: {resumen['ok']} correctos, {resumen['aviso']} advertencias, {resumen['error']} errores.")
-    if resumen["error"]:
-        print("Corrige los errores (✖) antes de usar el sistema. Detalles en MANUAL.md §20 y §16.")
-    elif resumen["aviso"]:
-        print("Se puede usar; revisa las advertencias (⚠) si necesitas capturar o configurar el proyector.")
-    else:
-        print("Todo listo.")
-    raise SystemExit(1 if resumen["error"] else 0)
 
 
 if __name__ == "__main__":
