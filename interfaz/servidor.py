@@ -36,7 +36,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 from comun import ARCHIVO_VIVO, DIR_CALIBRACION, DIR_ESTATICO, RAIZ, RE_POSE
 from ejecucion import difusor, ejecucion
-from imagenes import _cache_mapas, _lock_npz, _xyz, diferencia_z, generar_imagen, generar_nube, histograma_plano, perfil_3d, punto_3d
+from imagenes import _cache_mapas, _lock_npz, _xyz, diferencia_z, generar_imagen, generar_nube, estado_mascara, guardar_mascara, histograma_plano, perfil_3d, previa_mascara, punto_3d
 from consultas import _cache_errores, _lock_errores, configuracion_por_defecto, errores_calibracion, estado_sistema, guardar_comparacion, inventario, listado_archivos, listar_comparaciones, resumen_calibracion, vigilar
 
 import cv2
@@ -119,7 +119,16 @@ class Manejador(BaseHTTPRequestHandler):
                 return self._imagen(q)
             if url.path == "/api/punto":
                 cat, pose = self._cat_pose(q)
-                return self._json(punto_3d(cat, pose, float(q["fx"]), float(q["fy"])))
+                radio = int(min(max(float(q.get("radio", 6)), 1), 40))
+                return self._json(punto_3d(cat, pose, float(q["fx"]), float(q["fy"]), radio))
+            if url.path == "/api/mediciones":
+                import mediciones
+
+                cat, pose = self._cat_pose(q)
+                return self._json(mediciones.listar(cat, pose))
+            if url.path == "/api/mascara":
+                cat, pose = self._cat_pose(q)
+                return self._json(estado_mascara(cat, pose))
             if url.path == "/api/perfil":
                 cat, pose = self._cat_pose(q)
                 return self._json(perfil_3d(cat, pose, (float(q["ax"]), float(q["ay"])), (float(q["bx"]), float(q["by"]))))
@@ -166,7 +175,8 @@ class Manejador(BaseHTTPRequestHandler):
                 return self._json(errores_calibracion(q.get("variante", "independiente")))
             if url.path == "/api/nube":
                 cat, pose = self._cat_pose(q)
-                datos = generar_nube(cat, pose, int(q.get("max", 400_000)))
+                maximo = max(1000, min(int(q.get("max", 400_000)), 2_000_000))
+                datos = generar_nube(cat, pose, maximo, q.get("indices") == "1")
                 return self._enviar(200, datos, "application/octet-stream")
             return self._error(404, "ruta desconocida")
         except FileNotFoundError as exc:
@@ -209,6 +219,29 @@ class Manejador(BaseHTTPRequestHandler):
                 cuerpo = self._cuerpo()
                 cat, pose = self._cat_pose({k: str(v) for k, v in cuerpo.items()})
                 return self._json(guardar_comparacion(cat, pose))
+            if url.path in ("/api/mediciones/guardar", "/api/mediciones/borrar", "/api/mediciones/actualizar"):
+                import mediciones
+
+                cuerpo = self._cuerpo()
+                cat, pose = self._cat_pose(cuerpo)
+                if url.path.endswith("guardar"):
+                    return self._json(mediciones.guardar(cat, pose, cuerpo.get("medicion") or {}))
+                if url.path.endswith("borrar"):
+                    return self._json(mediciones.borrar(cat, pose, str(cuerpo.get("id", ""))))
+                return self._json(mediciones.actualizar(cat, pose, lambda fx, fy: punto_3d(cat, pose, fx, fy, 15)))
+            if url.path in ("/api/mascara/previa", "/api/mascara/guardar", "/api/mascara/borrar"):
+                cuerpo = self._cuerpo()
+                cat, pose = self._cat_pose(cuerpo)
+                if url.path.endswith("previa"):
+                    return self._json(previa_mascara(cat, pose, cuerpo.get("parametros") or {},
+                                                     vista=str(cuerpo.get("vista", "textura"))))
+                if url.path.endswith("borrar"):
+                    import mascara
+
+                    otras = [p for p in cuerpo.get("poses") or [] if RE_POSE.match(str(p))]
+                    return self._json({"borradas": [p for p in [pose, *otras] if mascara.borrar(cat, p)]})
+                otras = [p for p in cuerpo.get("poses") or [] if RE_POSE.match(str(p))]
+                return self._json(guardar_mascara(cat, pose, cuerpo.get("parametros") or {}, otras))
             if url.path == "/api/importar/elegir":  # ventana del sistema para elegir la carpeta
                 import importar
 

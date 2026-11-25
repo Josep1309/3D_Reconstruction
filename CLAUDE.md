@@ -94,6 +94,11 @@ Las etapas corren en un orden fijo desde `pipeline.py` (`ETAPAS`):
       `conf.seleccion` + `calib_poses`.
     - La calibración la guarda en su `.json` y `usar_configuracion_de()` la restaura al
       activarla.
+- **Máscara por pose** (`mascara.py`, pestaña Máscara): `pose_XX_mascara.png` junto a las
+  fases. La reconstrucción la aplica si existe (más `FILTRO_VECINOS_SIGMA`, 0 = apagado). Su
+  firma va en `<cat>_resumen.json` (`mascara`), así que cambiarla recalcula solo esa pose.
+- **Mediciones** (`mediciones.py`, pestaña Medición): `<DATOS>/mediciones.json`. Guardan la firma
+  de la reconstrucción para avisar si quedaron desactualizadas.
 - **Ajustes de la interfaz:** `conf["ajustes"]` sobrescribe variables de `cfg`
   (`ejecutor.aplicar_ajustes`, null = desactivado).
   - Las fases guardan una `firma` de sus parámetros. Si falta, se asume la de
@@ -125,6 +130,7 @@ Las etapas corren en un orden fijo desde `pipeline.py` (`ETAPAS`):
     - `ajustes.js`: diálogo ⚙ y tema (`data-theme` en `<html>`);
     - `archivos.js`: pestaña Archivos;
     - `calibracion.js`: pestaña Calibración;
+    - `mascara.js` y `medir.js`: pestañas Máscara y Medición;
   - textos de la interfaz en español e inglés en `estatico/i18n.js`. Todo texto visible nuevo va
     allí, en los dos idiomas: `data-i18n` en el HTML y `t("clave")` en el JS.
 

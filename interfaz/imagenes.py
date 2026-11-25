@@ -193,7 +193,22 @@ def punto_3d(cat: str, pose: str, fx: float, fy: float, radio: int = 6) -> dict:
     k = int(np.argmin((ys + f0 - f) ** 2 + (xs + c0 - c) ** 2))
     fi, ci = int(ys[k] + f0), int(xs[k] + c0)
     return {"fila": fi, "col": ci, "fx": ci / (ancho - 1), "fy": fi / (alto - 1),
+            "ajustado_px": float(np.hypot(fi - f, ci - c)), "sigma_mm": _ruido_local(xyz, m, fi, ci),
             **{k2: float(xyz[k2][fi, ci]) for k2 in ("X", "Y", "Z")}}
+
+
+def _ruido_local(xyz, m: np.ndarray, fi: int, ci: int, r: int = 4) -> float | None:
+    """Ruido de la superficie alrededor del punto: RMS de los residuos de un plano ajustado a sus
+    vecinos válidos (ventana de 2r+1 px). Sirve de incertidumbre aproximada de la posición."""
+    f0, f1, c0, c1 = max(fi - r, 0), fi + r + 1, max(ci - r, 0), ci + r + 1
+    v = m[f0:f1, c0:c1]
+    if v.sum() < 8:
+        return None
+    p = np.column_stack([xyz[k][f0:f1, c0:c1][v].astype(np.float64) for k in ("X", "Y", "Z")])
+    p -= p.mean(axis=0)
+    # el menor valor singular mide la dispersión fuera del plano local
+    s = np.linalg.svd(p, compute_uv=False)
+    return float(s[-1] / np.sqrt(len(p)))
 
 
 def perfil_3d(cat: str, pose: str, a: tuple[float, float], b: tuple[float, float], n: int = 400) -> dict:
@@ -260,7 +275,11 @@ def diferencia_z(cat: str, pose: str, ref: str, mascaras: bool = False):
     return dif, stats
 
 
-def generar_nube(cat: str, pose: str, maximo: int) -> bytes:
+def generar_nube(cat: str, pose: str, maximo: int, indices: bool = False) -> bytes:
+    """uint32 N | float32 xyz·N | uint8 gris·N [| uint32 alto, ancho, índice del píxel·N, con `indices`].
+
+    El índice del píxel (fila · ancho + columna) permite volver a la imagen: la pestaña Medición
+    lo usa para pedir el punto exacto y su ruido local."""
     archivos = _archivos_pose(cat, pose)
     xyz = cargar_npz(archivos["reconstruida"])
     m = xyz["Mask"].astype(bool) & np.isfinite(xyz["Z"])
@@ -272,4 +291,79 @@ def generar_nube(cat: str, pose: str, maximo: int) -> bytes:
         gris = cargar_npz(archivos["absoluta"])["Itex"].ravel()[idx].astype(np.uint8)
     else:
         gris = np.full(len(idx), 200, np.uint8)
-    return np.uint32(len(idx)).tobytes() + pts.tobytes() + gris.tobytes()
+    salida = np.uint32(len(idx)).tobytes() + pts.tobytes() + gris.tobytes()
+    if indices:
+        salida += np.array(m.shape, "<u4").tobytes() + idx.astype("<u4").tobytes()
+    return salida
+
+
+# ------------------------------------------------------------------ máscara (pestaña «Máscara»)
+def _base_mascara(cat: str, pose: str):
+    import mascara
+
+    d = cargar_npz(_archivos_pose(cat, pose)["absoluta"])
+    fd = mascara.fase_triangulacion()
+    claves = {"Fx": ("MaskX", "qFx"), "Fy": ("MaskY", "qFy")}.get(fd, ("MaskX", "qFx", "MaskY", "qFy"))
+    valido, gamma, umbral = mascara.base({k: d[k] for k in claves}, fd)
+    return valido, gamma, umbral, fd, d["Itex"]
+
+
+def estado_mascara(cat: str, pose: str) -> dict:
+    """Parámetros guardados (o None), la fase usada, el umbral γ actual y el histograma de γ."""
+    import mascara
+
+    valido, gamma, umbral, fd, _ = _base_mascara(cat, pose)
+    g = gamma[valido]
+    cuentas, bordes = np.histogram(np.clip(g, 0, 1), bins=50, range=(0.0, 1.0))
+    reconstruida = _archivos_pose(cat, pose)["reconstruida"]
+    return {"parametros": mascara.leer_parametros(cat, pose), "fase": fd, "umbral_actual": umbral,
+            "validos": int(valido.sum()), "total": int(valido.size), "hist": cuentas.tolist(),
+            "hist_max": float(bordes[-1]), "reconstruida": reconstruida.exists(),
+            "forma": list(valido.shape)}
+
+
+def previa_mascara(cat: str, pose: str, params: dict, ancho: int = 960, vista: str = "textura") -> dict:
+    """Vista previa: textura (o γ) con lo que se conserva normal, lo que quita la máscara en rojo y
+    lo que ya descartaba la fase oscurecido. Si hay reconstrucción, cuántos de sus puntos quedan."""
+    import base64
+
+    import mascara
+
+    valido, gamma, _, _, itex = _base_mascara(cat, pose)
+    m = mascara.calcular(valido, gamma, params)
+    if vista == "gamma":
+        base = cv2.applyColorMap(np.clip(gamma * 255 / max(float(np.percentile(gamma[valido], 99)) if valido.any() else 1, 1e-3),
+                                         0, 255).astype(np.uint8), cv2.COLORMAP_INFERNO)
+    else:
+        base = cv2.cvtColor(itex, cv2.COLOR_GRAY2BGR)
+    img = base.astype(np.float32)
+    quitado = valido & ~m
+    img[~valido] *= 0.25
+    img[quitado] = img[quitado] * 0.45 + np.array([40, 40, 230], np.float32) * 0.55  # rojo (BGR)
+    escala = min(ancho / img.shape[1], 1.0)
+    img = cv2.resize(img.astype(np.uint8), (0, 0), fx=escala, fy=escala, interpolation=cv2.INTER_AREA)
+    ok, jpg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    salida = {"imagen": "data:image/jpeg;base64," + base64.b64encode(jpg.tobytes()).decode(),
+              "conservados": int(m.sum()), "validos": int(valido.sum()), "total": int(m.size)}
+    ruta = _archivos_pose(cat, pose)["reconstruida"]
+    if ruta.exists():  # efecto sobre la nube actual
+        try:
+            mr = cargar_npz(ruta)["Mask"].astype(bool)
+            salida["puntos_actuales"] = int(mr.sum())
+            salida["puntos_quedan"] = int((mr & m).sum())
+        except (OSError, KeyError, ValueError):
+            pass
+    return salida
+
+
+def guardar_mascara(cat: str, pose: str, params: dict, otras: list[str]) -> dict:
+    """Guarda la máscara de la pose y, con los mismos parámetros, la de `otras` poses."""
+    import mascara
+
+    hechas = {}
+    for p in [pose, *[o for o in otras if o != pose]]:
+        valido, gamma, *_ = _base_mascara(cat, p)
+        m = mascara.calcular(valido, gamma, params)
+        mascara.guardar(cat, p, m, params)
+        hechas[p] = {"conservados": int(m.sum()), "validos": int(valido.sum())}
+    return {"poses": hechas}

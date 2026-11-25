@@ -34,6 +34,7 @@ import cv2
 import numpy as np
 
 import configuracion as cfg
+import mascara
 import fase
 import rutas
 import sesiones
@@ -294,10 +295,11 @@ def _guardar_figura(
 
 
 def _id_reconstruccion(ruta_calibracion: Path, fd: str, z_min: float, z_max: float, salto_max: float,
-                       plano_umbral: float = cfg.PLANO_UMBRAL_MM) -> str:
+                       plano_umbral: float = cfg.PLANO_UMBRAL_MM, vecinos: float = 0.0) -> str:
     """Identifica todo lo que, además de la fase de la pose, determina su reconstrucción."""
     st = ruta_calibracion.resolve().stat()
     extra = "" if plano_umbral == 3.0 else f"|{plano_umbral}"  # sin cambiar el id de lo ya calculado
+    extra += f"|vecinos={vecinos}" if vecinos else ""
     return f"{ruta_calibracion.resolve()}|{st.st_mtime_ns}|{fd}|{z_min}|{z_max}|{salto_max}{extra}"
 
 
@@ -334,7 +336,7 @@ def procesar_reconstruccion(
         )
     stereo_params = dict(np.load(ruta_calibracion))
     fd_usada = elegir_fase(fd, stereo_params)
-    ident = _id_reconstruccion(ruta_calibracion, fd_usada, z_min, z_max, salto_max, plano_umbral)
+    ident = _id_reconstruccion(ruta_calibracion, fd_usada, z_min, z_max, salto_max, plano_umbral, cfg.FILTRO_VECINOS_SIGMA)
     print(f"[INFO] Calibración: '{ruta_calibracion}' | triangulación con: {fd_usada}"
           f"{' (auto)' if fd.lower() == 'auto' else ''}")
     for clave in ("cobertura_up", "cobertura_vp"):
@@ -366,8 +368,10 @@ def procesar_reconstruccion(
             ruta_xyz = dir_cat / f"{categoria}_{nombre}.npz"
             salidas.setdefault(categoria, []).append(ruta_ply)
             previo = resumen.get(nombre, {})
+            firma_mascara = mascara.firma(categoria, nombre)  # máscara de la pestaña «Máscara», si hay
             if (
-                not rehacer and previo.get("id") == ident and ruta_ply.exists() and ruta_xyz.exists()
+                not rehacer and previo.get("id") == ident and previo.get("mascara") == firma_mascara
+                and ruta_ply.exists() and ruta_xyz.exists()
                 and ruta_xyz.stat().st_mtime > ruta_fase.stat().st_mtime
             ):
                 print(f"  [{nombre}] sin cambios, se reutiliza '{ruta_ply.name}'"
@@ -381,6 +385,11 @@ def procesar_reconstruccion(
                 peso_x=d.get("BX"), peso_y=d.get("BY"),
             )
             m = filtrar_outliers_3d(z, m, salto_max, z_min, z_max)
+            n_antes = int(np.count_nonzero(m))
+            mask_usuario = mascara.cargar(categoria, nombre, m.shape)
+            if mask_usuario is not None:
+                m &= mask_usuario
+            m = mascara.filtrar_vecinos(x, y, z, m, cfg.FILTRO_VECINOS_SIGMA)
             itex = d["Itex"]
             fuera = fuera_de_cobertura(d["up"], d["vp"], m, stereo_params, fd_usada)
 
@@ -390,11 +399,14 @@ def procesar_reconstruccion(
 
             e_map, erms = None, None
             texto = ""
-            info = {"id": ident, "puntos": int(len(pts)), "fuera_de_cobertura": round(fuera, 4)}
+            info = {"id": ident, "puntos": int(len(pts)), "fuera_de_cobertura": round(fuera, 4),
+                    "mascara": firma_mascara, "quitados_mascara": n_antes - int(len(pts))}
+            if firma_mascara or cfg.FILTRO_VECINOS_SIGMA:
+                texto = f" | máscara/filtro: -{n_antes - len(pts):,} puntos"
             if categoria == "plano" and np.count_nonzero(m) > 100:
                 e_map, erms, coef = plane_fitting(x, y, z, m, umbral_mm=plano_umbral)
                 cobertura = 100.0 * np.count_nonzero(np.isfinite(e_map)) / np.count_nonzero(m)
-                texto = f" | error RMS plano = {erms:.4f} mm ({cobertura:.0f}% de los puntos)"
+                texto += f" | error RMS plano = {erms:.4f} mm ({cobertura:.0f}% de los puntos)"
                 info.update(erms_mm=erms, plano_ABC=[float(c) for c in coef], fraccion_en_plano=cobertura / 100)
             if np.any(m):
                 z1, z99 = np.percentile(z[m], [1, 99])

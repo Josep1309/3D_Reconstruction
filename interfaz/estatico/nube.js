@@ -48,12 +48,20 @@ class VisorNube {
     this.uTam = gl.getUniformLocation(p, "tam");
   }
 
-  // datos: ArrayBuffer con uint32 N | float32 xyz*N | uint8 gris*N
-  cargar(buffer) {
+  // datos: ArrayBuffer con uint32 N | float32 xyz*N | uint8 gris*N [| uint32 alto, ancho, índice*N]
+  cargar(buffer, conIndices = false) {
     const n = new DataView(buffer).getUint32(0, true);
     const xyz = new Float32Array(buffer, 4, n * 3);
     this.gris = new Uint8Array(buffer, 4 + n * 12, n);
     this.n = n;
+    this.xyz = xyz;  // coordenadas originales (mm), para medir
+    this.indices = null;
+    if (conIndices) {  // el bloque no queda alineado a 4 bytes: se copia
+      const ini = 4 + n * 13;
+      const cab = new Uint32Array(buffer.slice(ini, ini + 8));
+      this.forma = [cab[0], cab[1]];
+      this.indices = new Uint32Array(buffer.slice(ini + 8, ini + 8 + n * 4));
+    }
     // Centro y escala robustos (percentiles) para no depender de puntos atípicos
     const muestra = (eje) => {
       const v = [];
@@ -148,8 +156,46 @@ class VisorNube {
       gl.enableVertexAttribArray(this.aCol);
       gl.vertexAttribPointer(this.aCol, 3, gl.FLOAT, false, 0, 0);
       gl.drawArrays(gl.POINTS, 0, this.n);
+      this.alDibujar?.();
     });
   }
+
+  // Posición en pantalla (px CSS dentro del lienzo) de un punto en mm; null si queda detrás
+  proyectar(p, mvp = this._matriz()) {
+    const x = p[0] - this.centro[0], y = p[1] - this.centro[1], z = p[2] - this.centro[2];
+    const cw = mvp[3] * x + mvp[7] * y + mvp[11] * z + mvp[15];
+    if (cw <= 0) return null;
+    const cx = (mvp[0] * x + mvp[4] * y + mvp[8] * z + mvp[12]) / cw;
+    const cy = (mvp[1] * x + mvp[5] * y + mvp[9] * z + mvp[13]) / cw;
+    return [(cx + 1) / 2 * this.canvas.clientWidth, (1 - cy) / 2 * this.canvas.clientHeight];
+  }
+
+  // Punto de la nube bajo el cursor: entre los que caen a menos de `radio` px, el más cercano a
+  // la cámara virtual (el que se ve delante). Devuelve su índice en la nube o -1.
+  elegir(clientX, clientY, radio = 7) {
+    if (!this.n) return -1;
+    const r = this.canvas.getBoundingClientRect();
+    const px = clientX - r.left, py = clientY - r.top, w = r.width, h = r.height;
+    const m = this._matriz(), [c0, c1, c2] = this.centro, xyz = this.xyz;
+    const r2 = radio * radio, tol = this.dist * 0.01;
+    let mejor = -1, mejorProf = Infinity, mejorD = Infinity;
+    for (let i = 0; i < this.n; i++) {
+      const x = xyz[i * 3] - c0, y = xyz[i * 3 + 1] - c1, z = xyz[i * 3 + 2] - c2;
+      const cw = m[3] * x + m[7] * y + m[11] * z + m[15];
+      if (cw <= 0) continue;
+      const sx = ((m[0] * x + m[4] * y + m[8] * z + m[12]) / cw + 1) / 2 * w;
+      const sy = (1 - (m[1] * x + m[5] * y + m[9] * z + m[13]) / cw) / 2 * h;
+      const d2 = (sx - px) ** 2 + (sy - py) ** 2;
+      if (d2 > r2) continue;
+      // el de delante gana; a igual profundidad (±1 % de la distancia), el más cercano al cursor
+      if (cw < mejorProf - tol || (Math.abs(cw - mejorProf) <= tol && d2 < mejorD)) {
+        mejor = i; mejorProf = Math.min(cw, mejorProf); mejorD = d2;
+      }
+    }
+    return mejor;
+  }
+
+  punto(i) { return [this.xyz[i * 3], this.xyz[i * 3 + 1], this.xyz[i * 3 + 2]]; }
 
   _desplazar(dx, dy) {
     // Desplaza el objetivo en el plano de la pantalla
@@ -166,8 +212,10 @@ class VisorNube {
     let previo = null, modo = null;
     const toques = new Map();
     c.addEventListener("contextmenu", (e) => e.preventDefault());
+    let inicio = null;
     c.addEventListener("pointerdown", (e) => {
       c.setPointerCapture(e.pointerId);
+      inicio = [e.clientX, e.clientY, e.button, e.shiftKey];
       toques.set(e.pointerId, [e.clientX, e.clientY]);
       previo = [e.clientX, e.clientY];
       modo = (e.button === 2 || e.shiftKey) ? "pan" : "girar";
@@ -194,14 +242,19 @@ class VisorNube {
       this.dibujar();
     });
     const soltar = (e) => { toques.delete(e.pointerId); if (!toques.size) previo = null; };
-    c.addEventListener("pointerup", soltar);
+    c.addEventListener("pointerup", (e) => {
+      // clic sin arrastrar (botón izquierdo): la pestaña Medición lo usa para elegir puntos
+      if (inicio && inicio[2] === 0 && !inicio[3] && Math.hypot(e.clientX - inicio[0], e.clientY - inicio[1]) < 4) this.alClic?.(e);
+      inicio = null;
+      soltar(e);
+    });
     c.addEventListener("pointercancel", soltar);
     c.addEventListener("wheel", (e) => {
       e.preventDefault();
       this.dist *= Math.exp(e.deltaY * 0.0012);
       this.dibujar();
     }, { passive: false });
-    c.addEventListener("dblclick", () => this.reiniciar());
+    c.addEventListener("dblclick", () => { if (!this.sinDobleClic) this.reiniciar(); });
   }
 }
 

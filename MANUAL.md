@@ -920,6 +920,16 @@ pose de 1.3 Mpx.
 Descarta los puntos que se alejan más de `SALTO_MAX_MM` de la mediana local 5×5 y los que están
 fuera de `[Z_MIN_MM, Z_MAX_MM]`. Equivale al `pcdenoise` de MATLAB.
 
+Después se aplican, si existen:
+
+- **La máscara de la pose** (`mascara.py`, pestaña *Máscara*).
+- **El filtro de puntos aislados** (`FILTRO_VECINOS_SIGMA`, apagado por defecto). Para cada
+  punto calcula la distancia media 3D a sus 8 vecinos de la imagen. Quita los que superan la
+  mediana en más de σ desviaciones robustas (MAD) y los que no tienen vecinos. Con 3σ quita entre
+  el 5 y el 8 % de los puntos de un objeto (bordes y puntos volando).
+
+La caché de la reconstrucción incluye los dos: cambiar la máscara recalcula solo esa pose.
+
 ### 13.6 Ajuste de plano — `plane_fitting(x, y, z, mask)` (solo categoría `plano`)
 
 1. **RANSAC**: 300 iteraciones sobre 20 000 puntos al azar. Elige el plano con más puntos a menos
@@ -1104,7 +1114,7 @@ corresponde. Cada subsección es una tabla de **síntoma → causa probable → 
 | Error de planitud en forma de cuenco (±1–2 mm en las esquinas) | Calibración con pocas poses, poca inclinación o poca cobertura | 10–15 poses con ±20–30°; confirma que la superficie sea realmente plana |
 | Error sistemático cerca del borde izquierdo de la imagen | Zona del proyector (u_p alto) no cubierta por la calibración | Igual que el anterior: poses del tablero desplazadas a esa zona |
 | Huecos o estrías horizontales en superficies oscuras | Poco contraste de las franjas H (DMD en diamante) | Más ciclos por captura; mejor iluminación; ver el último punto de §16.9 |
-| Puntos sueltos muy lejos del objeto | Atípicos que pasan el filtro | Ajusta `Z_MIN_MM`, `Z_MAX_MM` y `SALTO_MAX_MM` |
+| Puntos sueltos muy lejos del objeto | Atípicos que pasan el filtro | Pestaña *Máscara* (región más grande, recortar el contorno, excluir zonas); activa *Quitar puntos aislados en 3D* en ⚙; o ajusta `Z_MIN_MM`, `Z_MAX_MM` y `SALTO_MAX_MM` |
 | Resultados distintos tras cambiar `FASE_TRIANGULACION` | Esperable: Fx y Fy no tienen la misma sensibilidad | Usa `auto` (§13.3) |
 
 ### 16.8 Interfaz web
@@ -1192,6 +1202,8 @@ En esta tabla, `<P>` es la carpeta del proceso de captura (`AAAA-MM-DD_HHMM`, §
 | `calibraciones/Estereo_TSC_0_2.json` | Resumen legible — versionado | `calibracion` |
 | `calibraciones/historial/<fecha>/` | Copia de cada calibración anterior | `calibracion` |
 | `resultados/calibracion/patron_PhasesData.npz` | Correspondencias del tablero | `calibracion` |
+| `resultados/<P>/fases/<cat>/pose_XX_mascara.png` / `.json` | Máscara de la pose y sus parámetros | pestaña Máscara |
+| `mediciones.json` | Mediciones de distancia por pose | pestaña Medición |
 | `resultados/<P>/reconstruccion/<cat>/<cat>_pose_XX.ply` | Nube de puntos | `reconstruccion` |
 | `resultados/<P>/reconstruccion/<cat>/<cat>_pose_XX.npz` | `X, Y, Z, Mask` (y `E` en planos) | `reconstruccion` |
 | `resultados/reconstruccion/<cat>/<cat>_resumen.json` | Estadísticas de todas las poses, `erms_mm` | `reconstruccion` |
@@ -1289,7 +1301,7 @@ elegidas, importar y el proceso por etapas. El panel muestra:
 Al terminar, el panel indica si todo salió bien (se oculta a los 20 s) o en qué etapa se detuvo.
 Se cierra con ×.
 
-Seis pestañas de pasos y tres aparte: **Sistema** (estado del equipo, lista de comprobación antes
+Ocho pestañas de pasos y tres aparte: **Sistema** (estado del equipo, lista de comprobación antes
 de medir y espacio en disco), **Archivos** y **Calibración**. Arriba a la derecha están el
 **manual** (📖, también con la tecla `?`) y los **Ajustes** (⚙). Las pestañas de resultados siguen solas al proceso en curso
 cuando **Seguir la última** está activo:
@@ -1315,7 +1327,33 @@ cuando **Seguir la última** está activo:
 3. **Fase envuelta.** φ de X e Y en [−π, π] y la modulación γ de cada una.
 4. **Fase desenvuelta.** Fx y Fy, el orden de franja k del código Gray y el mapa de píxeles
    válidos.
-5. **Profundidad.** Mapa Z y, en los planos, el error respecto al plano ajustado. Debajo,
+5. **Máscara.** Qué píxeles de la pose se reconstruyen, para quitar el fondo y los
+   **puntos volando** que no son del objeto. Es opcional: sin máscara se usan solo los umbrales de ⚙.
+   La guía paso a paso está en §19.5; aquí va el resumen de los controles.
+   - Se arma sobre la **modulación γ** de la fase con la que se triangula (normalmente Fy). Se
+     puede ver sobre la textura o sobre el mapa de γ. En **rojo**, lo que quita la máscara; en
+     oscuro, lo que ya descartaba la fase.
+   - **Modulación mínima:** sube el umbral de γ solo en esta pose. El histograma de γ ayuda a
+     elegirlo.
+   - **Limpieza:**
+     - *Recortar el contorno* N px: los bordes del objeto mezclan fase de objeto y fondo. Solo
+       recorta el contorno exterior; los agujeritos de dentro no crecen.
+     - *Quitar regiones sueltas* menores de N px.
+     - *Conservar solo la región más grande*: normalmente, el objeto.
+   - **Zonas dibujadas:**
+     - *Recortar a una zona*: conserva solo lo que está dentro.
+     - *Excluir una zona*: la quita, por ejemplo un soporte o la mesa.
+
+     Para dibujar, haz clic en cada vértice y cierra con doble clic, Enter o un clic en el
+     primer punto. Esc cancela.
+   - La vista previa es inmediata y dice cuántos píxeles conserva y cuántos puntos quedarían de
+     la nube actual.
+   - **Aplicar lo mismo a otras poses** de la categoría: mismos parámetros y mismas zonas. La
+     cámara no se mueve, así que sirve si el objeto está en el mismo lugar.
+   - *Guardar y reconstruir* reconstruye solo lo que cambió.
+   - Se guarda en `resultados/<proceso>/fases/<cat>/pose_XX_mascara.png`, donde blanco =
+     se conserva, y se puede editar fuera. Al lado queda un `.json` con los parámetros.
+6. **Profundidad.** Mapa Z y, en los planos, el error respecto al plano ajustado. Debajo,
    **Medir sobre el mapa Z**:
    - *Punto y distancia*: un clic en el mapa Z lee X, Y, Z del píxel válido más cercano. Un
      segundo clic da la distancia 3D entre los dos puntos, ΔZ y la distancia en X-Y.
@@ -1343,12 +1381,29 @@ cuando **Seguir la última** está activo:
      3. elige la copia guardada.
 
    Las copias quedan en `resultados/comparaciones/`, con los ajustes con que se calcularon.
-6. **Nube de puntos.** Visor 3D interactivo con hasta 400 000 puntos, coloreados por profundidad
+7. **Nube de puntos.** Visor 3D interactivo con hasta 400 000 puntos, coloreados por profundidad
    o por textura:
    - arrastrar = girar;
    - clic derecho o Shift + arrastrar = desplazar;
    - rueda = acercar;
    - doble clic = vista inicial.
+8. **Medición.** Distancia 3D entre **dos puntos cualesquiera de la nube** de la pose. Guía
+   paso a paso en §19.6.
+   - **Nube 3D** (vista principal): la nube completa, sin submuestrear. Se gira, se desplaza y
+     se acerca igual que en la pestaña *Nube de puntos*. Un **clic sin arrastrar** sobre un punto
+     lo marca como A y otro clic marca B. Entre los puntos bajo el cursor se elige el que se ve
+     delante. Si haces clic en el vacío, avisa.
+   - **Textura / Profundidad Z**: lo mismo, marcando sobre la imagen de la cámara. Rueda =
+     acercar (hasta 24×), arrastrar = desplazar. Cada clic se ajusta al punto 3D válido más
+     cercano y avisa si se movió.
+   - Da la **distancia 3D**, ΔX, ΔY, ΔZ y X, Y, Z de cada punto, con su **ruido**: el RMS de la
+     superficie alrededor del punto respecto a un plano local (ventana de 9 × 9 px). La
+     incertidumbre de la distancia es la combinación de los dos. En el plano da ~0.03 mm por
+     punto.
+   - **Mediciones guardadas** por pose, con nombre. Se exportan a `.csv` y quedan en
+     `<DATOS>/mediciones.json`.
+   - Si la pose se vuelve a reconstruir, por ejemplo con otra máscara, se marcan con ⚠.
+     *Volver a medir con la nube actual* las recalcula en los mismos lugares de la imagen.
 
 **Calibración** (pestaña aparte, a la derecha).
 
@@ -1386,8 +1441,8 @@ calibración en uso (*independiente* o *conjunta*, según la opción **Calibraci
   - Rojo = sin círculos y visible para la cámara: ahí el modelo se extrapola.
   - Gris = fuera del campo de la cámara: no se mide, así que no importa.
 
-  A la derecha, en la imagen de la cámara, círculos naranjas numerados marcan **dónde poner el
-  tablero** en la próxima calibración para cubrir las zonas rojas. La posición se calcula con un
+  A la derecha, en la imagen de la cámara, círculos naranjas numerados marcan
+  **dónde poner el tablero** en la próxima calibración para cubrir las zonas rojas. La posición se calcula con un
   ajuste afín proyector → cámara de todas las correspondencias, así que es aproximada. Con la
   calibración del 24-nov se cubren 11 de 12 zonas visibles; falta el borde izquierdo de la
   imagen.
@@ -1412,8 +1467,8 @@ las poses que salieron de ella, con cuatro puntos: organizada · fase envuelta �
   organizadas, que es lo que se libera al borrarlos.
 - Las capturas **rechazadas** (sin ciclos válidos) y las **dudosas** (organizadas antes de los
   controles actuales, con pureza < 0.5) se marcan con su motivo.
-- **Usar esta configuración** la pone en uso, junto con su calibración si existe. **Volver a la
-  última** regresa a la más reciente.
+- **Usar esta configuración** la pone en uso, junto con su calibración si existe. 
+  **Volver a la última** regresa a la más reciente.
 - **Borrar:** marca capturas, un proceso o una configuración entera (*Seleccionar todo*) y pulsa
   **Mover a la papelera**. Se mueve la captura cruda y todo lo que depende de ella: poses
   organizadas, fases y reconstrucciones. También se quitan sus entradas del manifiesto, del
@@ -1453,6 +1508,7 @@ los de `configuracion.py`.
 | Fase para triangular | `FASE_TRIANGULACION` | auto | (Fy / Fx / ambas) |
 | Filtro de saltos en Z | `SALTO_MAX_MM` | 5 mm | sin filtro |
 | Rango de Z válido | `Z_MIN_MM`, `Z_MAX_MM` | 100–1500 mm | sin límite |
+| Quitar puntos aislados en 3D | `FILTRO_VECINOS_SIGMA` | apagado | (activo: 3 σ) |
 | Tolerancia del plano (RANSAC) | `PLANO_UMBRAL_MM` | 3 mm | — |
 | Calibración / poses del patrón | `CALIBRACION`, `CALIBRACION_POSES` | independiente / última sesión | — |
 | Distancia entre círculos del tablero (columnas – filas) | `PATRON_DISTANCIA_MM` | 15 – 15 mm | — (mídela con un calibre y recalibra) |
@@ -1615,6 +1671,81 @@ TESIS_DIR_DATOS=~/pruebas_tesis .env/bin/python interfaz/servidor.py
 ```
 
 ---
+
+### 19.5 Máscara paso a paso
+
+**Qué es.** Cada píxel de la cámara da, como mucho, un punto 3D. La máscara es una imagen en
+blanco y negro, del tamaño de la cámara, que dice qué píxeles se convierten en puntos: blanco =
+se conserva, negro = se descarta. Se arma sobre la imagen de la cámara (2D), pero su efecto se ve
+en la nube (3D).
+
+**De dónde salen los puntos volando:**
+
+- **El fondo** (mesa, pared) tiene franjas, así que da puntos que no son del objeto.
+- **Los bordes del objeto** mezclan la luz del objeto y la del fondo. Esa fase mezclada da
+  puntos que quedan «flotando» entre los dos, a la profundidad equivocada.
+- **Las zonas oscuras o con brillo** tienen poca modulación γ (franjas con poco contraste) y su
+  fase es ruidosa.
+
+**Receta habitual** (pose de un objeto sobre una mesa):
+
+1. Abre la pestaña **5 · Máscara** con la pose elegida. La vista previa muestra la textura:
+   - normal = lo que se reconstruye;
+   - **rojo** = lo que quitará tu máscara;
+   - oscuro = lo que la fase ya descarta (umbrales de ⚙).
+2. **Recorta a una zona:** pulsa *✂ Recortar a una zona* y haz clic alrededor del objeto, un
+   vértice por clic. Cierra con doble clic o Enter. Todo lo de fuera se pone rojo. Es lo que más
+   quita: el fondo entero.
+3. **Recortar el contorno:** sube el deslizador a 3–6 px. Quita el anillo del borde del objeto,
+   de donde salen la mayoría de los puntos volando. Los agujeritos de dentro no crecen.
+4. **Conservar solo la región más grande:** quita los trozos sueltos que quedaron.
+5. Si una zona del objeto sale mal (brillo, sombra), usa *⊘ Excluir una zona*. Si toda la pose
+   tiene puntos ruidosos, marca *Subir el umbral de γ* y súbelo un poco. El histograma muestra la
+   γ de los píxeles; los ruidosos están a la izquierda.
+6. Mira la línea de abajo: cuántos píxeles conserva y
+   **cuántos puntos quedarían de la nube actual**.
+7. Pulsa **Guardar y reconstruir**. Luego revisa la pestaña *Nube de puntos*. Si quedan puntos
+   volando sueltos, activa *Quitar puntos aislados en 3D* en ⚙ Ajustes y reconstruye otra vez.
+
+**Otras cosas que conviene saber:**
+
+- **Varias poses:** si el objeto está en el mismo lugar, marca las poses en
+  *Aplicar lo mismo a otras poses* antes de guardar. Se copian los parámetros y las zonas. Como la cámara no se
+  mueve, las zonas caen en el mismo lugar.
+- **Quitar máscara** vuelve a reconstruir solo con los umbrales de ⚙.
+- **Valores iniciales** deja los controles sin máscara, pero no borra nada hasta guardar.
+- **La máscara no cambia la fase ni la calibración:** solo decide qué puntos entran en la nube.
+  Las mediciones hechas antes de cambiarla quedan marcadas con ⚠ (§19.6).
+
+### 19.6 Medición paso a paso
+
+1. Abre la pestaña **8 · Medición** con la pose elegida. Carga la nube completa, con todos los
+   puntos y no una muestra.
+2. **Gira** la nube (arrastrar), **desplázala** (clic derecho o Shift + arrastrar) y **acércate**
+   (rueda) hasta ver bien el primer punto.
+3. **Clic sin arrastrar** sobre el punto: queda marcado como **A**. Gira si hace falta y haz clic
+   en el segundo: **B**. Se dibuja la línea con la distancia.
+4. A la derecha aparecen:
+   - la **distancia 3D**;
+   - ΔX, ΔY, ΔZ;
+   - X, Y, Z de cada punto;
+   - su **ruido**: la dispersión de la superficie alrededor del punto respecto a un plano local
+     (ventana de 9 × 9 px). Es la incertidumbre aproximada de la posición. El «±» de la
+     distancia combina el de los dos puntos.
+5. Ponle un nombre y pulsa **Guardar**. Las mediciones guardadas se dibujan en azul, y un clic en
+   la lista muestra cada una. *Exportar .csv* las descarga todas.
+
+**Consejos:**
+
+- Mide sobre la superficie, no en el borde: ahí el ruido es mayor (verás un «±» más grande).
+  Si un punto sale con mucho ruido o fuera de lugar, quita los puntos volando con la máscara
+  (§19.5).
+- Las coordenadas están en el sistema de la **cámara** (mm): Z es la distancia a la cámara. La
+  distancia entre dos puntos no depende del sistema.
+- Para comprobar la escala, mide algo conocido. Por ejemplo, dos círculos del tablero en una
+  pose de `patron` reconstruida, o el ancho de una pieza medida con calibre.
+- Si la pose se reconstruye de nuevo (otra máscara o calibración), las mediciones quedan con ⚠.
+  *Volver a medir con la nube actual* las recalcula en los mismos píxeles.
 
 ## 20. Instalación en otro computador
 

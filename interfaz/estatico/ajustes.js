@@ -16,6 +16,8 @@ const AJUSTES = [
   { clave: "SALTO_MAX_MM", grupo: "rec", min: 0.5, max: 50, paso: 0.5, unidad: "mm" },
   { clave: "Z_RANGO", grupo: "rec", doble: ["Z_MIN_MM", "Z_MAX_MM"], min: 0, max: 5000, paso: 10, unidad: "mm" },
   { clave: "TABLERO", grupo: "calib", doble: ["PATRON_DX_MM", "PATRON_DY_MM"], min: 5, max: 50, paso: 0.0001, unidad: "mm", fijo: true },
+  // Apagado por defecto (0 en configuracion.py): al activarlo se propone `sugerido`
+  { clave: "FILTRO_VECINOS_SIGMA", grupo: "rec", min: 1, max: 10, paso: 0.5, unidad: "σ", apagado: true, sugerido: 3 },
   { clave: "PLANO_UMBRAL_MM", grupo: "rec", min: 0.5, max: 20, paso: 0.5, unidad: "mm", fijo: true },
 ];
 
@@ -44,6 +46,7 @@ function guardarAjustes() {
 
 function valorDefecto(a, p) {
   if (a.doble) return { on: true, v: a.doble.map((k) => p[k]) };
+  if (a.apagado) return { on: p[a.clave] > 0, v: p[a.clave] > 0 ? p[a.clave] : a.sugerido };
   return { on: true, v: p[a.clave] };
 }
 

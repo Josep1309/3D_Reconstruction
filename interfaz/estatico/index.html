@@ -173,8 +173,10 @@
       <button role="tab" data-paso="captura"><span>2</span><b data-i18n="paso_captura">Imágenes</b></button>
       <button role="tab" data-paso="envuelta"><span>3</span><b data-i18n="paso_envuelta">Fase envuelta</b></button>
       <button role="tab" data-paso="desenvuelta"><span>4</span><b data-i18n="paso_desenvuelta">Fase desenvuelta</b></button>
-      <button role="tab" data-paso="profundidad"><span>5</span><b data-i18n="paso_profundidad">Profundidad</b></button>
-      <button role="tab" data-paso="nube"><span>6</span><b data-i18n="paso_nube">Nube de puntos</b></button>
+      <button role="tab" data-paso="mascara"><span>5</span><b data-i18n="paso_mascara">Máscara</b></button>
+      <button role="tab" data-paso="profundidad"><span>6</span><b data-i18n="paso_profundidad">Profundidad</b></button>
+      <button role="tab" data-paso="nube"><span>7</span><b data-i18n="paso_nube">Nube de puntos</b></button>
+      <button role="tab" data-paso="medir"><span>8</span><b data-i18n="paso_medir">Medición</b></button>
       <button role="tab" data-paso="sistema" class="paso-aparte"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2h12v9H9.5l.5 2H12v1.5H4V13h2l.5-2H2Zm1.5 1.5v6h9v-6Z"/></svg><b data-i18n="paso_sistema">Sistema</b></button>
       <button role="tab" data-paso="archivos" class="paso-aparte"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3A1.5 1.5 0 0 1 3 1.5h3.2l1.5 1.8H13A1.5 1.5 0 0 1 14.5 4.8v7.7A1.5 1.5 0 0 1 13 14H3a1.5 1.5 0 0 1-1.5-1.5Zm1.5 0v9.5h10V4.8H7l-1.5-1.8Z"/></svg><b data-i18n="paso_archivos">Archivos</b></button>
       <button role="tab" data-paso="calibracion" class="paso-aparte"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Zm0 2.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z"/></svg><b data-i18n="paso_calibracion">Calibración</b></button>
@@ -244,6 +246,66 @@
       </div>
     </section>
 
+    <section class="panel" data-panel="mascara">
+      <p id="mk-vacio" class="nota oculto" data-i18n="mk_vacio">Esta pose aún no tiene fase desenvuelta: la máscara se arma sobre su modulación.</p>
+      <div id="mk-cuerpo" class="mk">
+        <div class="mk-izq">
+          <div id="mk-lienzo" class="mk-lienzo">
+            <img id="mk-img" alt="" draggable="false">
+            <svg id="mk-capa" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true"></svg>
+          </div>
+          <p class="nota mk-leyenda"><i class="mk-c rojo"></i> <span data-i18n="mk_leyenda_quita">lo que quita la máscara</span>
+            · <i class="mk-c oscuro"></i> <span data-i18n="mk_leyenda_fase">ya descartado por la fase (⚙ Ajustes)</span></p>
+          <p id="mk-resultado" class="mk-resultado"></p>
+        </div>
+        <div class="mk-der tarjeta">
+          <button type="button" class="enlace mk-guia" data-manual="19.5" data-i18n="mk_guia">📖 ¿Cómo se usa? Guía paso a paso</button>
+          <div class="mk-fila"><b id="mk-estado"></b>
+            <div class="segmentado" id="mk-vista" role="group">
+              <button type="button" data-vista="textura" class="activo" data-i18n="mk_vista_textura">Textura</button>
+              <button type="button" data-vista="gamma" data-i18n="mk_vista_gamma">Modulación γ</button>
+            </div>
+          </div>
+          <p id="mk-fase" class="nota"></p>
+
+          <h4 data-i18n="mk_modulacion">Modulación mínima (γ)</h4>
+          <label class="casilla"><input id="mk-umbral-on" type="checkbox"> <span data-i18n="mk_umbral_on">Subir el umbral de γ en esta pose</span></label>
+          <div class="mk-control"><input id="mk-umbral" type="range" min="0" max="0.6" step="0.005"><input id="mk-umbral-n" type="number" min="0" max="1" step="0.005"></div>
+          <div id="mk-hist" class="mk-hist" data-i18n-title="mk_hist" title="Histograma de γ"></div>
+
+          <h4 data-i18n="mk_limpieza">Limpieza</h4>
+          <label class="mk-etq" for="mk-erosion" data-i18n="mk_erosion">Recortar el contorno (px)</label>
+          <div class="mk-control"><input id="mk-erosion" type="range" min="0" max="30" step="1"><input id="mk-erosion-n" type="number" min="0" max="50" step="1"></div>
+          <label class="mk-etq" for="mk-isla" data-i18n="mk_isla">Quitar regiones sueltas menores de (px)</label>
+          <div class="mk-control"><input id="mk-isla" type="range" min="0" max="20000" step="100"><input id="mk-isla-n" type="number" min="0" step="100"></div>
+          <label class="casilla"><input id="mk-mayor" type="checkbox"> <span data-i18n="mk_mayor">Conservar solo la región más grande (el objeto)</span></label>
+
+          <h4 data-i18n="mk_zonas">Zonas dibujadas</h4>
+          <div class="mk-fila botones">
+            <button type="button" data-dibujar="recortes" data-i18n="mk_recortar">✂ Recortar a una zona</button>
+            <button type="button" data-dibujar="exclusiones" data-i18n="mk_excluir">⊘ Excluir una zona</button>
+            <button type="button" id="mk-deshacer" data-i18n="mk_deshacer">Deshacer</button>
+            <button type="button" id="mk-sin-zonas" data-i18n="mk_quitar_zonas">Quitar zonas</button>
+          </div>
+          <p class="nota" id="mk-zonas"></p>
+          <p class="nota aviso oculto" id="mk-dibujando" data-i18n="mk_como_dibujar">Haz clic sobre la imagen para poner los vértices; cierra con doble clic, Enter o clic en el primer punto. Esc cancela.</p>
+
+          <div id="mk-otras-fila">
+            <h4 data-i18n="mk_otras">Aplicar lo mismo a otras poses</h4>
+            <label class="casilla"><input id="mk-todas" type="checkbox"> <span data-i18n="mk_todas">Todas</span></label>
+            <div id="mk-otras" class="mk-otras"></div>
+          </div>
+
+          <div class="mk-fila botones mk-acciones">
+            <button type="button" id="mk-reiniciar" data-i18n="mk_reiniciar">Valores iniciales</button>
+            <button type="button" id="mk-borrar" data-i18n="mk_borrar">Quitar máscara</button>
+            <button type="button" id="mk-guardar" data-i18n="mk_guardar">Guardar</button>
+            <button type="button" id="mk-reconstruir" class="primario" data-i18n="mk_guardar_reconstruir">Guardar y reconstruir</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="panel" data-panel="profundidad">
       <div class="rejilla dos">
         <figure data-tipo="Z"><figcaption><span data-i18n="fig_Z">Profundidad Z</span></figcaption></figure>
@@ -282,6 +344,69 @@
           <div id="cmp-stats" class="me-puntos"></div>
         </div>
       </section>
+    </section>
+
+    <section class="panel" data-panel="medir">
+      <p id="md-vacio" class="nota oculto" data-i18n="md_vacio">Esta pose aún no tiene reconstrucción 3D: no hay puntos que medir.</p>
+      <div id="md-cuerpo" class="md">
+        <div class="md-izq">
+          <div class="md-barra">
+            <div class="segmentado" id="md-vista" role="group">
+              <button type="button" data-vista="3d" class="activo" data-i18n="md_vista_3d">Nube 3D</button>
+              <button type="button" data-vista="textura" data-i18n="mk_vista_textura">Textura</button>
+              <button type="button" data-vista="Z" data-i18n="md_vista_z">Profundidad Z</button>
+            </div>
+            <span class="md-ctl3d">
+              <span class="segmentado color" role="group" id="md-color">
+                <button type="button" data-color="profundidad" class="activo" data-i18n="col_prof">Profundidad</button>
+                <button type="button" data-color="textura" data-i18n="col_tex">Textura</button>
+              </span>
+              <label><span data-i18n="tamano">Tamaño</span> <input id="md-tam" type="range" min="1" max="6" step="0.5" value="2"></label>
+              <button type="button" id="md-vista-inicial" data-i18n="vista_inicial">Vista inicial</button>
+            </span>
+            <span class="md-zoom-ctl">
+              <button type="button" id="md-menos" data-i18n-aria="md_alejar" aria-label="Alejar">−</button>
+              <span id="md-zoom">100 %</span>
+              <button type="button" id="md-mas" data-i18n-aria="md_acercar" aria-label="Acercar">+</button>
+              <button type="button" id="md-ajustar" data-i18n="md_ajustar">Ajustar</button>
+            </span>
+          </div>
+          <div id="md-3d" class="md-3d">
+            <canvas id="md-lienzo" data-i18n-aria="lienzo" aria-label="Nube de puntos 3D"></canvas>
+            <svg id="md-capa3d" aria-hidden="true"></svg>
+            <p id="md-info3d" class="visor-info"></p>
+          </div>
+          <div id="md-marco" class="md-marco">
+            <div id="md-mundo" class="md-mundo">
+              <img id="md-img" alt="" draggable="false">
+              <svg id="md-capa" preserveAspectRatio="none" aria-hidden="true"></svg>
+            </div>
+          </div>
+          <p class="nota" id="md-ayuda"></p>
+        </div>
+        <div class="md-der tarjeta">
+          <button type="button" class="enlace mk-guia" data-manual="19.6" data-i18n="md_guia">📖 Guía de la medición</button>
+          <h4 data-i18n="md_distancia">Distancia 3D</h4>
+          <div id="md-distancia" class="md-distancia">—</div>
+          <p id="md-deltas" class="nota"></p>
+          <p id="md-aviso" class="nota aviso"></p>
+          <table id="md-tabla" class="md-tabla oculto">
+            <thead><tr><th></th><th>X</th><th>Y</th><th>Z</th><th data-i18n="md_ruido" data-i18n-title="md_ruido_ayuda" title="">Ruido</th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div class="md-guardar">
+            <input id="md-nombre" type="text" maxlength="80" data-i18n-placeholder="md_nombre" placeholder="Nombre (p. ej. ancho de la pieza)">
+            <button type="button" id="md-guardar" class="primario" data-i18n="md_guardar">Guardar</button>
+            <button type="button" id="md-limpiar" data-i18n="md_limpiar">Limpiar</button>
+          </div>
+          <h4 data-i18n="md_guardadas">Mediciones de esta pose</h4>
+          <div id="md-lista" class="md-lista"></div>
+          <div class="md-fila">
+            <button type="button" id="md-actualizar" class="oculto" data-i18n="md_actualizar">⟳ Volver a medir con la nube actual</button>
+            <button type="button" id="md-csv" data-i18n="md_csv">Exportar .csv</button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section class="panel" data-panel="nube">
@@ -523,6 +648,8 @@
 <script src="/estatico/archivos.js"></script>
 <script src="/estatico/sistema.js"></script>
 <script src="/estatico/medicion.js"></script>
+<script src="/estatico/mascara.js"></script>
+<script src="/estatico/medir.js"></script>
 <script src="/estatico/recalibrar.js"></script>
 <script src="/estatico/calibracion.js"></script>
 <script src="/estatico/app.js"></script>

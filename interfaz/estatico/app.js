@@ -301,7 +301,7 @@ function pintarMetricas() {
 
 function pintarPasos() {
   const p = infoPose() || {};
-  const hecho = { captura: p.organizada, envuelta: p.relativa, desenvuelta: p.absoluta, profundidad: p.reconstruida, nube: p.reconstruida };
+  const hecho = { captura: p.organizada, envuelta: p.relativa, desenvuelta: p.absoluta, mascara: p.mascara, profundidad: p.reconstruida, nube: p.reconstruida, medir: p.reconstruida };
   const enCurso = est.ejec.ejecutando ? PASO_DE_ETAPA[est.ejec.etapa] : null;
   for (const b of $$("#pasos button")) {
     const paso = b.dataset.paso;
@@ -336,6 +336,8 @@ function cargarPanel() {
   if (est.paso === "archivos") return cargarArchivos();
   if (est.paso === "sistema") return cargarSistema();
   if (est.paso === "profundidad") cargarMedicion();
+  if (est.paso === "mascara") return cargarMascara();
+  if (est.paso === "medir") return cargarMedir();
   for (const fig of $$("figure[data-tipo]", panel)) cargarFigura(fig);
 }
 
@@ -874,6 +876,8 @@ async function iniciar() {
   iniciarVisor();
   iniciarArchivos();
   iniciarAvance();
+  iniciarMascara();
+  iniciarMedir();
   if (Array.isArray(c.calib_poses)) {  // lista explícita en pipeline.py
     const o = document.createElement("option");
     o.value = "lista"; o.dataset.i18n = "calib_poses_lista"; o.textContent = t("calib_poses_lista");

@@ -32,6 +32,7 @@ NEUTROS = {
     "Z_MIN_MM": float("-inf"),       # sin límite de Z (se envía junto con Z_MAX_MM)
     "Z_MAX_MM": float("inf"),
     "PLANO_UMBRAL_MM": 3.0,
+    "FILTRO_VECINOS_SIGMA": 0.0,     # sin filtro de puntos aislados
 }
 ENTEROS = {"BORDE_MASCARA", "MED_FILT"}
 

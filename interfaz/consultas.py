@@ -19,6 +19,7 @@ from imagenes import cargar_npz
 
 import numpy as np
 import configuracion as cfg
+import mascara
 import rutas
 
 
@@ -60,7 +61,11 @@ def inventario() -> dict:
             # Procedencia: ¿se calculó con los ajustes actuales? (si no, hay que volver a procesar)
             f_rel, f_abs = _firma_pose(archivos["relativa"], "rel"), _firma_pose(archivos["absoluta"], "abs")
             distintos = [f for f, esperada in ((f_rel, esperada_rel), (f_abs, esperada_abs)) if f and f != esperada]
+            firma_mascara = mascara.firma(cat, pose)
             poses.append({"pose": pose, **estado, "puntos": info.get("puntos"), "erms_mm": info.get("erms_mm"),
+                          # máscara de la pestaña «Máscara»; pendiente = guardada pero la nube no la usa aún
+                          "mascara": firma_mascara is not None,
+                          "mascara_pendiente": estado["reconstruida"] and info.get("mascara") != firma_mascara,
                           "nota": notas.get(f"pose:{cat}/{pose}"),
                           "z": [info.get("z_p1_mm"), info.get("z_p99_mm")],
                           "ajustes_ok": not distintos,
@@ -340,7 +345,7 @@ def configuracion_por_defecto() -> dict:
         "calib_poses": p.CALIBRACION_POSES,
         "parametros": {k: getattr(cfg, k) for k in (
             "PERIODO", "N_BITS_GRAY", "GAMMA_TH", "GAMMA_TH_Y", "SUAVIZADO_FASE_PX", "UMBRAL_INTENSIDAD",
-            "MED_FILT", "BORDE_MASCARA", "ORDEN_BITS_GRAY", "SALTO_MAX_MM", "PLANO_UMBRAL_MM",
+            "MED_FILT", "BORDE_MASCARA", "ORDEN_BITS_GRAY", "SALTO_MAX_MM", "PLANO_UMBRAL_MM", "FILTRO_VECINOS_SIGMA",
             "CAM_EXPOSICION_US", "PATRON_COLUMNAS", "PATRON_FILAS", "PATRON_DISTANCIA_MM", "Z_MIN_MM", "Z_MAX_MM")},
         "fuentes_demo": fuentes_demo(),
         "tablero_mm": list(_distancia_tablero()),

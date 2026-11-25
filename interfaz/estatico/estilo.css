@@ -650,3 +650,92 @@ a.boton:hover { border-color: var(--texto-2); }
 .av-etapas li.fallo { opacity: 1; color: #d14343; }
 .av-paso { display: flex; gap: 12px; font-size: 13px; align-items: baseline; flex-wrap: wrap; }
 .av-detalle { margin-left: auto; font-size: 12px; opacity: .8; font-variant-numeric: tabular-nums; }
+
+/* ---------- Pestaña Máscara ---------- */
+.mk { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 14px; align-items: start; }
+@media (max-width: 1100px) { .mk { grid-template-columns: 1fr; } }
+.mk-lienzo { position: relative; line-height: 0; background: var(--lienzo, #111); border-radius: var(--radio); overflow: hidden; user-select: none; }
+.mk-lienzo img { width: 100%; height: auto; display: block; }
+.mk-lienzo svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.mk-lienzo.dibujando { cursor: crosshair; outline: 2px solid var(--acento); }
+.mk-recorte { fill: none; stroke: #3ccf6e; stroke-width: 2; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; }
+.mk-exclusion { fill: rgb(230 60 60 / .25); stroke: #ff5a5a; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.mk-dibujo { fill: none; stroke: #ffd23f; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.mk-inicio { fill: #ffd23f; }
+.mk-leyenda { margin: 6px 0 0; }
+.mk-c { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; }
+.mk-c.rojo { background: #e63c3c; } .mk-c.oscuro { background: #333; border: 1px solid #777; }
+.mk-resultado { font-size: 13px; margin: 6px 0 0; font-variant-numeric: tabular-nums; }
+.mk-der { display: flex; flex-direction: column; gap: 6px; }
+.mk-der h4 { margin: 10px 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; opacity: .75; }
+.mk-fila { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; justify-content: space-between; }
+.mk-fila.botones { justify-content: flex-start; }
+.mk-fila.botones button.activo { border-color: var(--acento); color: var(--acento); }
+.mk-acciones { margin-top: 10px; }
+.mk-acciones .primario { margin-left: auto; }
+#mk-estado.aviso { color: #c98a00; }
+.mk-control { display: flex; gap: 8px; align-items: center; }
+.mk-control input[type=range] { flex: 1; accent-color: var(--acento); }
+.mk-control input[type=number] { width: 80px; }
+.mk-etq { font-size: 12.5px; }
+.mk-hist { height: 44px; }
+.mk-hist svg { width: 100%; height: 100%; display: block; }
+.mk-hist rect { fill: color-mix(in srgb, var(--texto, #888) 45%, transparent); }
+.mk-umbral { stroke: var(--acento); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.mk-otras { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 12.5px; }
+.mk-der .mk-fila.botones button { flex: 1 1 calc(50% - 8px); white-space: nowrap; font-size: 12.5px; padding-inline: 8px; }
+.mk-der .mk-acciones button { flex: 0 1 auto; }
+.mk-der .mk-acciones .primario { flex: 1 1 100%; }
+
+/* ---------- Pestaña Medición ---------- */
+.md { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; align-items: start; }
+@media (max-width: 1100px) { .md { grid-template-columns: 1fr; } }
+.md-barra { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.md-zoom-ctl { display: flex; gap: 6px; align-items: center; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.md-zoom-ctl #md-zoom { min-width: 48px; text-align: center; }
+.md-marco { position: relative; overflow: hidden; background: var(--lienzo); border-radius: var(--radio); cursor: crosshair; touch-action: none; user-select: none; }
+.md-marco.arrastrando { cursor: grabbing; }
+.md-mundo { position: relative; transform-origin: 0 0; line-height: 0; }
+.md-mundo img { width: 100%; height: auto; display: block; image-rendering: pixelated; }
+.md-mundo svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.md-linea { stroke: #ffd23f; }
+.md-linea.guardada { stroke: #4fc3f7; opacity: .6; }
+.md-punto { fill: none; stroke: #ffd23f; }
+.md-etq { fill: #ffd23f; font-weight: 700; paint-order: stroke; stroke: #000; stroke-width: .5px; }
+.md-der { display: flex; flex-direction: column; gap: 6px; }
+.md-der h4 { margin: 8px 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; opacity: .75; }
+.md-distancia { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--acento); }
+.md-tabla { width: 100%; font-size: 12.5px; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.md-tabla th, .md-tabla td { padding: 2px 4px; text-align: right; }
+.md-tabla th:first-child { text-align: left; }
+.md-guardar { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.md-guardar input { flex: 1 1 100%; }
+.md-guardar .primario { flex: 1; }
+.md-lista { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow: auto; }
+.md-item { display: flex; gap: 4px; }
+.md-item .md-ver { flex: 1; display: flex; justify-content: space-between; gap: 8px; text-align: left; font-size: 13px; }
+.md-item .md-ver span { font-variant-numeric: tabular-nums; }
+.md-item.sel .md-ver { border-color: var(--acento); box-shadow: inset 0 0 0 1px var(--acento); }
+.md-item.vieja .md-ver span { color: #c98a00; }
+.md-item .md-x { padding: 0 10px; }
+.md-fila { display: flex; gap: 6px; flex-wrap: wrap; }
+/* Con 8 pasos + 3 pestañas aparte no caben en una fila: pasan a otra en vez de quedar ocultas */
+.pasos { flex-wrap: wrap; overflow-x: visible; row-gap: 2px; }
+.pasos button { flex: 0 1 auto; padding: 6px 10px; }
+.pasos button.paso-aparte { flex: 0 1 auto; }
+.pasos button[data-paso="sistema"] { margin-left: auto; }
+
+.md-3d { position: relative; height: min(70vh, 640px); background: var(--lienzo); border-radius: var(--radio); overflow: hidden; }
+.md-3d canvas { width: 100%; height: 100%; display: block; cursor: crosshair; touch-action: none; }
+.md-3d svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.md-3d .visor-info { position: absolute; left: 10px; bottom: 6px; margin: 0; }
+.md-3d .md-punto { stroke-width: 2; }
+.md-3d .md-linea { stroke-width: 2; }
+.md-3d .md-linea.guardada { stroke-width: 1.5; }
+.md-3d .md-etq { font-size: 14px; }
+.md-cota { fill: #fff; font-size: 13px; font-weight: 700; paint-order: stroke; stroke: #000; stroke-width: 3px; }
+.md-ctl3d { display: flex; gap: 8px; align-items: center; font-size: 12.5px; flex-wrap: wrap; }
+.md-ctl3d input[type=range] { width: 80px; vertical-align: middle; }
+
+.md-distancia small { font-size: 15px; font-weight: 600; opacity: .8; }
+.mk-guia { align-self: flex-start; background: none; border: none; padding: 0; color: var(--acento); font-size: 12.5px; cursor: pointer; text-decoration: underline; }

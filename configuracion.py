@@ -129,6 +129,7 @@ CALIBRACION = "independiente"  # "independiente" (Estereo_TSC_0_2) o "conjunta" 
 Z_MIN_MM = 100.0
 Z_MAX_MM = 1500.0
 SALTO_MAX_MM = 5.0             # salto local máximo en Z (filtro de puntos atípicos)
+FILTRO_VECINOS_SIGMA = 0.0     # quita puntos aislados en 3D (mascara.filtrar_vecinos); 0 = desactivado
 PLANO_UMBRAL_MM = 3.0          # distancia máxima al plano (RANSAC) para medir la planitud de `plano`
 
 # Valores tal como están en este archivo, antes de que la interfaz aplique sus ajustes (los usa
