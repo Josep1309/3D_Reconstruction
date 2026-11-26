@@ -1606,7 +1606,12 @@ cuando **Seguir la última** está activo:
    - arrastrar = girar;
    - clic derecho o Shift + arrastrar = desplazar;
    - rueda = acercar;
-   - doble clic = vista inicial.
+   - doble clic = vista inicial;
+   - botones **Frente, Atrás, Izq., Der., Arriba, Abajo**: vistas fijas, centradas en la nube.
+     Son respecto de la cámara: *Frente* es mirar la pieza desde la cámara, *Arriba* desde −Y
+     (la Y de la cámara apunta hacia abajo en la imagen) e *Izq./Der.* desde los lados tal como
+     los ve la cámara. Si la cámara está inclinada, «arriba» es el de la cámara, no el de la mesa.
+     También están en la pestaña *Medición*.
 8. **Medición.** Distancia 3D entre **dos puntos cualesquiera de la nube** de la pose. Guía
    paso a paso en §19.6.
    - **Nube 3D** (vista principal): la nube completa, sin submuestrear. Se gira, se desplaza y
@@ -1968,6 +1973,29 @@ en la nube (3D).
 5. Ponle un nombre y pulsa **Guardar**. Las mediciones guardadas se dibujan en azul, y un clic en
    la lista muestra cada una. *Exportar .csv* las descarga todas.
 
+**Medidas rápidas** (recuadro de la derecha, *Calcular*): medidas de toda la pieza sin marcar
+puntos (`procesamiento/medidas.py`, `GET /api/medidas_rapidas`). Un clic en una fila la dibuja
+en la nube (en rosa).
+
+| Medida | Qué es |
+|---|---|
+| **Distancia máxima** | Los dos puntos de la pieza más alejados entre sí (el «largo máximo» en cualquier dirección). *Usar* los pasa a la medición normal para guardarla con nombre. |
+| **Caja orientada** | Largo × ancho × espesor según los ejes principales de la pieza: no depende de cómo esté puesta frente a la cámara. Es la caja que sigue la forma, no necesariamente la de menor volumen. |
+| **Caja X·Y·Z** | Extensión en X (derecha), Y (abajo) y Z (profundidad) de la cámara: el ancho y alto «como se ve» desde la cámara. |
+| **Esfera ajustada** | Diámetro de la esfera que mejor se ajusta a los puntos y el RMS de los residuos. Sirve para piezas redondas aunque solo se vea un casquete; si el RMS es de varios mm, la pieza no es una esfera e ignora el diámetro. |
+
+Opciones:
+
+- **Solo la pieza principal** (activada): usa el mayor grupo de puntos conectados en 3D (vóxeles
+  de 3 mm). Quita el fondo lejano y los grupos sueltos, pero **no separa la pieza de la mesa** si
+  está apoyada y la mesa salió en la nube: en ese caso quita la mesa con la *Máscara* (§19.5).
+- **Atípicos** (0.1 % por defecto): descarta ese porcentaje de puntos en cada extremo de cada eje
+  principal. Sube a 0.5–1 % si quedan puntos volando que alargan las medidas.
+
+Una sola vista ve solo una cara: el espesor y la caja en Z son los de **la parte visible**. Para
+el tamaño completo, mide sobre una pose que muestre la dimensión que buscas o sobre un escaneo
+360°.
+
 **Consejos:**
 
 - Mide sobre la superficie, no en el borde: ahí el ruido es mayor (verás un «±» más grande).
@@ -1999,6 +2027,10 @@ Una captura ve solo la cara del objeto que mira a la cámara. Para tenerlo compl
 4. La mesa y el fondo se quitan con la *Máscara* de cada pose. Si no, quedan en la nube unida.
 
 **Cómo unirlas (pestaña 360°):**
+
+Al abrir la pestaña se muestra el escaneo guardado más reciente que contiene la **pose elegida**.
+Si ninguno la contiene, empieza un escaneo nuevo con esa pose como referencia (★). Los escaneos
+anteriores siguen en la lista desplegable.
 
 1. *＋ Nuevo escaneo…*, un nombre y las vistas (miniaturas). La primera elegida (★) es la
    **referencia**: la nube final queda en su sistema de coordenadas.

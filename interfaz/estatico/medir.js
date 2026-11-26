@@ -8,6 +8,7 @@
 const md = {
   clave: null, vista: "3d", puntos: [], lista: [], seleccion: null, visor: null, nube: null,
   zoom: 1, dx: 0, dy: 0, arrastre: null, ancho: 1280, alto: 1024, turno: 0,
+  rapidas: null, rapSel: null, rapTurno: 0,  // medidas rápidas (procesamiento/medidas.py) y cuál se dibuja
 };
 
 async function cargarMedir() {
@@ -19,6 +20,8 @@ async function cargarMedir() {
   if (md.clave === clave && md.version === v) return;
   if (md.clave !== clave) { md.puntos = []; md.seleccion = null; md.zoom = 1; md.dx = md.dy = 0; }
   md.clave = clave; md.version = v;
+  md.rapidas = null; md.rapSel = null; md.rapTurno++;
+  pintarRapidas();
   mostrarVistaMedir();
   await cargarListaMediciones();
   pintarMedir();
@@ -103,7 +106,109 @@ function pintarCapa3D() {
     s += `<circle cx="${q[0]}" cy="${q[1]}" r="6" class="md-punto"/>`;
     s += `<text x="${q[0] + 9}" y="${q[1] - 8}" class="md-etq">${"AB"[k]}</text>`;
   });
-  capa.innerHTML = s;
+  capa.innerHTML = s + capaRapidas3D(pr);
+}
+
+// Lo que se dibuja de la medida rápida elegida: caja (12 aristas y sus tres medidas), esfera
+// (contorno aproximado en pantalla) o el segmento de la distancia máxima.
+function capaRapidas3D(pr) {
+  const r = md.rapidas, sel = md.rapSel;
+  if (!r || !sel) return "";
+  const P = (x) => pr({ X: x[0], Y: x[1], Z: x[2] });
+  const linea = (a, b, cls) => (a && b ? `<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}" class="${cls}"/>` : "");
+  const texto = (q, txt) => (q ? `<text x="${q[0] + 6}" y="${q[1] - 6}" class="md-cota mr-cota">${txt}</text>` : "");
+  if (sel === "dmax") {
+    const { a, b, distancia_mm } = r.distancia_maxima, pa = pr(a), pb = pr(b);
+    let s = linea(pa, pb, "mr-linea");
+    for (const q of [pa, pb]) if (q) s += `<circle cx="${q[0]}" cy="${q[1]}" r="5" class="mr-punto"/>`;
+    return s + texto(pa && pb && [(pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2], `${fmt(distancia_mm, 2)} mm`);
+  }
+  if (sel === "esfera" && r.esfera) {
+    const c = r.esfera.centro, rad = r.esfera.diametro_mm / 2, [der, arr] = md.visor.ejesPantalla();
+    const pc = P(c);
+    if (!pc) return "";
+    let s = "", pts = [];
+    for (let k = 0; k <= 48; k++) {
+      const a = (k / 48) * 2 * Math.PI, q = P(c.map((v, i) => v + rad * (Math.cos(a) * der[i] + Math.sin(a) * arr[i])));
+      if (q) pts.push(q.join(","));
+    }
+    s += `<polyline points="${pts.join(" ")}" class="mr-linea"/>`;
+    s += `<circle cx="${pc[0]}" cy="${pc[1]}" r="4" class="mr-punto"/>`;
+    return s + texto(pc, `Ø ${fmt(r.esfera.diametro_mm, 2)} mm`);
+  }
+  const caja = sel === "orientada" ? r.caja_orientada : sel === "camara" ? r.caja_camara : null;
+  if (!caja) return "";
+  const { centro, ejes, medidas_mm: m } = caja;
+  const esquina = (k) => P(centro.map((v, i) => v + [0, 1, 2].reduce((acc, e) => acc + ((k >> e) & 1 ? 0.5 : -0.5) * m[e] * ejes[e][i], 0)));
+  const esq = [...Array(8).keys()].map(esquina);
+  let s = "";
+  for (let k = 0; k < 8; k++) for (const e of [0, 1, 2]) if (!((k >> e) & 1)) s += linea(esq[k], esq[k | (1 << e)], "mr-linea");
+  // las tres medidas, en las aristas que salen de la esquina 0
+  const nombres = sel === "camara" ? ["X", "Y", "Z"] : [t("mr_largo"), t("mr_ancho"), t("mr_espesor")];
+  for (const e of [0, 1, 2]) {
+    const a = esq[0], b = esq[1 << e];
+    if (a && b) s += texto([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], `${nombres[e]} ${fmt(m[e], 1)}`);
+  }
+  return s;
+}
+
+// ------------------------------------------------------------------ medidas rápidas
+async function calcularRapidas() {
+  const turno = ++md.rapTurno;
+  const recorte = $("#mr-recorte").value, principal = $("#mr-principal").checked ? 1 : 0;
+  $("#mr-estado").textContent = t("mr_calculando");
+  $("#mr-calcular").disabled = true;
+  try {
+    const r = await api(`/api/medidas_rapidas?cat=${est.cat}&pose=${est.pose}&recorte=${recorte}&principal=${principal}`);
+    if (turno !== md.rapTurno) return;
+    md.rapidas = r;
+    md.rapSel = md.rapSel || "dmax";
+  } catch (err) {
+    if (turno !== md.rapTurno) return;
+    md.rapidas = null;
+    $("#mr-estado").textContent = t("error_x", { m: err.message });
+  } finally { if (turno === md.rapTurno) $("#mr-calcular").disabled = false; }
+  pintarRapidas();
+  pintarMedir();
+}
+
+function pintarRapidas() {
+  const r = md.rapidas, tabla = $("#mr-tabla");
+  tabla.classList.toggle("oculto", !r);
+  if (!r) { if (!$("#mr-calcular").disabled) $("#mr-estado").textContent = t("mr_ayuda"); return; }
+  $("#mr-estado").textContent = t("mr_puntos", { n: r.puntos.toLocaleString(locale()), total: r.puntos_validos.toLocaleString(locale()) });
+  const x = (m) => m.map((v) => fmt(v, 1)).join(" × ");
+  const filas = [
+    ["dmax", t("mr_dmax"), `${fmt(r.distancia_maxima.distancia_mm, 2)} mm`, t("mr_dmax_t")],
+    ["orientada", t("mr_orientada"), `${x(r.caja_orientada.medidas_mm)} mm`, t("mr_orientada_t")],
+    ["camara", t("mr_camara"), `${x(r.caja_camara.medidas_mm)} mm`, t("mr_camara_t")],
+  ];
+  if (r.esfera) filas.push(["esfera", t("mr_esfera"), `Ø ${fmt(r.esfera.diametro_mm, 2)} mm · RMS ${fmt(r.esfera.rms_mm, 2)}`, t("mr_esfera_t")]);
+  const tb = $("tbody", tabla);
+  tb.innerHTML = "";
+  for (const [id, nombre, valor, ayuda] of filas) {
+    const tr = document.createElement("tr");
+    tr.className = id === md.rapSel ? "sel" : "";
+    tr.title = ayuda;
+    tr.innerHTML = "<th></th><td></td><td></td>";
+    $("th", tr).textContent = nombre;
+    $("td", tr).textContent = valor;
+    if (id === "dmax") {  // se puede guardar como una medición normal (dos puntos reales)
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "enlace"; b.textContent = t("mr_usar"); b.title = t("mr_usar_t");
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const { a, b: pb } = r.distancia_maxima;
+        md.seleccion = null;
+        md.puntos = [{ ...a, sigma_mm: null }, { ...pb, sigma_mm: null }];
+        $("#md-nombre").value = t("mr_dmax");
+        pintarMedir();
+      });
+      tr.lastElementChild.append(b);
+    }
+    tr.addEventListener("click", () => { md.rapSel = md.rapSel === id ? null : id; pintarRapidas(); pintarMedir(); });
+    tb.append(tr);
+  }
 }
 
 function cargarImagenMedir() {
@@ -189,6 +294,10 @@ function pintarCapaMedir() {
   if (pts.length === 2) {
     const [ax, ay] = px(pts[0]), [bx, by] = px(pts[1]);
     s += `<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" class="md-linea" stroke-width="${ancho}"/>`;
+  }
+  if (md.rapidas && md.rapSel === "dmax") {
+    const [ax, ay] = px(md.rapidas.distancia_maxima.a), [bx, by] = px(md.rapidas.distancia_maxima.b);
+    s += `<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" class="mr-linea" stroke-width="${ancho}"/>`;
   }
   pts.forEach((p, i) => {
     const [x, y] = px(p);
@@ -300,7 +409,13 @@ function iniciarMedir() {
   $("#md-mas").addEventListener("click", () => { const r = marco.getBoundingClientRect(); zoomMedir(1.5, r.left + r.width / 2, r.top + r.height / 2); });
   $("#md-menos").addEventListener("click", () => { const r = marco.getBoundingClientRect(); zoomMedir(1 / 1.5, r.left + r.width / 2, r.top + r.height / 2); });
   $("#md-ajustar").addEventListener("click", () => { md.zoom = 1; md.dx = md.dy = 0; aplicarVistaMedir(); });
-  $("#md-limpiar").addEventListener("click", () => { md.puntos = []; md.seleccion = null; $("#md-aviso").textContent = ""; pintarMedir(); });
+  $("#md-limpiar").addEventListener("click", () => {
+    md.puntos = []; md.seleccion = null; $("#md-aviso").textContent = "";
+    // también las medidas rápidas (y un cálculo en curso, que ya no se mostrará)
+    md.rapidas = null; md.rapSel = null; md.rapTurno++; $("#mr-calcular").disabled = false;
+    pintarRapidas();
+    pintarMedir();
+  });
   $("#md-guardar").addEventListener("click", guardarMedicionActual);
   $("#md-nombre").addEventListener("keydown", (e) => { if (e.key === "Enter") guardarMedicionActual(); });
   $("#md-csv").addEventListener("click", exportarMediciones);
@@ -327,5 +442,9 @@ function iniciarMedir() {
   }
   $("#md-tam").addEventListener("input", (e) => md.visor?.setTamano(+e.target.value));
   $("#md-vista-inicial").addEventListener("click", () => md.visor?.reiniciar());
+  enlazarVistas($("#md-vistas"), () => md.visor);
+  $("#mr-calcular").addEventListener("click", calcularRapidas);
+  for (const id of ["#mr-recorte", "#mr-principal"]) $(id).addEventListener("change", () => { if (md.rapidas) calcularRapidas(); });
+  pintarRapidas();
   for (const b of $$("[data-manual]")) b.addEventListener("click", () => abrirManual(b.dataset.manual));
 }

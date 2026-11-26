@@ -197,6 +197,14 @@ def punto_3d(cat: str, pose: str, fx: float, fy: float, radio: int = 6) -> dict:
             **{k2: float(xyz[k2][fi, ci]) for k2 in ("X", "Y", "Z")}}
 
 
+def medidas_rapidas(cat: str, pose: str, recorte: float = 0.1, principal: bool = True) -> dict:
+    """Distancia máxima, cajas y esfera ajustada de la nube de la pose (procesamiento/medidas.py)."""
+    from procesamiento import medidas
+
+    xyz = _xyz(cat, pose)
+    return medidas.medidas_rapidas(xyz["X"], xyz["Y"], xyz["Z"], xyz["Mask"], recorte, principal)
+
+
 def _ruido_local(xyz, m: np.ndarray, fi: int, ci: int, r: int = 4) -> float | None:
     """Ruido de la superficie alrededor del punto: RMS de los residuos de un plano ajustado a sus
     vecinos válidos (ventana de 2r+1 px). Sirve de incertidumbre aproximada de la posición."""

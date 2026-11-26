@@ -403,6 +403,14 @@
               </span>
               <label><span data-i18n="tamano">Tamaño</span> <input id="md-tam" type="range" min="1" max="6" step="0.5" value="2"></label>
               <button type="button" id="md-vista-inicial" data-i18n="vista_inicial">Vista inicial</button>
+              <div class="segmentado vistas" id="md-vistas" role="group" data-i18n-aria="vistas" aria-label="Vistas">
+                <button type="button" data-lado="frente" data-i18n="vw_frente" data-i18n-title="vw_frente_t" title="Desde la cámara">Frente</button>
+                <button type="button" data-lado="atras" data-i18n="vw_atras" data-i18n-title="vw_atras_t" title="Desde detrás de la pieza">Atrás</button>
+                <button type="button" data-lado="izquierda" data-i18n="vw_izq" data-i18n-title="vw_izq_t" title="Desde la izquierda (vista desde la cámara)">Izq.</button>
+                <button type="button" data-lado="derecha" data-i18n="vw_der" data-i18n-title="vw_der_t" title="Desde la derecha (vista desde la cámara)">Der.</button>
+                <button type="button" data-lado="arriba" data-i18n="vw_arriba" data-i18n-title="vw_arriba_t" title="Desde arriba (−Y de la cámara)">Arriba</button>
+                <button type="button" data-lado="abajo" data-i18n="vw_abajo" data-i18n-title="vw_abajo_t" title="Desde abajo (+Y de la cámara)">Abajo</button>
+              </div>
             </span>
             <span class="md-zoom-ctl">
               <button type="button" id="md-menos" data-i18n-aria="md_alejar" aria-label="Alejar">−</button>
@@ -439,6 +447,19 @@
             <button type="button" id="md-guardar" class="primario" data-i18n="md_guardar">Guardar</button>
             <button type="button" id="md-limpiar" data-i18n="md_limpiar">Limpiar</button>
           </div>
+          <section class="md-rapidas">
+            <div class="md-rapidas-cab">
+              <h4 data-i18n="mr_titulo">Medidas rápidas</h4>
+              <button type="button" id="mr-calcular" data-i18n="mr_calcular">Calcular</button>
+            </div>
+            <div class="md-fila mr-opciones">
+              <label><input type="checkbox" id="mr-principal" checked> <span data-i18n="mr_principal" data-i18n-title="mr_principal_t" title="El mayor grupo de puntos conectados en 3D: quita el fondo lejano y los grupos sueltos">Solo la pieza principal</span></label>
+              <label><span data-i18n="mr_recorte" data-i18n-title="mr_recorte_t" title="Quita este porcentaje de puntos en cada extremo de cada eje (puntos atípicos sueltos)">Atípicos</span>
+                <select id="mr-recorte"><option value="0">0 %</option><option value="0.1" selected>0.1 %</option><option value="0.5">0.5 %</option><option value="1">1 %</option></select></label>
+            </div>
+            <p id="mr-estado" class="nota"></p>
+            <table id="mr-tabla" class="md-tabla mr-tabla oculto"><tbody></tbody></table>
+          </section>
           <h4 data-i18n="md_guardadas">Mediciones de esta pose</h4>
           <div id="md-lista" class="md-lista"></div>
           <div class="md-fila">
@@ -548,6 +569,14 @@
           </div>
           <label><span data-i18n="tamano">Tamaño</span> <input id="n-tam" type="range" min="1" max="6" step="0.5" value="2"></label>
           <button id="n-reiniciar" data-i18n="vista_inicial" data-i18n-title="vista_title">Vista inicial</button>
+          <div class="segmentado vistas" id="n-vistas" role="group" data-i18n-aria="vistas" aria-label="Vistas">
+            <button type="button" data-lado="frente" data-i18n="vw_frente" data-i18n-title="vw_frente_t" title="Desde la cámara">Frente</button>
+            <button type="button" data-lado="atras" data-i18n="vw_atras" data-i18n-title="vw_atras_t" title="Desde detrás de la pieza">Atrás</button>
+            <button type="button" data-lado="izquierda" data-i18n="vw_izq" data-i18n-title="vw_izq_t" title="Desde la izquierda (vista desde la cámara)">Izq.</button>
+            <button type="button" data-lado="derecha" data-i18n="vw_der" data-i18n-title="vw_der_t" title="Desde la derecha (vista desde la cámara)">Der.</button>
+            <button type="button" data-lado="arriba" data-i18n="vw_arriba" data-i18n-title="vw_arriba_t" title="Desde arriba (−Y de la cámara)">Arriba</button>
+            <button type="button" data-lado="abajo" data-i18n="vw_abajo" data-i18n-title="vw_abajo_t" title="Desde abajo (+Y de la cámara)">Abajo</button>
+          </div>
         </div>
         <p id="n-info" class="visor-info">arrastra para girar · clic derecho o Shift para desplazar · rueda para acercar</p>
         <p id="n-vacio" class="visor-vacio oculto">Esta pose aún no tiene reconstrucción 3D.</p>

@@ -39,7 +39,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 from comun import ARCHIVO_VIVO, DIR_CALIBRACION, DIR_ESTATICO, RAIZ, RE_POSE
 from ejecucion import difusor, ejecucion
-from imagenes import _cache_mapas, _lock_npz, _xyz, diferencia_z, generar_imagen, generar_nube, estado_mascara, guardar_mascara, histograma_plano, perfil_3d, previa_mascara, punto_3d
+from imagenes import _cache_mapas, _lock_npz, _xyz, diferencia_z, generar_imagen, generar_nube, estado_mascara, guardar_mascara, histograma_plano, medidas_rapidas, perfil_3d, previa_mascara, punto_3d
 from consultas import _cache_errores, _lock_errores, configuracion_por_defecto, errores_calibracion, estado_sistema, guardar_comparacion, inventario, listado_archivos, listar_comparaciones, resumen_calibracion, vigilar
 
 import cv2
@@ -124,6 +124,10 @@ class Manejador(BaseHTTPRequestHandler):
                 cat, pose = self._cat_pose(q)
                 radio = int(min(max(float(q.get("radio", 6)), 1), 40))
                 return self._json(punto_3d(cat, pose, float(q["fx"]), float(q["fy"]), radio))
+            if url.path == "/api/medidas_rapidas":
+                cat, pose = self._cat_pose(q)
+                recorte = min(max(float(q.get("recorte", 0.1)), 0.0), 5.0)
+                return self._json(medidas_rapidas(cat, pose, recorte, q.get("principal", "1") != "0"))
             if url.path == "/api/mediciones":
                 from datos_sistema import mediciones
 

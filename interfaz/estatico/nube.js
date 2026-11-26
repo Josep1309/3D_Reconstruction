@@ -1,7 +1,7 @@
 // Visor de nubes de puntos en WebGL, sin dependencias (funciona sin internet).
 // Coordenadas de entrada: sistema de la cámara en mm (X derecha, Y abajo, Z hacia la escena).
 // Controles: arrastrar = girar, clic derecho / Shift + arrastrar = desplazar, rueda = acercar,
-// doble clic = vista inicial. En pantallas táctiles: un dedo gira, dos dedos acercan.
+// doble clic = vista inicial, verDesde("frente" | "atras" | …) = vistas fijas. En pantallas táctiles: un dedo gira, dos dedos acercan.
 "use strict";
 
 class VisorNube {
@@ -179,6 +179,33 @@ class VisorNube {
     this.alMover?.();
   }
 
+  // Vistas fijas (botones Frente, Atrás, Izquierda, Derecha, Arriba, Abajo), respecto de la cámara
+  // real: «frente» es mirar la pieza desde la cámara y «arriba» desde −Y (la imagen tiene Y hacia
+  // abajo). Recentra y encuadra la nube, con una transición corta.
+  verDesde(lado) {
+    const casi = Math.PI / 2 - 1e-3;  // ±90° exactos dejan indefinido el «arriba» de la pantalla
+    const ang = { frente: [0, 0], atras: [Math.PI, 0], izquierda: [-Math.PI / 2, 0], derecha: [Math.PI / 2, 0],
+                  arriba: [0, -casi], abajo: [0, casi] }[lado];
+    if (!ang) return;
+    const ini = this.vista, t0 = performance.now(), ms = 250;
+    // giro por el camino más corto
+    let dyaw = (ang[0] - ini.yaw) % (2 * Math.PI);
+    if (dyaw > Math.PI) dyaw -= 2 * Math.PI;
+    if (dyaw < -Math.PI) dyaw += 2 * Math.PI;
+    const fin = { yaw: ini.yaw + dyaw, pitch: ang[1], dist: this.radio ? this.radio * 2.6 : ini.dist, pan: [0, 0, 0] };
+    cancelAnimationFrame(this._anim);
+    const paso = (ahora) => {
+      const u = Math.min(1, (ahora - t0) / ms), k = u * u * (3 - 2 * u);
+      const mezcla = (a, b) => a + (b - a) * k;
+      this.yaw = mezcla(ini.yaw, fin.yaw); this.pitch = mezcla(ini.pitch, fin.pitch);
+      this.dist = mezcla(ini.dist, fin.dist); this.pan = ini.pan.map((v, i) => mezcla(v, fin.pan[i]));
+      this.dibujar();
+      this.alMover?.();
+      if (u < 1) this._anim = requestAnimationFrame(paso);
+    };
+    this._anim = requestAnimationFrame(paso);
+  }
+
   // Vista (cámara virtual) para copiarla a otro visor
   get vista() { return { yaw: this.yaw, pitch: this.pitch, dist: this.dist, pan: [...this.pan] }; }
   set vista(v) { Object.assign(this, { yaw: v.yaw, pitch: v.pitch, dist: v.dist, pan: [...v.pan] }); this.dibujar(); }
@@ -275,6 +302,14 @@ class VisorNube {
 
   punto(i) { return [this.xyz[i * 3], this.xyz[i * 3 + 1], this.xyz[i * 3 + 2]]; }
 
+  // Direcciones (en mm de la nube) que en pantalla son «derecha» y «arriba»
+  ejesPantalla() {
+    const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw), cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
+    const dir = [sy * cp, sp, -cy * cp];
+    const der = normalizar(cruz([0, -1, 0], dir));
+    return [der, cruz(dir, der)];
+  }
+
   _desplazar(dx, dy) {
     // Desplaza el objetivo en el plano de la pantalla
     const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw), cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
@@ -292,6 +327,7 @@ class VisorNube {
     c.addEventListener("contextmenu", (e) => e.preventDefault());
     let inicio = null;
     c.addEventListener("pointerdown", (e) => {
+      cancelAnimationFrame(this._anim);
       c.setPointerCapture(e.pointerId);
       inicio = [e.clientX, e.clientY, e.button, e.shiftKey];
       toques.set(e.pointerId, [e.clientX, e.clientY]);
@@ -315,7 +351,8 @@ class VisorNube {
       if (modo === "pan") this._desplazar(dx, dy);
       else {
         this.yaw += dx * 0.008;
-        this.pitch = Math.max(-1.5, Math.min(1.5, this.pitch + dy * 0.008));
+        const tope = Math.PI / 2 - 1e-3;
+        this.pitch = Math.max(-tope, Math.min(tope, this.pitch + dy * 0.008));
       }
       this.dibujar();
       this.alMover?.();
@@ -374,3 +411,10 @@ function viridis(t) {
 }
 
 window.VisorNube = VisorNube;
+
+// Botones de vistas fijas: <div data-vistas-de="…"> con <button data-lado="frente">…; `visor` es
+// una función porque el visor se crea al abrir la pestaña.
+function enlazarVistas(grupo, visor) {
+  for (const b of grupo.querySelectorAll("button[data-lado]")) b.addEventListener("click", () => visor()?.verDesde(b.dataset.lado));
+}
+window.enlazarVistas = enlazarVistas;

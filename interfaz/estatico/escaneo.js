@@ -10,15 +10,26 @@ const e3 = {
   marcar: null,             // {a, b, visorA, visorB, puntos: [[pa, pb]], pendiente: pa|null}
 };
 
-async function cargarEscaneo() {
+// porPose (al abrir la pestaña): muestra el escaneo más reciente que contiene la pose elegida; si
+// ninguno la contiene, uno nuevo con esa pose de referencia (y no un escaneo de otras poses).
+// Sin porPose (tras unir o borrar) se queda con el escaneo actual.
+async function cargarEscaneo(porPose = false) {
   try { e3.lista = (await api("/api/escaneos")).escaneos; } catch { e3.lista = []; }
   const sel = $("#e3-lista");
-  const previo = e3.actual;
   sel.innerHTML = "";
   sel.appendChild(new Option(t("e3_nuevo_opcion"), ""));
   for (const e of e3.lista) sel.appendChild(new Option(`${e.nombre} · ${t("e3_n_vistas", { n: (e.unidas || []).length })}`, e.id));
-  sel.value = e3.lista.some((e) => e.id === previo) ? previo : (e3.lista[0]?.id || "");
-  await elegirEscaneo(sel.value);
+  let id;
+  if (porPose) {
+    const conPose = e3.lista.filter((e) => est.cat === "objeto" && (e.poses || []).includes(est.pose))
+      .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+    id = conPose.some((e) => e.id === e3.actual) ? e3.actual : (conPose[0]?.id || "");
+  } else id = e3.lista.some((e) => e.id === e3.actual) ? e3.actual : "";
+  sel.value = id;
+  // un escaneo nuevo a medio elegir que ya incluye la pose no se pierde (p. ej. al cambiar de idioma)
+  const aMedias = !id && !e3.actual && e3.sel.includes(est.pose) ? [...e3.sel] : null;
+  await elegirEscaneo(id);
+  if (aMedias) { e3.sel = aMedias; pintarVistasE3(); }
 }
 
 async function elegirEscaneo(id) {
@@ -29,6 +40,8 @@ async function elegirEscaneo(id) {
     try { e3.datos = await api(`/api/escaneo?id=${encodeURIComponent(id)}`); } catch { e3.datos = null; }
   }
   e3.sel = e3.datos ? [...e3.datos.poses] : [];
+  // escaneo nuevo: la pose elegida queda de referencia (★), si es de objeto y está reconstruida
+  if (!id && est.cat === "objeto" && (est.poses.objeto || []).some((p) => p.pose === est.pose && p.reconstruida)) e3.sel = [est.pose];
   e3.manual = e3.datos?.manual ? structuredClone(e3.datos.manual) : {};
   $("#e3-nombre").value = e3.datos?.nombre || "";
   $("#e3-borrar").disabled = !id;
@@ -123,7 +136,11 @@ function pintarResultadoE3() {
   const d = e3.datos, res = $("#e3-resultado"), tabla = $("#e3-pares tbody");
   tabla.innerHTML = "";
   $("#e3-leyenda").innerHTML = "";
-  if (!d) { res.textContent = e3.actual ? "" : t("e3_ayuda"); return; }
+  if (!d) {
+    res.textContent = e3.actual ? "" : t("e3_ayuda");
+    if (!e3.actual && e3.lista.length) res.textContent += " " + t("e3_otros");
+    return;
+  }
   res.textContent = t("e3_resumen", { u: d.unidas.length, n: d.poses.length, p: (d.puntos || 0).toLocaleString(),
                                       r: d.rms_mm != null ? fmt(d.rms_mm, 3) : "—" });
   if (d.sueltas?.length) res.textContent += " " + t("e3_sueltas", { l: d.sueltas.join(", ") });

@@ -733,6 +733,19 @@ a.boton:hover { border-color: var(--texto-2); }
 .md-3d .md-linea { stroke-width: 2; }
 .md-3d .md-linea.guardada { stroke-width: 1.5; }
 .md-3d .md-etq { font-size: 14px; }
+.mr-linea { stroke: #ff7ad9; stroke-width: 1.5; fill: none; stroke-dasharray: 5 3; }
+.mr-punto { fill: #ff7ad9; stroke: #000; stroke-width: 1; }
+.mr-cota { fill: #ffd6f3; font-size: 12px; }
+.md-rapidas { display: flex; flex-direction: column; gap: 4px; }
+.md-rapidas-cab { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.mr-opciones { font-size: 12.5px; align-items: center; }
+.mr-opciones label { display: flex; align-items: center; gap: 4px; }
+.mr-tabla tr { cursor: pointer; }
+.mr-tabla tr:hover { background: var(--superficie-2); }
+.mr-tabla tr.sel { box-shadow: inset 3px 0 0 #ff7ad9; }
+.mr-tabla td .enlace { margin-left: 6px; font-size: 12px; white-space: nowrap; }
+.mr-tabla th { white-space: nowrap; }
+.segmentado.vistas button { padding: 6px 8px; }
 .md-cota { fill: #fff; font-size: 13px; font-weight: 700; paint-order: stroke; stroke: #000; stroke-width: 3px; }
 .md-ctl3d { display: flex; gap: 8px; align-items: center; font-size: 12.5px; flex-wrap: wrap; }
 .md-ctl3d input[type=range] { width: 80px; vertical-align: middle; }

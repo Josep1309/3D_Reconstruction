@@ -362,7 +362,7 @@ function cargarPanel() {
   if (est.paso === "profundidad") cargarMedicion();
   if (est.paso === "mascara") return cargarMascara();
   if (est.paso === "medir") return cargarMedir();
-  if (est.paso === "escaneo") return cargarEscaneo();
+  if (est.paso === "escaneo") return cargarEscaneo(true);
   for (const fig of $$("figure[data-tipo]", panel)) cargarFigura(fig);
 }
 
@@ -1017,6 +1017,7 @@ async function iniciar() {
   document.addEventListener("idioma", redibujarTextos);
   $("#n-tam").addEventListener("input", (e) => est.visor?.setTamano(+e.target.value));
   $("#n-reiniciar").addEventListener("click", () => est.visor?.reiniciar());
+  enlazarVistas($("#n-vistas"), () => est.visor);
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") $$("figure.ampliada").forEach((f) => f.classList.remove("ampliada"));
     if (e.key === "Enter" && est.ejec.esperando && !["INPUT", "BUTTON", "SELECT"].includes(document.activeElement?.tagName)) {

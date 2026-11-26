@@ -151,6 +151,11 @@ Las etapas corren en un orden fijo desde `pipeline.py` (`ETAPAS`):
   firma va en `<cat>_resumen.json` (`mascara`), así que cambiarla recalcula solo esa pose.
 - **Mediciones** (`mediciones.py`, pestaña Medición): `<DATOS>/mediciones.json`. Guardan la firma
   de la reconstrucción para avisar si quedaron desactualizadas.
+  - *Medidas rápidas* (`procesamiento/medidas.py`, `GET /api/medidas_rapidas`): distancia máxima,
+    caja orientada (PCA), caja X·Y·Z y esfera ajustada, sin marcar puntos. La «pieza principal» se
+    agrupa en 3D (vóxeles de 3 mm), no en la imagen: la máscara de una pieza puede quedar partida
+    (costuras de una pelota).
+  - El visor (`nube.js`) tiene vistas fijas `verDesde("frente"|"atras"|…)`, respecto de la cámara.
 - **Ajustes de la interfaz:** `conf["ajustes"]` sobrescribe variables de `cfg`
   (`ejecutor.aplicar_ajustes`, null = desactivado).
   - Las fases guardan una `firma` de sus parámetros. Si falta, se asume la de
