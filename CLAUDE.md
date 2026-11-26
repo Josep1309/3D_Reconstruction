@@ -130,8 +130,11 @@ Las etapas corren en un orden fijo desde `pipeline.py` (`ETAPAS`):
 - **Escaneo 360°** (`procesamiento/escaneo.py`, pestaña 360°): une poses de objeto. Usa SIFT
   sobre la textura más RANSAC rígido, o puntos marcados a mano; luego ICP punto a plano con
   asociación proyectiva (`cv2.projectPoints` con `Ac`/`dist_cam`, sin FLANN, que era 10× más
-  lento), ajuste global y fusión por vóxel. Sale a `resultados/escaneos/<nombre>/`. Corre en el
-  ejecutor con `conf.escaneo`.
+  lento), ajuste global y fusión por vóxel.
+  - Además, malla TSDF (`procesamiento/tsdf.py`): integración de distancias con signo, rellenando
+    antes los huecos pequeños con convolución normalizada (`cv2.inpaint` metía ceros), y Surface
+    Nets.
+  - Sale a `resultados/escaneos/<nombre>/`. Corre en el ejecutor con `conf.escaneo`.
 - **Máscara por pose** (`mascara.py`, pestaña Máscara): `pose_XX_mascara.png` junto a las
   fases. La reconstrucción la aplica si existe (más `FILTRO_VECINOS_SIGMA`, 0 = apagado). Su
   firma va en `<cat>_resumen.json` (`mascara`), así que cambiarla recalcula solo esa pose.

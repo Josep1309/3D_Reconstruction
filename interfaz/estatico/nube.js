@@ -16,6 +16,10 @@ class VisorNube {
     this._programa();
     this.bPos = gl.createBuffer();
     this.bCol = gl.createBuffer();
+    this.bNor = gl.createBuffer();
+    this.bIdx = gl.createBuffer();
+    this.nCaras = 0;          // > 0: se dibuja una malla (triángulos con sombreado) en vez de puntos
+    this.u32 = !!gl.getExtension("OES_element_index_uint");
     this._eventos();
     new ResizeObserver(() => this.dibujar()).observe(canvas);
   }
@@ -46,11 +50,56 @@ class VisorNube {
     this.aCol = gl.getAttribLocation(p, "col");
     this.uMvp = gl.getUniformLocation(p, "mvp");
     this.uTam = gl.getUniformLocation(p, "tam");
+    // malla: color por vértice con iluminación difusa desde la cámara virtual (más una luz ambiente)
+    const vsm = `
+      attribute vec3 pos; attribute vec3 col; attribute vec3 nor;
+      uniform mat4 mvp; uniform vec3 luz;
+      varying vec3 vCol;
+      void main() {
+        gl_Position = mvp * vec4(pos, 1.0);
+        float d = abs(dot(normalize(nor), luz));
+        vCol = col * (0.25 + 0.75 * d);
+      }`;
+    const pm = gl.createProgram();
+    gl.attachShader(pm, compilar(gl.VERTEX_SHADER, vsm));
+    gl.attachShader(pm, compilar(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(pm);
+    this.progM = pm;
+    this.mPos = gl.getAttribLocation(pm, "pos");
+    this.mCol = gl.getAttribLocation(pm, "col");
+    this.mNor = gl.getAttribLocation(pm, "nor");
+    this.mMvp = gl.getUniformLocation(pm, "mvp");
+    this.mLuz = gl.getUniformLocation(pm, "luz");
+  }
+
+  // Malla: uint32 nv | uint32 nf | float32 xyz·nv | float32 normal·nv | uint8 gris·nv (+relleno a 4) | uint32 caras·nf·3
+  cargarMalla(buffer, centro = null) {
+    const dv = new DataView(buffer), nv = dv.getUint32(0, true), nf = dv.getUint32(4, true);
+    const xyz = new Float32Array(buffer, 8, nv * 3);
+    const nor = new Float32Array(buffer, 8 + nv * 12, nv * 3);
+    const gris = new Uint8Array(buffer, 8 + nv * 24, nv);
+    const ini = 8 + nv * 25 + ((4 - ((nv * 25) % 4)) % 4);
+    const caras = new Uint32Array(buffer, ini, nf * 3);
+    // reutiliza la carga de puntos (centro, escala, colores por profundidad o textura)
+    const tmp = new ArrayBuffer(4 + nv * 13);
+    new DataView(tmp).setUint32(0, nv, true);
+    new Float32Array(tmp, 4, nv * 3).set(xyz);
+    new Uint8Array(tmp, 4 + nv * 12, nv).set(gris);
+    this.cargar(tmp, false, centro);
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.bNor);
+    gl.bufferData(gl.ARRAY_BUFFER, nor, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.bIdx);
+    if (this.u32) gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, caras, gl.STATIC_DRAW);
+    else gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(caras.filter((i) => i < 65536)), gl.STATIC_DRAW);
+    this.nCaras = nf;
+    this.dibujar();
   }
 
   // datos: ArrayBuffer con uint32 N | float32 xyz*N | uint8 gris*N [| uint32 alto, ancho, índice*N]
   // centro: [x, y, z] común a varios visores (comparar métodos); si no, la mediana de esta nube
   cargar(buffer, conIndices = false, centro = null) {
+    this.nCaras = 0;
     const n = new DataView(buffer).getUint32(0, true);
     const xyz = new Float32Array(buffer, 4, n * 3);
     this.gris = new Uint8Array(buffer, 4 + n * 12, n);
@@ -159,6 +208,7 @@ class VisorNube {
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       if (!this.n) return;
       gl.enable(gl.DEPTH_TEST);
+      if (this.nCaras) { this._dibujarMalla(); this.alDibujar?.(); return; }
       gl.useProgram(this.prog);
       gl.uniformMatrix4fv(this.uMvp, false, this._matriz());
       gl.uniform1f(this.uTam, this.tamano * dpr);
@@ -171,6 +221,21 @@ class VisorNube {
       gl.drawArrays(gl.POINTS, 0, this.n);
       this.alDibujar?.();
     });
+  }
+
+  _dibujarMalla() {
+    const gl = this.gl;
+    gl.useProgram(this.progM);
+    gl.uniformMatrix4fv(this.mMvp, false, this._matriz());
+    const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw), cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
+    gl.uniform3f(this.mLuz, sy * cp, sp, -cy * cp);   // luz desde la cámara virtual
+    for (const [buf, loc] of [[this.bPos, this.mPos], [this.bCol, this.mCol], [this.bNor, this.mNor]]) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+    }
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.bIdx);
+    gl.drawElements(gl.TRIANGLES, this.nCaras * 3, this.u32 ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT, 0);
   }
 
   // Posición en pantalla (px CSS dentro del lienzo) de un punto en mm; null si queda detrás

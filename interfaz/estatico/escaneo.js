@@ -23,6 +23,7 @@ async function cargarEscaneo() {
 
 async function elegirEscaneo(id) {
   e3.actual = id || null;
+  e3.mallaClave = null;
   e3.datos = null;
   if (id) {
     try { e3.datos = await api(`/api/escaneo?id=${encodeURIComponent(id)}`); } catch { e3.datos = null; }
@@ -33,9 +34,53 @@ async function elegirEscaneo(id) {
   $("#e3-borrar").disabled = !id;
   $("#e3-ply").classList.toggle("oculto", !id);
   if (id) $("#e3-ply").href = `/api/escaneo/ply?id=${encodeURIComponent(id)}`;
+  const hayMalla = !!e3.datos?.malla;
+  for (const [sel, ruta] of [["#e3-stl", "stl"], ["#e3-malla-ply", "malla.ply"]]) {
+    $(sel).classList.toggle("oculto", !hayMalla);
+    if (hayMalla) $(sel).href = `/api/escaneo/${ruta}?id=${encodeURIComponent(id)}`;
+  }
   pintarVistasE3();
   pintarResultadoE3();
-  cargarNubeE3();
+  mostrarFusionE3();
+}
+
+// Nube de puntos, malla TSDF o las dos lado a lado (cámara sincronizada)
+function mostrarFusionE3() {
+  const modo = e3.fusion || "nube", hayMalla = !!e3.datos?.malla;
+  const verNube = modo !== "malla" || !hayMalla, verMalla = hayMalla && modo !== "nube";
+  $("#e3-lienzo").closest(".md-3d").classList.toggle("oculto", !verNube);
+  $("#e3-3d-malla").classList.toggle("oculto", !verMalla);
+  $(".e3-visores").classList.toggle("dos", verNube && verMalla);
+  for (const b of $$("#e3-fusion button")) {
+    b.classList.toggle("activo", b.dataset.fusion === modo);
+    b.disabled = b.dataset.fusion !== "nube" && !hayMalla;
+  }
+  if (verNube) cargarNubeE3();
+  if (verMalla) cargarMallaE3();
+}
+
+async function cargarMallaE3() {
+  if (!e3.visorMalla) {
+    try { e3.visorMalla = new VisorNube($("#e3-lienzo-malla")); } catch (err) { $("#e3-info-malla").textContent = err.message; return; }
+    e3.visorMalla.setColor("textura");
+    const sync = (o, d) => { if (!e3.sinc && d?.n) { e3.sinc = true; d.vista = o.vista; e3.sinc = false; } };
+    e3.visorMalla.alMover = () => sync(e3.visorMalla, e3.visor);
+    if (e3.visor) e3.visor.alMover = () => sync(e3.visor, e3.visorMalla);
+  }
+  const clave = `${e3.actual}/${e3.datos?.fecha}`;
+  if (e3.mallaClave === clave) return e3.visorMalla.dibujar();
+  e3.mallaClave = clave;
+  const m = e3.datos.malla;
+  $("#e3-info-malla").textContent = t("md_cargando");
+  try {
+    const r = await fetch(`/api/escaneo/malla?id=${encodeURIComponent(e3.actual)}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const buf = await r.arrayBuffer();
+    if (clave !== e3.mallaClave) return;
+    e3.visorMalla.cargarMalla(buf, e3.visor?.n ? e3.visor.centro : null);
+    if (e3.visor?.n) e3.visorMalla.vista = e3.visor.vista;
+    $("#e3-info-malla").textContent = t("e3_malla_info", { v: m.vertices.toLocaleString(locale()), c: m.caras.toLocaleString(locale()), d: m.voxel_mm });
+  } catch (err) { e3.mallaClave = null; $("#e3-info-malla").textContent = t("error_x", { m: err.message }); }
 }
 
 // ------------------------------------------------------------------ elegir vistas
@@ -115,6 +160,7 @@ async function cargarNubeE3() {
   if (!e3.visor) {
     try { e3.visor = new VisorNube($("#e3-lienzo")); } catch (err) { $("#e3-info").textContent = err.message; return; }
     e3.visor.setColor("vista");
+    e3.visor.alMover = () => { if (!e3.sinc && e3.visorMalla?.n) { e3.sinc = true; e3.visorMalla.vista = e3.visor.vista; e3.sinc = false; } };
   }
   const clave = e3.actual && e3.datos ? `${e3.actual}/${e3.datos.fecha}` : null;
   if (clave === e3.nubeClave) return e3.visor.dibujar();
@@ -205,10 +251,15 @@ function iniciarEscaneo() {
     b.addEventListener("click", () => {
       for (const x of $$("#e3-color button")) x.classList.toggle("activo", x === b);
       e3.visor?.setColor(b.dataset.color);
+      // la malla no tiene «por vista»: textura o profundidad
+      e3.visorMalla?.setColor(b.dataset.color === "vista" ? "textura" : b.dataset.color);
     });
   }
+  for (const b of $$("#e3-fusion button")) {
+    b.addEventListener("click", () => { e3.fusion = b.dataset.fusion; mostrarFusionE3(); });
+  }
   $("#e3-tam").addEventListener("input", (ev) => e3.visor?.setTamano(+ev.target.value));
-  $("#e3-vista-inicial").addEventListener("click", () => e3.visor?.reiniciar());
+  $("#e3-vista-inicial").addEventListener("click", () => { e3.visor?.reiniciar(); e3.visorMalla?.reiniciar(); });
   $("#e3-marcar-deshacer").addEventListener("click", () => {
     const m = e3.marcar;
     if (m.pendiente) m.pendiente = null; else m.puntos.pop();

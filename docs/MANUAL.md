@@ -1260,6 +1260,7 @@ corresponde. Cada subsección es una tabla de **síntoma → causa probable → 
 | La vista previa avisa de píxeles saturados | Exposición o brillos excesivos | Baja `CAM_EXPOSICION_US` o la luz, o cambia el ángulo (§19.3) |
 | Las capturas del modo demo aparecen como poses reales | Se guardan en `capturas/` con sufijo `_simulada` | Borra esas carpetas y las poses que generaron (§19.1) |
 | No se puede abrir desde otra PC | El servidor escucha solo en el equipo local | `--host 0.0.0.0` (sin contraseña: solo en redes de confianza) |
+| «Error (código -9)» o «código 9», o el registro dice «el sistema detuvo el proceso (señal 9)» | El sistema se quedó sin memoria RAM y mató el proceso. Pasaba en el escaneo 360° con muchas vistas y fondo: la grilla TSDF crecía sin límite | Ya está acotado: la malla usa celdas más grandes si la caja es enorme (avisa en el registro). Si vuelve a pasar: cierra otros programas, une menos vistas o quita el fondo con la máscara de cada pose |
 
 ### 16.9 Limitaciones conocidas del montaje
 
@@ -1923,8 +1924,8 @@ Una captura ve solo la cara del objeto que mira a la cámara. Para tenerlo compl
      desplazamiento entre ellas (RANSAC);
    - lo afina con **ICP punto a plano**: proyecta cada punto en la imagen de la otra vista y
      minimiza la distancia a su superficie.
-   Luego ajusta todas las vistas a la vez, para repartir el error, y las funde en una rejilla de
-   0.3 mm.
+   Luego ajusta todas las vistas a la vez, para repartir el error, y las **funde de dos formas**
+   (ver abajo): una nube de puntos y una malla TSDF.
 3. Revisa el resultado:
    - la nube se ve **coloreada por vista**: donde dos colores se superponen deben calzar sin
      escalones;
@@ -1935,10 +1936,48 @@ Una captura ve solo la cara del objeto que mira a la cámara. Para tenerlo compl
    - Haz clic en un punto en A y en el **mismo lugar** en B, al menos 3 veces, con puntos separados
      entre sí (esquinas, manchas, marcas).
    - *Guardar puntos y volver a unir* usa esos puntos para la posición inicial y los afina con ICP.
-5. *Descargar .ply* da la nube unida. Queda en `resultados/escaneos/<nombre>/`:
-   - `nube.ply`;
-   - `nube.npz` (xyz, gris y vista de cada punto);
-   - `escaneo.json` (vistas, pares, transformaciones y calidad).
+5. **Nube / Malla (TSDF) / Lado a lado:** cambia lo que se ve; lado a lado, los dos visores van
+   sincronizados. Todo queda en `resultados/escaneos/<nombre>/`:
+   - *Nube .ply*: `nube.ply`, más `nube.npz` (xyz, gris y vista de cada punto);
+   - *Malla .stl* y *Malla .ply*: `malla.stl`, `malla.ply`, más `malla.npz`;
+   - `escaneo.json`: vistas, pares, transformaciones y calidad.
+
+**Dos formas de fundir las vistas** (`procesamiento/escaneo.py` y `procesamiento/tsdf.py`):
+
+- **Nube (puntos por vóxel):** todos los puntos de todas las vistas en el sistema de la
+  referencia, promediados en una rejilla de 0.3 mm. Conserva todo el detalle. Pero donde se
+  superponen vistas con un pequeño desfase residual, quedan **varias capas** casi paralelas.
+- **Malla (TSDF + Surface Nets),** como KinectFusion (Curless y Levoy, 1996):
+  1. En una grilla 3D de 0.5 mm alrededor del objeto, cada vista aporta en cada celda su
+     **distancia con signo** a la superficie medida (truncada a ±2 mm). Pesa más si la vista mira
+     la superficie de frente.
+  2. Promediar distancias, en vez de puntos, cancela el ruido a lo largo de la normal y funde las
+     capas en **una sola superficie**.
+  3. La superficie (el cero de esa función) se extrae con *Surface Nets*: un vértice por celda que
+     cruza el cero y un cuadrilátero por arista. Se quitan los pedazos sueltos de malla.
+  4. **Huecos pequeños:** antes de integrar, en cada vista se rellenan los huecos de hasta ~10 mm²,
+     interpolando la profundidad desde su contorno. Son, sobre todo, las pintas que quita el filtro
+     de manchas. Esos píxeles pesan un 30 % de los medidos. Los huecos grandes (zonas no vistas)
+     quedan abiertos: rellenarlos sería inventar.
+
+**Comparación en el cilindro con pintas** (5 vistas, poses 18–22). El «espesor» es la dispersión
+de la superficie en parches de 2 × 2 mm: lo fina que queda.
+
+| | Nube (puntos por vóxel) | Malla TSDF |
+|---|---|---|
+| Elementos | 680 575 puntos | 170 209 vértices, 329 284 triángulos |
+| Espesor, zonas vistas por 1 vista | 0.049 mm | 0.047 mm (en todo el objeto) |
+| Espesor, zonas vistas por 3 vistas | 0.182 mm (capas) | 〃 |
+| Distancia al cilindro ajustado, P95 / P99 | 1.27 / 2.29 mm | 1.03 / 2.13 mm |
+| Bordes abiertos de la malla | — | 39 636 sin relleno → 12 820 con relleno |
+| Tiempo | (incluido en la unión) | 13–15 s |
+
+La malla funde las vistas superpuestas en una sola superficie, igual de fina que una vista sola,
+y reduce los valores extremos. La nube conserva más puntos (detalle a 0.3 mm frente a 0.5 mm).
+
+**El sombreado como diagnóstico:** en la malla se ven ondulaciones finas paralelas a las franjas.
+Es el **error periódico de la fase**, que en la nube de puntos no se nota. Sirve para evaluar la
+calidad de la fase (más corrimientos, desenfoque o gamma del proyector la mejoran).
 
 **Referencia:** en el cilindro con pintas (objeto `pose_18`–`22`), las 5 vistas se unieron
 automáticamente, incluso pares girados 66–72°. El ajuste entre vistas fue de 0.20 mm y tardó

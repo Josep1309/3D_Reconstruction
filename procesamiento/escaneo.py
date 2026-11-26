@@ -11,9 +11,12 @@ Cada pose es una vista del objeto (apoyado en otra cara, girado…). Para unirla
 4. **Global:** se arma un árbol con los mejores pares a partir de la vista de referencia (la
    primera) y luego cada vista se ajusta contra todas las demás ya ubicadas, varias vueltas, para
    repartir el error (al dar la vuelta completa la última vista debe calzar con la primera).
-5. **Fusión:** todas las vistas en el sistema de la de referencia, promediadas en una rejilla de
-   vóxeles. Se guarda en resultados/escaneos/<nombre>/: nube.ply, nube.npz (xyz, gris, vista) y
-   escaneo.json (vistas, pares, transformaciones y calidad).
+5. **Fusión**, de dos formas (para comparar):
+   - *puntos por vóxel*: todas las vistas en el sistema de la de referencia, promediadas en una
+     rejilla de vóxeles -> nube.ply, nube.npz (xyz, gris, vista);
+   - *TSDF* (`tsdf.py`): distancias con signo promediadas en una grilla 3D y superficie extraída
+     con Surface Nets -> malla.ply, malla.stl, malla.npz.
+   Y escaneo.json (vistas, pares, transformaciones y calidad).
 
 Uso: `.env/bin/python -m procesamiento.escaneo --nombre cilindro --poses pose_18 pose_19 pose_20`
 o la pestaña 360° de la interfaz.
@@ -47,7 +50,8 @@ ICP_DIST_FIN_MM = 1.5         # …y se termina estricto
 ICP_ITER = 40
 MIN_SOLAPE = 0.08             # fracción mínima de una vista que debe calzar con la otra
 PASO_ICP = 4                  # una de cada 4 filas/columnas para ICP (~1/16 de los puntos)
-VOXEL_MM = 0.3                # tamaño de la rejilla de fusión
+VOXEL_MM = 0.3                # tamaño de la rejilla de fusión de puntos
+VOXEL_TSDF_MM = 0.5           # celda de la grilla TSDF (la malla tiene ~ este detalle)
 
 
 # ------------------------------------------------------------------ vistas
@@ -391,7 +395,18 @@ def nube_binaria(nombre: str, maximo: int = 1_500_000) -> bytes:
             + vista.astype(np.uint8).tobytes())
 
 
-def unir(nombre: str, poses: list[str], manual: dict[str, list] | None = None, voxel: float = VOXEL_MM) -> dict:
+def malla_binaria(nombre: str) -> bytes:
+    """Para el visor: uint32 nv | uint32 nf | f32 xyz·nv | f32 normal·nv | u8 gris·nv (+relleno) | u32 caras."""
+    with np.load(carpeta(nombre) / "malla.npz") as d:
+        v, n, g, c = d["vertices"], d["normales"], d["gris"], d["caras"]
+    cab = np.array([len(v), len(c)], "<u4").tobytes()
+    relleno = b"\0" * ((4 - (len(v) * 25) % 4) % 4)
+    return (cab + v.astype("<f4").tobytes() + n.astype("<f4").tobytes() + g.astype(np.uint8).tobytes()
+            + relleno + c.astype("<u4").tobytes())
+
+
+def unir(nombre: str, poses: list[str], manual: dict[str, list] | None = None, voxel: float = VOXEL_MM,
+         voxel_tsdf: float | None = VOXEL_TSDF_MM) -> dict:
     """Une las poses (la primera es la referencia). `manual`: {"pose_a|pose_b": [[pa, pb], …]}."""
     from procesamiento import reconstruccion_3d as r3d
     from datos_sistema import sesiones
@@ -436,13 +451,29 @@ def unir(nombre: str, poses: list[str], manual: dict[str, list] | None = None, v
 
     orden = list(ubicadas)
     fase.guardar_npz_atomico(destino / "nube.npz", xyz=xyz, gris=gris, vista=vista, vistas=np.array(orden))
+    malla_info = None
+    if voxel_tsdf:  # malla por TSDF (procesamiento/tsdf.py)
+        from procesamiento import tsdf
+
+        avisar_tsdf = lambda i, n, txt: avance.contador(i, n, txt)  # noqa: E731
+        k, dist = camara()
+        m = tsdf.fusionar_tsdf(vistas, ubicadas, xyz, k, dist, voxel=voxel_tsdf, avisar=avisar_tsdf)
+        avance.paso("Guardando la malla")
+        tsdf.escribir_ply_malla(destino / "malla.ply", m["vertices"], m["caras"], m["gris"])
+        tsdf.escribir_stl(destino / "malla.stl", m["vertices"], m["caras"])
+        fase.guardar_npz_atomico(destino / "malla.npz", vertices=m["vertices"], caras=m["caras"].astype(np.int32),
+                                 normales=m["normales"], gris=m["gris"])
+        malla_info = {"vertices": int(len(m["vertices"])), "caras": int(len(m["caras"])), "voxel_mm": m["voxel_mm"],
+                      "trunc_mm": m["trunc_mm"], "segundos": round(m["segundos"], 1)}
+        print(f"  Malla TSDF: {len(m['vertices']):,} vértices, {len(m['caras']):,} triángulos "
+              f"(celda {m['voxel_mm']} mm, {m['segundos']:.0f} s)", flush=True)
     rms = [c["rms_mm"] for c in calidad.values() if math.isfinite(c["rms_mm"])]
     info = {
         "nombre": nombre, "poses": poses, "fecha": datetime.now().isoformat(timespec="seconds"),
         "manual": manual, "voxel_mm": voxel, "puntos": int(len(xyz)), "unidas": orden, "sueltas": sueltas,
         "pares": {k: {kk: vv for kk, vv in r.items()} for k, r in pares.items()},
         "transformaciones": {p: t.tolist() for p, t in ubicadas.items()},
-        "calidad": calidad, "rms_mm": float(np.median(rms)) if rms else None,
+        "calidad": calidad, "rms_mm": float(np.median(rms)) if rms else None, "malla": malla_info,
         "calibracion": str(cfg.DIR_CALIBRACION / "Estereo_TSC_0_2.npz"),
     }
     sesiones.escribir_json(destino / "escaneo.json", info)

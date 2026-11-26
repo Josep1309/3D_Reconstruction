@@ -447,14 +447,27 @@
       <div class="e3-barra">
         <select id="e3-lista" data-i18n-aria="e3_titulo"></select>
         <button type="button" id="e3-borrar" class="icono" data-i18n-title="e3_borrar" title="Borrar este escaneo">🗑</button>
-        <a id="e3-ply" class="boton oculto" download data-i18n="e3_ply">Descargar .ply</a>
+        <a id="e3-ply" class="boton oculto" download data-i18n="e3_ply">Nube .ply</a>
+        <a id="e3-stl" class="boton oculto" download data-i18n="e3_stl">Malla .stl</a>
+        <a id="e3-malla-ply" class="boton oculto" download data-i18n="e3_malla_ply">Malla .ply</a>
         <button type="button" class="enlace mk-guia" data-manual="19.7" data-i18n="e3_guia">📖 Guía del escaneo 360°</button>
       </div>
       <div class="e3">
         <div class="e3-izq">
-          <div class="md-3d">
-            <canvas id="e3-lienzo" data-i18n-aria="lienzo" aria-label="Nube de puntos 3D"></canvas>
-            <p id="e3-info" class="visor-info"></p>
+          <div class="segmentado" role="group" id="e3-fusion">
+            <button type="button" data-fusion="nube" class="activo" data-i18n="e3_fus_nube">Nube (puntos por vóxel)</button>
+            <button type="button" data-fusion="malla" data-i18n="e3_fus_malla">Malla (TSDF)</button>
+            <button type="button" data-fusion="ambas" data-i18n="e3_fus_ambas">Lado a lado</button>
+          </div>
+          <div class="e3-visores">
+            <div class="md-3d">
+              <canvas id="e3-lienzo" data-i18n-aria="lienzo" aria-label="Nube de puntos 3D"></canvas>
+              <p id="e3-info" class="visor-info"></p>
+            </div>
+            <div class="md-3d oculto" id="e3-3d-malla">
+              <canvas id="e3-lienzo-malla" data-i18n-aria="lienzo" aria-label="Malla 3D"></canvas>
+              <p id="e3-info-malla" class="visor-info"></p>
+            </div>
           </div>
           <div class="md-ctl3d">
             <span class="segmentado color" role="group" id="e3-color">

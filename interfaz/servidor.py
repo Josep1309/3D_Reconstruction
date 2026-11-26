@@ -147,6 +147,15 @@ class Manejador(BaseHTTPRequestHandler):
                 from procesamiento import escaneo
 
                 return self._json(escaneo.leer(q.get("id", "")))
+            if url.path in ("/api/escaneo/malla", "/api/escaneo/stl", "/api/escaneo/malla.ply"):
+                from procesamiento import escaneo
+
+                d = escaneo.carpeta(q.get("id", ""))
+                if url.path.endswith("malla"):
+                    return self._enviar(200, escaneo.malla_binaria(q.get("id", "")), "application/octet-stream")
+                archivo = "malla.stl" if url.path.endswith("stl") else "malla.ply"
+                return self._enviar(200, (d / archivo).read_bytes(), "application/octet-stream",
+                                    {"Content-Disposition": f'attachment; filename="escaneo_{d.name}_{archivo}"'})
             if url.path in ("/api/escaneo/nube", "/api/escaneo/ply"):
                 from procesamiento import escaneo
 

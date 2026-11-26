@@ -252,6 +252,10 @@ class Ejecucion:
             self._marcar_hecha(self.etapa)
         else:
             self.fallida = self.etapa
+        if codigo in (-9, 137):  # SIGKILL: casi siempre el sistema se quedó sin memoria (OOM)
+            self.ultimo_error = ("[ERROR] El sistema detuvo el proceso (señal 9), casi siempre por falta de memoria RAM. "
+                                 "Cierra otros programas, usa menos vistas o quita el fondo con la máscara y vuelve a intentar.")
+            difusor.emitir("log", {"texto": self.ultimo_error})
         self.fin = time.time()
         self.ultimo_codigo, self.esperando, self.etapa = codigo, False, None
         texto = "✔ Proceso terminado correctamente" if codigo == 0 else f"✖ Proceso terminado con código {codigo}"
