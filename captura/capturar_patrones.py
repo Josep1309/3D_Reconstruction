@@ -110,6 +110,7 @@ class CamaraFLIR:
         if cam.TriggerMode.GetAccessMode() != ps.RW:
             raise RuntimeError("TriggerMode no es escribible")
         cam.TriggerMode.SetValue(ps.TriggerMode_Off)
+        self._configurar_roi()
 
         if cam.ExposureAuto.GetAccessMode() == ps.RW:
             cam.ExposureAuto.SetValue(ps.ExposureAuto_Off)
@@ -150,7 +151,36 @@ class CamaraFLIR:
 
         cam.AcquisitionMode.SetValue(ps.AcquisitionMode_Continuous)
         cam.TriggerMode.SetValue(ps.TriggerMode_On)
-        print(f"[OK] Cámara lista | exposición {cam.ExposureTime.GetValue():.0f} us | trigger Line0")
+        fps = cam.AcquisitionResultingFrameRate.GetValue()
+        print(f"[OK] Cámara lista | {cam.Width.GetValue()}×{cam.Height.GetValue()} | exposición "
+              f"{cam.ExposureTime.GetValue():.0f} us | máx. {fps:.1f} fps | trigger Line0")
+        if cfg.MONTAJE_INFO.get("disparo") == "vsync" and fps < 60.0:
+            print(f"[AVISO] La cámara solo llega a {fps:.1f} fps: se saltará pulsos de VSYNC (60 Hz). "
+                  "Reduce CAM_ALTO o la exposición.", flush=True)
+
+    def _configurar_roi(self) -> None:
+        """ROI de CAM_ANCHO × CAM_ALTO centrada en el sensor y, si se pide, el límite de USB."""
+        ps, cam = self.ps, self.camera
+
+        def centrar(nodo_tam, nodo_off, tam_max, tam) -> None:
+            paso = max(int(nodo_tam.GetInc()), 1)
+            tam = min(max(int(tam) // paso * paso, int(nodo_tam.GetMin())), int(tam_max))
+            nodo_off.SetValue(0)
+            nodo_tam.SetValue(tam)
+            paso_off = max(int(nodo_off.GetInc()), 1)
+            nodo_off.SetValue(min((int(tam_max) - tam) // 2 // paso_off * paso_off, int(nodo_off.GetMax())))
+
+        try:
+            centrar(cam.Width, cam.OffsetX, cam.WidthMax.GetValue(), cfg.CAM_ANCHO)
+            centrar(cam.Height, cam.OffsetY, cam.HeightMax.GetValue(), cfg.CAM_ALTO)
+        except ps.SpinnakerException as e:
+            print(f"[AVISO] No se pudo fijar la ROI {cfg.CAM_ANCHO}×{cfg.CAM_ALTO}: {e}", flush=True)
+        if cfg.CAM_LIMITE_USB_BPS is not None:
+            try:
+                nodo = cam.DeviceLinkThroughputLimit
+                nodo.SetValue(int(min(max(cfg.CAM_LIMITE_USB_BPS, nodo.GetMin()), nodo.GetMax())))
+            except ps.SpinnakerException as e:
+                print(f"[AVISO] No se pudo subir el límite USB de la cámara: {e}", flush=True)
 
     def capturar(self, cantidad: int, al_frame: AlFrame | None = None) -> list[np.ndarray]:
         """Captura `cantidad` frames consecutivos a partir del siguiente pulso de trigger.
@@ -336,7 +366,7 @@ class CamaraSimuladaHDMI:
         p = self.proyector.actual if self.proyector is not None and self.proyector.actual is not None else None
         if p is None:
             p = np.zeros((cfg.PROYECTOR_ALTO, cfg.PROYECTOR_ANCHO), np.uint8)
-        img = cv2.resize(p, (1280, 1024), interpolation=cv2.INTER_AREA).astype(np.float32)
+        img = cv2.resize(p, (cfg.CAM_ANCHO, cfg.CAM_ALTO), interpolation=cv2.INTER_AREA).astype(np.float32)
         img = cv2.GaussianBlur(img, (0, 0), 1.2) * 0.7 * self.ganancia + 20 + self.rng.normal(0, 1.5, img.shape)
         return np.clip(img, 0, 255).astype(np.uint8)
 

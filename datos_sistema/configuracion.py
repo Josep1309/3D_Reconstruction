@@ -57,6 +57,12 @@ CAM_EXPOSICION_US = 12000.0
 CAM_DEBOUNCE_US = 500.0
 CAM_TRIGGER_DELAY_US = None  # None = no modificar el valor de la cámara
 CAM_TIMEOUT_MS = 2000
+# Región de la imagen (ROI), centrada en el sensor. Se fija al abrir la cámara para que un montaje no
+# herede la del otro (la cámara la conserva hasta apagarse). CAM_LIMITE_USB_BPS = None no toca el
+# límite de ancho de banda USB de la cámara
+CAM_ANCHO = 1280
+CAM_ALTO = 1024
+CAM_LIMITE_USB_BPS = None
 CICLOS_POR_CAPTURA = 1   # >1 captura varios ciclos seguidos; el organizador los promedia
 # Además de los .tiff, un .avi FFV1 con los mismos frames. Duplica ~47 MB por pose y el organizador
 # lo descarta cuando están los .tiff, así que está desactivado (AUDITORIA.md §4.1)
@@ -161,17 +167,24 @@ MONTAJES = {
         "parametros": {},               # los valores de arriba
     },
     "hdmi_dell": {
-        "nombre": "Proyector HDMI (Dell 1280×1024) · VSYNC 60 Hz",
+        "nombre": "Proyector HDMI (Dell M318WL 1280×800) · VSYNC 60 Hz",
         "proyeccion": "hdmi",           # el PC muestra cada patrón a pantalla completa en el proyector
         "disparo": "vsync",             # el VSYNC del HDMI dispara la cámara en cada cuadro (60 Hz)
         "parametros": {
             "PROYECTOR_ANCHO": 1280,
-            "PROYECTOR_ALTO": 1024,
+            "PROYECTOR_ALTO": 800,            # nativa del M318WL (WXGA): a 1024 reescala las filas
             "N_BITS_GRAY": 7,           # 2^7 * 18 = 2304 px >= 1280 (con 6 bits: 1152 < 1280)
             # DLP con rueda de color: la exposición debe cubrir casi un cuadro completo (16.7 ms a
             # 60 Hz) para integrar todos los colores; la cámara expone mientras lee el anterior
             "CAM_EXPOSICION_US": 16000.0,
             "CAM_TRIGGER_OVERLAP": "ReadOut",
+            # El pulso de VSYNC dura ~0.1 ms: con el antirrebote de 500 us no pasaría ninguno
+            "CAM_DEBOUNCE_US": 10.0,
+            # La BFS-U3-32S4C (ADC de 10 bits como mínimo) llega a 56.7 fps con 1280×1024 y a 60.3
+            # con 960 filas; a 1024 se salta VSYNC. Con el límite USB por defecto (55 MB/s) no pasa
+            # de 41.8 fps, por eso se sube
+            "CAM_ALTO": 960,
+            "CAM_LIMITE_USB_BPS": 380_000_000,
             # Píxeles cuadrados (no DMD en diamante): el contraste es parecido en H y V. Valores de
             # partida: ajustarlos en ⚙ con las primeras capturas de plano.
             "GAMMA_TH": 0.10,

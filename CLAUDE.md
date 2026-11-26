@@ -112,8 +112,10 @@ Las etapas corren en un orden fijo desde `pipeline.py` (`ETAPAS`):
     - La calibración la guarda en su `.json` y `usar_configuracion_de()` la restaura al
       activarla.
 - **Montajes** (`configuracion.MONTAJES`, elegido en `datos/montaje.json` o `TESIS_MONTAJE`):
-  `lightcrafter` (Arduino 20 Hz) y `hdmi_dell` (Dell DLP 1280×1024, el PC proyecta con una
+  `lightcrafter` (Arduino 20 Hz) y `hdmi_dell` (Dell M318WL DLP 1280×800 nativo, el PC proyecta con una
   ventana de OpenCV/Qt y el VSYNC dispara la cámara a 60 Hz; 7 bits Gray, 52 imágenes por ciclo).
+  - En `hdmi_dell` la cámara usa ROI 1280×960 (`CAM_ALTO`), límite USB alto y antirrebote de
+    10 µs: con 1024 filas no llega a 60 fps y con 500 µs el pulso de VSYNC no pasa.
   - Al importar `configuracion` se aplican los parámetros del montaje y se recalculan los derivados.
   - Cada montaje tiene calibración (`calibraciones/<id>/`), patrones y `ajustes_<id>.json` propios.
   - `proceso.json` guarda el montaje, y `sesiones.configuracion_vigente` solo ve el montaje en uso.

@@ -14,7 +14,7 @@ Resultado: las mismas imágenes ordenadas de siempre (un ciclo de IMAGENES_POR_C
 organizar, fases, calibración y reconstrucción no cambian. La latencia se mide con `medir_latencia`
 (⚙ Ajustes → Proyector → «Medir latencia»).
 
-Requisitos: el proyector configurado en el sistema a su resolución nativa (1280×1024, 60 Hz) como
+Requisitos: el proyector configurado en el sistema a su resolución nativa (1280×800, 60 Hz) como
 pantalla extendida (no duplicada), sin «keystone» ni modos de imagen que alteren el brillo.
 """
 

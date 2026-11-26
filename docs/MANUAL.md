@@ -169,21 +169,23 @@ sudo chmod a+rw /dev/hidrawX       # el script dice cuál es X
 
 ---
 
-### 3.1 Montaje con proyector HDMI (Dell 1280×1024, VSYNC)
+### 3.1 Montaje con proyector HDMI (Dell M318WL 1280×800, VSYNC)
 
 El sistema admite dos **montajes**. Se elige en la tarjeta *Medir* → **Montaje**: el servidor se
 reinicia unos segundos y la página se recarga sola.
 
 | | LightCrafter 4500 | Proyector HDMI (Dell) |
 |---|---|---|
-| Proyector | 912 × 1140, DMD en diamante | 1280 × 1024, DLP con rueda de color |
+| Proyector | 912 × 1140, DMD en diamante | Dell M318WL, 1280 × 800 (WXGA), DLP con rueda de color |
 | Cómo proyecta | Secuencia guardada en su memoria | El PC muestra cada patrón a pantalla completa (ventana de OpenCV) |
 | Disparo de la cámara | Arduino a 20 Hz (proyector y cámara a la vez) | El **VSYNC** del HDMI, en cada cuadro (60 Hz) |
 | Bits Gray / imágenes por ciclo | 6 / 50 | **7** / **52** (2⁷ · 18 = 2304 ≥ 1280) |
 | Exposición de la cámara | 12 ms | **16 ms**, con disparo solapado a la lectura (`TriggerOverlap = ReadOut`) |
+| Imagen de la cámara | 1280 × 1024 | **1280 × 960** (`CAM_ALTO`): con 1024 filas la cámara no pasa de 56.7 fps y se salta VSYNC |
+| Antirrebote de Line0 | 500 µs | **10 µs**: el pulso de VSYNC dura ~0.1 ms |
 | Tiempo por pose | ~2.5 s | ~4–5 s (depende de la latencia) |
 | Calibración | `calibraciones/` | `calibraciones/hdmi_dell/` |
-| Patrones | `recursos/patterns/secuencia_completa_bmp/` | `recursos/patterns/hdmi_dell_1280x1024/` |
+| Patrones | `recursos/patterns/secuencia_completa_bmp/` | `recursos/patterns/hdmi_dell_1280x800/` |
 | Ajustes de ⚙ | `datos/ajustes.json` | `datos/ajustes_hdmi_dell.json` |
 
 **Separación entre montajes:**
@@ -206,11 +208,20 @@ encuadrar.
 
 **Puesta en marcha:**
 1. **Pantalla:** conecta el Dell por HDMI y configúralo en el sistema como **pantalla extendida**
-   (no duplicada), a **1280 × 1024 y 60 Hz**. Desactiva en el proyector el *keystone*, el modo
+   (no duplicada), a **1280 × 800 y 60 Hz**, su resolución nativa: a 1280 × 1024 el proyector
+   reescala las filas y deforma las franjas H. Desactiva en el proyector el *keystone*, el modo
    dinámico de brillo y el «realce de color»: alteran la intensidad de las franjas.
 2. **Disparo:** lleva la señal VSYNC del HDMI a la entrada **Line0** de la cámara (flanco de
-   subida). En la tarjeta *Medir* elige el montaje *Proyector HDMI*.
-3. **Patrones:** ⚙ Ajustes → Proyector → **Generar los patrones** (52 imágenes de 1280 × 1024).
+   subida) y **la masa de esa señal a la masa del optoacoplador** de la cámara: sin ella Line0 queda
+   casi siempre en alto y dispara ~1 vez por segundo. En la tarjeta *Medir* elige el montaje
+   *Proyector HDMI*.
+   - El aparato que saca el VSYNC debe dejar pasar 1280 × 800: uno probado solo dejaba pasar
+     1920 × 1080 (el proyector mostraba «No signal» con el resto). Con el cable directo el
+     M318WL acepta 1280 × 800 a 59.81 Hz.
+   - La cámara se configura sola al abrirla en este montaje: 1280 × 960 centrada, límite USB de
+     380 MB/s (con el de fábrica, 55 MB/s, no pasa de 41.8 fps) y antirrebote de 10 µs. El
+     registro muestra `máx. … fps`, que debe ser ≥ 60.
+3. **Patrones:** ⚙ Ajustes → Proyector → **Generar los patrones** (52 imágenes de 1280 × 800).
 4. **Latencia:** con la cámara apuntando al área proyectada, ⚙ Ajustes → Proyector → **Medir la
    latencia del proyector**.
    - Alterna negro y blanco 5 veces y cuenta los cuadros hasta que la cámara ve el cambio.
@@ -1252,6 +1263,9 @@ corresponde. Cada subsección es una tabla de **síntoma → causa probable → 
 | `Sin trigger tras … ms en el frame N` | El Arduino no está enviando pulsos, o Line0 está desconectado | Revisa la alimentación del Arduino, el cable pin 9 → Line0 y la masa común |
 | Frames incompletos o pérdidas con cámara USB3 | Buffer USB del kernel pequeño | Sube `usbfs_memory_mb` a 1000, como indica FLIR (§20.3) |
 | `Δt … [AVISO] posible pulso perdido` | El equipo está cargado, o mala conexión del trigger | Cierra otros programas; el organizador descarta los ciclos rotos, pero conviene repetir la pose |
+| Montaje HDMI: `[AVISO] La cámara solo llega a … fps` o disparos a ~42 Hz en vez de 60 | La ROI o la exposición no dejan a la cámara llegar a 60 fps | Usa `CAM_ALTO = 960` y `CAM_LIMITE_USB_BPS` del montaje (§3.1), o baja la exposición |
+| Montaje HDMI: disparos muy espaciados (~1 por segundo) | Falta la masa común entre la fuente del VSYNC y el opto de Line0, o el pulso no baja lo suficiente | Conecta la masa; si sigue, pon un inversor con *schmitt trigger* (74HC14) entre el VSYNC y Line0 |
+| Montaje HDMI: el proyector dice «No signal» | El aparato del VSYNC no deja pasar esa resolución | Prueba con el cable directo; usa un aparato que deje pasar 1280 × 800 sin convertirla |
 | Imágenes saturadas o muy oscuras | Exposición inadecuada | Ajusta `CAM_EXPOSICION_US` (debe ser menor de 50 ms) |
 | Funciona en el equipo original pero no en otro | Versión de PySpin, SDK o Python distinta | §20.3 |
 
