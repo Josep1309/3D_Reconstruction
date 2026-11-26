@@ -49,7 +49,8 @@ class VisorNube {
   }
 
   // datos: ArrayBuffer con uint32 N | float32 xyz*N | uint8 gris*N [| uint32 alto, ancho, índice*N]
-  cargar(buffer, conIndices = false) {
+  // centro: [x, y, z] común a varios visores (comparar métodos); si no, la mediana de esta nube
+  cargar(buffer, conIndices = false, centro = null) {
     const n = new DataView(buffer).getUint32(0, true);
     const xyz = new Float32Array(buffer, 4, n * 3);
     this.gris = new Uint8Array(buffer, 4 + n * 12, n);
@@ -71,15 +72,16 @@ class VisorNube {
       return [v[Math.floor(v.length * 0.01)], v[Math.floor(v.length * 0.5)], v[Math.floor(v.length * 0.99)]];
     };
     const [x1, xm, x9] = muestra(0), [y1, ym, y9] = muestra(1), [z1, zm, z9] = muestra(2);
-    this.centro = [xm, ym, zm];
+    this.centro = centro || [xm, ym, zm];
+    const [cx0, cy0, cz0] = this.centro;
     this.zRango = [z1, z9];
     this.radio = Math.max(x9 - x1, y9 - y1, z9 - z1, 1) * 0.6;
     // Posiciones centradas (mejor precisión en float32 de la GPU)
     const pos = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) {
-      pos[i * 3] = xyz[i * 3] - xm;
-      pos[i * 3 + 1] = xyz[i * 3 + 1] - ym;
-      pos[i * 3 + 2] = xyz[i * 3 + 2] - zm;
+      pos[i * 3] = xyz[i * 3] - cx0;
+      pos[i * 3 + 1] = xyz[i * 3 + 1] - cy0;
+      pos[i * 3 + 2] = xyz[i * 3 + 2] - cz0;
     }
     this.z = new Float32Array(n);
     for (let i = 0; i < n; i++) this.z[i] = xyz[i * 3 + 2];
@@ -95,7 +97,12 @@ class VisorNube {
   _colores() {
     if (!this.n) return;
     const n = this.n, col = new Float32Array(n * 3);
-    if (this.modoColor === "textura") {
+    if (this.modoColor === "vista" && this.etiquetas) {  // escaneo 360: un color por vista
+      for (let i = 0; i < n; i++) {
+        const c = COLORES_VISTA[this.etiquetas[i] % COLORES_VISTA.length];
+        col[i * 3] = c[0]; col[i * 3 + 1] = c[1]; col[i * 3 + 2] = c[2];
+      }
+    } else if (this.modoColor === "textura") {
       for (let i = 0; i < n; i++) { const g = this.gris[i] / 255; col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = g; }
     } else {
       const [lo, hi] = this.zRango, esc = 1 / Math.max(hi - lo, 1e-6);
@@ -112,6 +119,7 @@ class VisorNube {
   }
 
   setColor(modo) { this.modoColor = modo; this._colores(); this.dibujar(); }
+  setEtiquetas(etiquetas) { this.etiquetas = etiquetas; this._colores(); this.dibujar(); }
   setTamano(t) { this.tamano = t; this.dibujar(); }
 
   // Vista inicial: desde la cámara (mirando +Z, con Y hacia abajo), algo inclinada
@@ -119,7 +127,12 @@ class VisorNube {
     this.yaw = 0.35; this.pitch = -0.35; this.dist = this.radio ? this.radio * 2.6 : 500;
     this.pan = [0, 0, 0];
     this.dibujar();
+    this.alMover?.();
   }
+
+  // Vista (cámara virtual) para copiarla a otro visor
+  get vista() { return { yaw: this.yaw, pitch: this.pitch, dist: this.dist, pan: [...this.pan] }; }
+  set vista(v) { Object.assign(this, { yaw: v.yaw, pitch: v.pitch, dist: v.dist, pan: [...v.pan] }); this.dibujar(); }
 
   _matriz() {
     const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
@@ -240,6 +253,7 @@ class VisorNube {
         this.pitch = Math.max(-1.5, Math.min(1.5, this.pitch + dy * 0.008));
       }
       this.dibujar();
+      this.alMover?.();
     });
     const soltar = (e) => { toques.delete(e.pointerId); if (!toques.size) previo = null; };
     c.addEventListener("pointerup", (e) => {
@@ -253,6 +267,7 @@ class VisorNube {
       e.preventDefault();
       this.dist *= Math.exp(e.deltaY * 0.0012);
       this.dibujar();
+      this.alMover?.();
     }, { passive: false });
     c.addEventListener("dblclick", () => { if (!this.sinDobleClic) this.reiniciar(); });
   }
@@ -281,6 +296,10 @@ function multiplicar(a, b) {
   }
   return r;
 }
+// Colores de las vistas de un escaneo 360 (distinguibles entre sí, en claro y oscuro)
+const COLORES_VISTA = [[0.31, 0.6, 0.98], [0.98, 0.55, 0.16], [0.3, 0.8, 0.4], [0.93, 0.3, 0.35], [0.7, 0.5, 0.95],
+  [0.95, 0.85, 0.25], [0.3, 0.85, 0.85], [0.95, 0.5, 0.8], [0.6, 0.6, 0.6], [0.6, 0.85, 0.2], [0.55, 0.35, 0.2], [0.2, 0.4, 0.75]];
+window.COLORES_VISTA = COLORES_VISTA;
 // Mapa de color viridis aproximado por tramos (t en [0, 1])
 const VIRIDIS = [[0.267, 0.005, 0.329], [0.229, 0.322, 0.546], [0.128, 0.567, 0.551], [0.369, 0.789, 0.383], [0.993, 0.906, 0.144]];
 function viridis(t) {

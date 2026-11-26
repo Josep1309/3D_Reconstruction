@@ -275,13 +275,18 @@ def diferencia_z(cat: str, pose: str, ref: str, mascaras: bool = False):
     return dif, stats
 
 
-def generar_nube(cat: str, pose: str, maximo: int, indices: bool = False) -> bytes:
+def generar_nube(cat: str, pose: str, maximo: int, indices: bool = False, metodo: str | None = None) -> bytes:
     """uint32 N | float32 xyz·N | uint8 gris·N [| uint32 alto, ancho, índice del píxel·N, con `indices`].
 
     El índice del píxel (fila · ancho + columna) permite volver a la imagen: la pestaña Medición
     lo usa para pedir el punto exacto y su ruido local."""
     archivos = _archivos_pose(cat, pose)
-    xyz = cargar_npz(archivos["reconstruida"])
+    if metodo and metodo != "estereo":  # otro método de reconstrucción (procesamiento/metodos.py)
+        from procesamiento import metodos
+
+        xyz = cargar_npz(metodos.reconstruir(cat, pose, metodo))
+    else:
+        xyz = cargar_npz(archivos["reconstruida"])
     m = xyz["Mask"].astype(bool) & np.isfinite(xyz["Z"])
     idx = np.flatnonzero(m)
     if len(idx) > maximo:
@@ -308,6 +313,18 @@ def _base_mascara(cat: str, pose: str):
     return valido, gamma, umbral, fd, d["Itex"]
 
 
+def _manchas(cat: str, pose: str, params: dict, fd: str) -> np.ndarray:
+    """Lo que quita el filtro de bordes de manchas oscuras con el valor de la pose (o el general)."""
+    from datos_sistema import rutas
+    from procesamiento import mascara as mk
+
+    d = cargar_npz(_archivos_pose(cat, pose)["absoluta"])
+    rel = params.get("reflectancia")
+    rel = cfg.REFLECTANCIA_REL_MIN if rel is None else float(rel)
+    claves = {"Fx": ("BX",), "Fy": ("BY",)}.get(fd, ("BX", "BY"))
+    return mk.zonas_dificiles({"Itex": d["Itex"], **{k: d[k] for k in claves}}, rutas.dir_pose_ordenada(cat, pose), fd, rel_min=rel)
+
+
 def estado_mascara(cat: str, pose: str) -> dict:
     """Parámetros guardados (o None), la fase usada, el umbral γ actual y el histograma de γ."""
     from procesamiento import mascara
@@ -317,6 +334,7 @@ def estado_mascara(cat: str, pose: str) -> dict:
     cuentas, bordes = np.histogram(np.clip(g, 0, 1), bins=50, range=(0.0, 1.0))
     reconstruida = _archivos_pose(cat, pose)["reconstruida"]
     return {"parametros": mascara.leer_parametros(cat, pose), "fase": fd, "umbral_actual": umbral,
+            "reflectancia_general": cfg.REFLECTANCIA_REL_MIN,
             "validos": int(valido.sum()), "total": int(valido.size), "hist": cuentas.tolist(),
             "hist_max": float(bordes[-1]), "reconstruida": reconstruida.exists(),
             "forma": list(valido.shape)}
@@ -329,8 +347,9 @@ def previa_mascara(cat: str, pose: str, params: dict, ancho: int = 960, vista: s
 
     from procesamiento import mascara
 
-    valido, gamma, _, _, itex = _base_mascara(cat, pose)
+    valido, gamma, _, fd, itex = _base_mascara(cat, pose)
     m = mascara.calcular(valido, gamma, params)
+    manchas = _manchas(cat, pose, mascara.normalizar(params), fd) & valido & m
     if vista == "gamma":
         base = cv2.applyColorMap(np.clip(gamma * 255 / max(float(np.percentile(gamma[valido], 99)) if valido.any() else 1, 1e-3),
                                          0, 255).astype(np.uint8), cv2.COLORMAP_INFERNO)
@@ -340,17 +359,21 @@ def previa_mascara(cat: str, pose: str, params: dict, ancho: int = 960, vista: s
     quitado = valido & ~m
     img[~valido] *= 0.25
     img[quitado] = img[quitado] * 0.45 + np.array([40, 40, 230], np.float32) * 0.55  # rojo (BGR)
+    img[manchas] = img[manchas] * 0.35 + np.array([0, 165, 255], np.float32) * 0.65  # naranja: filtro de manchas
     escala = min(ancho / img.shape[1], 1.0)
     img = cv2.resize(img.astype(np.uint8), (0, 0), fx=escala, fy=escala, interpolation=cv2.INTER_AREA)
     ok, jpg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 85])
     salida = {"imagen": "data:image/jpeg;base64," + base64.b64encode(jpg.tobytes()).decode(),
-              "conservados": int(m.sum()), "validos": int(valido.sum()), "total": int(m.size)}
+              "conservados": int((m & ~manchas).sum()), "validos": int(valido.sum()), "total": int(m.size),
+              "manchas": int(manchas.sum())}
     ruta = _archivos_pose(cat, pose)["reconstruida"]
     if ruta.exists():  # efecto sobre la nube actual
         try:
             mr = cargar_npz(ruta)["Mask"].astype(bool)
             salida["puntos_actuales"] = int(mr.sum())
-            salida["puntos_quedan"] = int((mr & m).sum())
+            # aproximado: los que ya tiene la nube y siguen dentro (bajar el filtro de manchas
+            # además devuelve puntos que la nube actual no tiene)
+            salida["puntos_quedan"] = int((mr & m & ~manchas).sum())
         except (OSError, KeyError, ValueError):
             pass
     return salida

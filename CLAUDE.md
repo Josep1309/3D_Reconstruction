@@ -119,6 +119,19 @@ Las etapas corren en un orden fijo desde `pipeline.py` (`ETAPAS`):
   mueve las tres carpetas y reescribe el manifiesto.
 - **Zonas difíciles** (`mascara.zonas_dificiles`, siempre en la reconstrucción): bordes de manchas
   oscuras (`REFLECTANCIA_REL_MIN` 0.6) y, opcional, saturación. Van en el id de la reconstrucción.
+  La máscara de una pose puede fijar su propio umbral (`reflectancia`, `mascara.reflectancia_de`).
+- **Métodos de reconstrucción** (`procesamiento/metodos.py`, selector y *Comparar* en la pestaña
+  Nube): estéreo Fy/Fx/ambas y 4 híbridos (polinomial o racional, con planos virtuales o
+  medidos), portados de `recursos/Matlab_Codes/Codes/{3DReconstructionCodes,HybridCalibCodes}`.
+  - Variable de fase: vp. Racional = cuadrático/lineal con Z normalizada por píxel (el 2/2 era
+    singular).
+  - Modelos en `resultados/calibracion/modelos/`, nubes por método en `…/reconstruccion/<cat>/metodos/`.
+  - El método por defecto del pipeline sigue siendo el estéreo.
+- **Escaneo 360°** (`procesamiento/escaneo.py`, pestaña 360°): une poses de objeto. Usa SIFT
+  sobre la textura más RANSAC rígido, o puntos marcados a mano; luego ICP punto a plano con
+  asociación proyectiva (`cv2.projectPoints` con `Ac`/`dist_cam`, sin FLANN, que era 10× más
+  lento), ajuste global y fusión por vóxel. Sale a `resultados/escaneos/<nombre>/`. Corre en el
+  ejecutor con `conf.escaneo`.
 - **Máscara por pose** (`mascara.py`, pestaña Máscara): `pose_XX_mascara.png` junto a las
   fases. La reconstrucción la aplica si existe (más `FILTRO_VECINOS_SIGMA`, 0 = apagado). Su
   firma va en `<cat>_resumen.json` (`mascara`), así que cambiarla recalcula solo esa pose.

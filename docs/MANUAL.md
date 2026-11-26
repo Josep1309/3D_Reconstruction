@@ -967,7 +967,11 @@ Después se descartan las **zonas difíciles** (`mascara.zonas_dificiles`):
   - Medido en el cilindro con pintas (objeto `pose_18`–`22` del 25-nov): el RMS del interior pasa
     de 0.39–0.49 a 0.17–0.21 mm, y los picos > 2 mm de ~0.9 % a ~0.1 %, quitando el 8–12 % de los
     puntos.
-  - En los planos no quita nada.
+  - En los planos no quita nada, ni en superficies sin manchas (esfera, piezas lisas). Un objeto
+    oscuro grande, como un mouse negro, se conserva, porque se compara con su entorno.
+  - Su límite son los objetos oscuros **finos** sobre fondo claro (< ~15 px: cables, líneas,
+    letras), que desaparecen. Para esas poses, ajústalo por pose en la pestaña *Máscara* (§19.5)
+    sin cambiar el valor general.
 - **Saturación** (`SATURACION_NIVEL`, apagado). Si se activa, quita los píxeles que llegan a ese
   nivel en la mitad o más de los corrimientos. Con 18 corrimientos, recortar levemente la franja
   casi no afecta. En una pose sobreexpuesta (objeto `pose_15`–`17`: 46 % saturado) quitaría medio
@@ -1030,6 +1034,77 @@ triangulación y los mismos filtros (`_id_reconstruccion`). Recalibrar o cambiar
 > de MB y había que reescribirlo entero cada vez.
 
 ---
+
+### 13.9 Otros métodos de reconstrucción (comparar) — `procesamiento/metodos.py`
+
+Además de la triangulación estéreo, el sistema implementa los métodos de los códigos de MATLAB de
+`recursos/Matlab_Codes/Codes/3DReconstructionCodes` y `HybridCalibCodes`. Se eligen en la pestaña
+**Nube de puntos**:
+- con *Método de reconstrucción* se cambia la nube que se ve;
+- *Comparar métodos* los pone lado a lado (*Ver todos* muestra los 7 a la vez, *Los 4
+  principales* los más útiles), con la cámara sincronizada: al girar uno giran todos;
+- la tabla resume todos los métodos de la pose; un clic en una fila abre ese método en grande.
+
+| Método | Qué hace | MATLAB |
+|---|---|---|
+| **Estéreo (Fy)** | Triangula el rayo de la cámara con la fila del proyector (fase Fy). Es el del sistema. | `StereoReconstruction.m` |
+| Estéreo (Fx) | Igual, con la columna del proyector (Fx) | ídem, `Fd = 'Fx'` |
+| Estéreo (Fx + Fy) | Promedia las dos, pesadas por su modulación | ídem |
+| Híbrido polinomial · planos virtuales | Por píxel, X, Y, Z = polinomio de grado 4 de la fase, ajustado con 17 planos virtuales | `HybridCalibration_VirtualPlanes_Script.m`, `Polyfit3D.m`, `Eval_PhaseRegression.m` |
+| Híbrido racional · planos virtuales | Por píxel, Z = (a0 + a1·φ + a2·φ²)/(1 + b1·φ) y X, Y lineales en Z | `Racionalfit3D.m`, `Eval_PhaseFrac.m` |
+| Híbrido polinomial · planos medidos | Polinomio de grado 3, ajustado con superficies planas **capturadas** | `HybridCalibration_Stereo_Script.m`, `XYZ_R3D_Target.m` |
+| Híbrido racional · planos medidos | Racional, ajustado con superficies planas capturadas | ídem, `Racionalfit3D.m` |
+
+**Los métodos híbridos** no triangulan. Cada píxel de la cámara tiene su propia función, que pasa
+directamente de la fase a X, Y, Z. Esa función se ajusta con superficies de calibración:
+
+- **Planos virtuales:** planos perpendiculares a la cámara a 17 distancias, alrededor de las del
+  tablero. Se generan con la calibración estéreo: el rayo de cada píxel corta el plano, y ese
+  punto se proyecta en el proyector (`BackPropagation_Planes2.m`). No mide nada nuevo, así que
+  reproduce el estéreo. En nuestros datos:
+  - el **racional** coincide con el estéreo a **0.002 mm**: es la forma exacta de un sistema
+    ideal, y eso valida la implementación;
+  - el **polinomial** de grado 4 se aleja **0.14 mm**: es su error de aproximación.
+
+  Nota: se usa la forma cuadrática sobre lineal. La 2/2 de `Eval_PhaseFrac.m` tiene infinitas
+  soluciones equivalentes con datos exactos, y su ajuste quedaba singular (sesgo de 0.13 mm).
+- **Planos medidos:** las poses de **plano** y del **patrón** de la configuración en uso.
+  1. Cada una se reconstruye en estéreo y se le ajusta su plano (RANSAC, tolerancia 1 mm).
+  2. El punto «ideal» de cada píxel es donde su rayo corta ese plano.
+  3. La función se ajusta con la fase **medida**, así que corrige errores sistemáticos de la fase
+     (no linealidad del proyector, distorsiones no modeladas) que el estéreo no ve.
+
+**Resultados en nuestros datos** (planitud de las poses de plano 20–23, dejando cada plano fuera
+del ajuste para no hacer trampa):
+
+| Plano | Estéreo (Fy) | Híbrido polinomial · medidos | Híbrido racional · medidos |
+|---|---|---|---|
+| pose_20 | 0.66 mm | 0.30 mm | 0.32 mm |
+| pose_21 | 0.41 mm | 0.22 mm | 0.22 mm |
+| pose_22 | 0.60 mm | 0.28 mm | 0.27 mm |
+| pose_23 | 0.56 mm | 0.24 mm | 0.23 mm |
+
+En la tabla de la pestaña, un plano que se usó para ajustar el modelo aparece con «*». Su
+planitud ahí sale optimista (~0.13 mm); la cifra justa es la de esta tabla.
+
+Los híbridos con planos medidos **reducen a la mitad** el error de planitud. Estéreo (Fx) es
+mucho peor (1.3 mm), porque la línea base es vertical (§13.3).
+
+**Limitación de los planos medidos: el rango de profundidad.** Un modelo híbrido **no extrapola**:
+solo reconstruye la fase que se vio al calibrar, con un margen del 5 %. Si el objeto está más
+cerca o más lejos que los planos capturados, faltan puntos.
+- Ejemplo: el cilindro (Z 427–472 mm) con planos a 460–540 mm conserva solo el 9 % de los
+  puntos.
+- Para usarlo con objetos, **captura poses de plano que cubran su profundidad**: más cerca y más
+  lejos de la cámara. Los planos virtuales cubren todo el rango del tablero ±120 mm.
+
+**Cálculo y caché:**
+- Cada modelo híbrido se ajusta una vez por calibración (~10–25 s) y queda en
+  `resultados/calibracion/modelos/`.
+- El de planos medidos se recalcula si cambian las poses de plano o del patrón.
+- Las nubes de cada método quedan en `resultados/<proceso>/reconstruccion/<cat>/metodos/`, con
+  los **mismos filtros** que la reconstrucción normal (saltos, manchas, máscara), para comparar
+  en igualdad.
 
 ## 14. Etapa `visualizacion`
 
@@ -1404,6 +1479,11 @@ cuando **Seguir la última** está activo:
        recorta el contorno exterior; los agujeritos de dentro no crecen.
      - *Quitar regiones sueltas* menores de N px.
      - *Conservar solo la región más grande*: normalmente, el objeto.
+   - **Bordes de manchas oscuras** (en **naranja**): el filtro de §13.5. Por defecto usa el valor
+     general de ⚙ (0.6). Con *Valor propio para esta pose* se cambia solo en esta pose:
+     - 0 = no quitar nada;
+     - más bajo = conserva más detalles oscuros finos (un cable, letras);
+     - más alto = quita más bordes de manchas.
    - **Zonas dibujadas:**
      - *Recortar a una zona*: conserva solo lo que está dentro.
      - *Excluir una zona*: la quita, por ejemplo un soporte o la mesa.
@@ -1765,12 +1845,15 @@ en la nube (3D).
 3. **Recortar el contorno:** sube el deslizador a 3–6 px. Quita el anillo del borde del objeto,
    de donde salen la mayoría de los puntos volando. Los agujeritos de dentro no crecen.
 4. **Conservar solo la región más grande:** quita los trozos sueltos que quedaron.
-5. Si una zona del objeto sale mal (brillo, sombra), usa *⊘ Excluir una zona*. Si toda la pose
+5. Si el filtro de manchas (naranja) se come algo que es del objeto, por ejemplo un cable negro o
+   letras finas, marca *Valor propio para esta pose* y bájalo (0.3–0.4) o ponlo en 0. Si al
+   revés quedan picos sobre manchas, súbelo (0.7–0.8). Solo cambia esta pose.
+6. Si una zona del objeto sale mal (brillo, sombra), usa *⊘ Excluir una zona*. Si toda la pose
    tiene puntos ruidosos, marca *Subir el umbral de γ* y súbelo un poco. El histograma muestra la
    γ de los píxeles; los ruidosos están a la izquierda.
-6. Mira la línea de abajo: cuántos píxeles conserva y
+7. Mira la línea de abajo: cuántos píxeles conserva y
    **cuántos puntos quedarían de la nube actual**.
-7. Pulsa **Guardar y reconstruir**. Luego revisa la pestaña *Nube de puntos*. Si quedan puntos
+8. Pulsa **Guardar y reconstruir**. Luego revisa la pestaña *Nube de puntos*. Si quedan puntos
    volando sueltos, activa *Quitar puntos aislados en 3D* en ⚙ Ajustes y reconstruye otra vez.
 
 **Otras cosas que conviene saber:**
@@ -1812,6 +1895,63 @@ en la nube (3D).
   pose de `patron` reconstruida, o el ancho de una pieza medida con calibre.
 - Si la pose se reconstruye de nuevo (otra máscara o calibración), las mediciones quedan con ⚠.
   *Volver a medir con la nube actual* las recalcula en los mismos píxeles.
+
+### 19.7 Escaneo 360° paso a paso
+
+Una captura ve solo la cara del objeto que mira a la cámara. Para tenerlo completo se capturan
+**varias vistas** y la pestaña **360°** las une en una sola nube
+(`procesamiento/escaneo.py`).
+
+**Cómo capturar las vistas:**
+
+1. Pon un nombre al proceso (por ejemplo «pieza 360») y captura una pose de *Objeto* por vista.
+   Usa *Pausa antes de cada pose* para mover el objeto entre una y otra.
+2. Entre una vista y la siguiente, **gira el objeto o apóyalo en otra cara**, como un dado. Cada
+   vista debe compartir con alguna otra una parte de la superficie, idealmente un 20–30 %.
+   - Ayuda que cada toma muestre **2–3 caras**: una esquina hacia la cámara, no una cara de frente.
+   - Para cubrir todo, 8–12 vistas suelen bastar, por ejemplo dos por cada cara de apoyo.
+3. Si el objeto es **liso, sin textura**, pega 3–4 marcas pequeñas (puntos negros, pegatinas):
+   dan puntos para unir las vistas a mano si la unión automática falla.
+4. La mesa y el fondo se quitan con la *Máscara* de cada pose. Si no, quedan en la nube unida.
+
+**Cómo unirlas (pestaña 360°):**
+
+1. *＋ Nuevo escaneo…*, un nombre y las vistas (miniaturas). La primera elegida (★) es la
+   **referencia**: la nube final queda en su sistema de coordenadas.
+2. **Unir vistas.** Para cada par de vistas:
+   - busca los mismos puntos de la **textura** en las dos (SIFT) y, con su X, Y, Z, el giro y
+     desplazamiento entre ellas (RANSAC);
+   - lo afina con **ICP punto a plano**: proyecta cada punto en la imagen de la otra vista y
+     minimiza la distancia a su superficie.
+   Luego ajusta todas las vistas a la vez, para repartir el error, y las funde en una rejilla de
+   0.3 mm.
+3. Revisa el resultado:
+   - la nube se ve **coloreada por vista**: donde dos colores se superponen deben calzar sin
+     escalones;
+   - la tabla *Pares de vistas* da, para cada par, si se unió (✓/✕), cómo (textura o puntos),
+     el **error** en mm y qué parte **calza**.
+4. **Si una vista no se une** (✕, o queda en «Sin unir»): pulsa *Marcar puntos* en un par donde
+   compartan superficie. Se abren las dos vistas lado a lado.
+   - Haz clic en un punto en A y en el **mismo lugar** en B, al menos 3 veces, con puntos separados
+     entre sí (esquinas, manchas, marcas).
+   - *Guardar puntos y volver a unir* usa esos puntos para la posición inicial y los afina con ICP.
+5. *Descargar .ply* da la nube unida. Queda en `resultados/escaneos/<nombre>/`:
+   - `nube.ply`;
+   - `nube.npz` (xyz, gris y vista de cada punto);
+   - `escaneo.json` (vistas, pares, transformaciones y calidad).
+
+**Referencia:** en el cilindro con pintas (objeto `pose_18`–`22`), las 5 vistas se unieron
+automáticamente, incluso pares girados 66–72°. El ajuste entre vistas fue de 0.20 mm y tardó
+~30 s.
+
+**Límites:**
+
+- La unión necesita superficie en común. Dos vistas opuestas (de frente y de espalda) no se unen
+  directamente: hacen falta vistas intermedias.
+- Las piezas muy simétricas y lisas (esfera, cilindro liso) pueden calzar «girados» de más; usa
+  marcas.
+- El resultado es una nube de puntos. Para una malla cerrada hace falta otro paso, por ejemplo
+  con MeshLab (Poisson) a partir del `.ply`.
 
 ## 20. Instalación en otro computador
 

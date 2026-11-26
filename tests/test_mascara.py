@@ -67,3 +67,19 @@ def test_filtro_de_vecinos_quita_un_punto_volando():
     r = mascara.filtrar_vecinos(xx * 0.2, yy * 0.2, z, m, 3.0)
     assert not r[50, 50] and r.sum() >= m.sum() - 9  # quita el volando (y como mucho sus vecinos)
     assert np.array_equal(mascara.filtrar_vecinos(xx, yy, z, m, 0.0), m)  # 0 = desactivado
+
+
+def test_reflectancia_propia_de_la_pose():
+    """El filtro de manchas usa el valor propio de la máscara de la pose, o el general."""
+    from datos_sistema import configuracion as cfg
+
+    assert mascara.normalizar({"reflectancia": 2})["reflectancia"] == 0.95
+    assert mascara.normalizar({})["reflectancia"] is None
+    assert mascara.reflectancia_de("objeto", "pose_98") == cfg.REFLECTANCIA_REL_MIN  # sin máscara
+    valido, gamma = _objeto_con_agujeros()
+    mascara.guardar("objeto", "pose_98", valido, {"reflectancia": 0.3})
+    assert mascara.reflectancia_de("objeto", "pose_98") == 0.3
+    mascara.guardar("objeto", "pose_98", valido, {"reflectancia": 0})
+    assert mascara.reflectancia_de("objeto", "pose_98") == 0.0  # 0 = no quitar (no es «sin valor»)
+    mascara.borrar("objeto", "pose_98")
+    assert mascara.reflectancia_de("objeto", "pose_98") == cfg.REFLECTANCIA_REL_MIN

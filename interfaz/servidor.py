@@ -129,6 +129,33 @@ class Manejador(BaseHTTPRequestHandler):
             if url.path == "/api/mascara":
                 cat, pose = self._cat_pose(q)
                 return self._json(estado_mascara(cat, pose))
+            if url.path == "/api/metodos":
+                from procesamiento import metodos
+
+                return self._json({"metodos": metodos.listar()})
+            if url.path == "/api/metodos/comparar":
+                from procesamiento import metodos
+
+                cat, pose = self._cat_pose(q)
+                lista = [m for m in q.get("metodos", "").split(",") if m in metodos.METODOS] or None
+                return self._json(metodos.comparar(cat, pose, lista, avisar=lambda t: None))
+            if url.path == "/api/escaneos":
+                from procesamiento import escaneo
+
+                return self._json({"escaneos": escaneo.listar()})
+            if url.path == "/api/escaneo":
+                from procesamiento import escaneo
+
+                return self._json(escaneo.leer(q.get("id", "")))
+            if url.path in ("/api/escaneo/nube", "/api/escaneo/ply"):
+                from procesamiento import escaneo
+
+                d = escaneo.carpeta(q.get("id", ""))
+                if url.path.endswith("ply"):
+                    return self._enviar(200, (d / "nube.ply").read_bytes(), "application/octet-stream",
+                                        {"Content-Disposition": f'attachment; filename="escaneo_{d.name}.ply"'})
+                return self._enviar(200, escaneo.nube_binaria(q.get("id", ""), int(q.get("max", 1_500_000))),
+                                    "application/octet-stream")
             if url.path == "/api/perfil":
                 cat, pose = self._cat_pose(q)
                 return self._json(perfil_3d(cat, pose, (float(q["ax"]), float(q["ay"])), (float(q["bx"]), float(q["by"]))))
@@ -176,7 +203,7 @@ class Manejador(BaseHTTPRequestHandler):
             if url.path == "/api/nube":
                 cat, pose = self._cat_pose(q)
                 maximo = max(1000, min(int(q.get("max", 400_000)), 2_000_000))
-                datos = generar_nube(cat, pose, maximo, q.get("indices") == "1")
+                datos = generar_nube(cat, pose, maximo, q.get("indices") == "1", q.get("metodo"))
                 return self._enviar(200, datos, "application/octet-stream")
             return self._error(404, "ruta desconocida")
         except FileNotFoundError as exc:
@@ -260,6 +287,16 @@ class Manejador(BaseHTTPRequestHandler):
 
                 cuerpo = self._cuerpo()
                 archivos.guardar_nota(str(cuerpo.get("clave", "")), str(cuerpo.get("texto", "")))
+                return self._json({"ok": True})
+            if url.path == "/api/escaneo/borrar":
+                import shutil
+
+                from procesamiento import escaneo
+
+                d = escaneo.carpeta(str(self._cuerpo().get("id", "")))
+                if d.parent != escaneo.DIR_ESCANEOS or not d.is_dir():
+                    raise ValueError("escaneo inválido")
+                shutil.rmtree(d)
                 return self._json({"ok": True})
             if url.path == "/api/poses/borrar":  # {cat, poses, simular}: simular = qué se movería
                 from datos_sistema import archivos

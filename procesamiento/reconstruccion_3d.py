@@ -388,7 +388,8 @@ def procesar_reconstruccion(
             )
             m = filtrar_outliers_3d(z, m, salto_max, z_min, z_max)
             n_antes = int(np.count_nonzero(m))
-            m &= ~mascara.zonas_dificiles(d, rutas.dir_pose_ordenada(categoria, nombre), fd_usada)
+            m &= ~mascara.zonas_dificiles(d, rutas.dir_pose_ordenada(categoria, nombre), fd_usada,
+                                          rel_min=mascara.reflectancia_de(categoria, nombre))
             n_dificiles = n_antes - int(np.count_nonzero(m))
             mask_usuario = mascara.cargar(categoria, nombre, m.shape)
             if mask_usuario is not None:

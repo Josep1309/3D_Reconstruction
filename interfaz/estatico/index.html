@@ -204,6 +204,7 @@
       <button role="tab" data-paso="profundidad"><span>6</span><b data-i18n="paso_profundidad">Profundidad</b></button>
       <button role="tab" data-paso="nube"><span>7</span><b data-i18n="paso_nube">Nube de puntos</b></button>
       <button role="tab" data-paso="medir"><span>8</span><b data-i18n="paso_medir">Medición</b></button>
+      <button role="tab" data-paso="escaneo" class="paso-aparte"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5a6.5 6.5 0 1 0 6.5 6.5h-1.5A5 5 0 1 1 8 3V1.5Zm0 3.5a3 3 0 1 0 3 3H9.5A1.5 1.5 0 1 1 8 6.5V5Zm3.5-4 3 3-3 3V5H10V3h1.5Z"/></svg><b data-i18n="paso_escaneo">360°</b></button>
       <button role="tab" data-paso="sistema" class="paso-aparte"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2h12v9H9.5l.5 2H12v1.5H4V13h2l.5-2H2Zm1.5 1.5v6h9v-6Z"/></svg><b data-i18n="paso_sistema">Sistema</b></button>
       <button role="tab" data-paso="archivos" class="paso-aparte"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3A1.5 1.5 0 0 1 3 1.5h3.2l1.5 1.8H13A1.5 1.5 0 0 1 14.5 4.8v7.7A1.5 1.5 0 0 1 13 14H3a1.5 1.5 0 0 1-1.5-1.5Zm1.5 0v9.5h10V4.8H7l-1.5-1.8Z"/></svg><b data-i18n="paso_archivos">Archivos</b></button>
       <button role="tab" data-paso="calibracion" class="paso-aparte"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Zm0 2.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z"/></svg><b data-i18n="paso_calibracion">Calibración</b></button>
@@ -282,6 +283,7 @@
             <svg id="mk-capa" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true"></svg>
           </div>
           <p class="nota mk-leyenda"><i class="mk-c rojo"></i> <span data-i18n="mk_leyenda_quita">lo que quita la máscara</span>
+            · <i class="mk-c naranja"></i> <span data-i18n="mk_leyenda_manchas">bordes de manchas</span>
             · <i class="mk-c oscuro"></i> <span data-i18n="mk_leyenda_fase">ya descartado por la fase (⚙ Ajustes)</span></p>
           <p id="mk-resultado" class="mk-resultado"></p>
         </div>
@@ -306,6 +308,11 @@
           <label class="mk-etq" for="mk-isla" data-i18n="mk_isla">Quitar regiones sueltas menores de (px)</label>
           <div class="mk-control"><input id="mk-isla" type="range" min="0" max="20000" step="100"><input id="mk-isla-n" type="number" min="0" step="100"></div>
           <label class="casilla"><input id="mk-mayor" type="checkbox"> <span data-i18n="mk_mayor">Conservar solo la región más grande (el objeto)</span></label>
+
+          <h4 data-i18n="mk_manchas">Bordes de manchas oscuras</h4>
+          <label class="casilla"><input id="mk-refl-on" type="checkbox"> <span id="mk-refl-etq"></span></label>
+          <div class="mk-control"><input id="mk-refl" type="range" min="0" max="0.95" step="0.05"><input id="mk-refl-n" type="number" min="0" max="0.95" step="0.05"></div>
+          <p class="nota" data-i18n="mk_manchas_nota">En naranja. Quita los bordes de manchas, letras o cables oscuros sobre fondo claro, donde la fase da picos falsos. 0 = no quitar; más alto = quita más. Bájalo si el objeto tiene detalles oscuros finos que quieres conservar.</p>
 
           <h4 data-i18n="mk_zonas">Zonas dibujadas</h4>
           <div class="mk-fila botones">
@@ -436,7 +443,83 @@
       </div>
     </section>
 
+    <section class="panel" data-panel="escaneo">
+      <div class="e3-barra">
+        <select id="e3-lista" data-i18n-aria="e3_titulo"></select>
+        <button type="button" id="e3-borrar" class="icono" data-i18n-title="e3_borrar" title="Borrar este escaneo">🗑</button>
+        <a id="e3-ply" class="boton oculto" download data-i18n="e3_ply">Descargar .ply</a>
+        <button type="button" class="enlace mk-guia" data-manual="19.7" data-i18n="e3_guia">📖 Guía del escaneo 360°</button>
+      </div>
+      <div class="e3">
+        <div class="e3-izq">
+          <div class="md-3d">
+            <canvas id="e3-lienzo" data-i18n-aria="lienzo" aria-label="Nube de puntos 3D"></canvas>
+            <p id="e3-info" class="visor-info"></p>
+          </div>
+          <div class="md-ctl3d">
+            <span class="segmentado color" role="group" id="e3-color">
+              <button type="button" data-color="vista" class="activo" data-i18n="e3_col_vista">Por vista</button>
+              <button type="button" data-color="textura" data-i18n="col_tex">Textura</button>
+              <button type="button" data-color="profundidad" data-i18n="col_prof">Profundidad</button>
+            </span>
+            <label><span data-i18n="tamano">Tamaño</span> <input id="e3-tam" type="range" min="1" max="6" step="0.5" value="2"></label>
+            <button type="button" id="e3-vista-inicial" data-i18n="vista_inicial">Vista inicial</button>
+          </div>
+          <div id="e3-leyenda" class="e3-leyenda"></div>
+        </div>
+        <div class="e3-der tarjeta">
+          <p id="e3-resultado" class="e3-resultado"></p>
+          <h4 data-i18n="e3_vistas">Vistas del objeto</h4>
+          <input id="e3-nombre" type="text" maxlength="60" spellcheck="false" data-i18n-placeholder="e3_nombre" placeholder="Nombre del escaneo (p. ej. cilindro 360)">
+          <p class="nota" id="e3-sel-resumen"></p>
+          <div id="e3-vistas" class="rc-poses e3-vistas"></div>
+          <button type="button" id="e3-unir" class="primario" data-i18n="e3_unir">Unir vistas</button>
+          <h4 data-i18n="e3_pares">Pares de vistas</h4>
+          <table id="e3-pares" class="md-tabla e3-pares">
+            <thead><tr><th data-i18n="e3_par">Par</th><th></th><th data-i18n="e3_metodo">Cómo</th><th data-i18n="e3_error">Error mm</th><th data-i18n="e3_calza">Calza</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <section id="e3-marcar" class="tarjeta oculto">
+        <div class="e3-barra"><b id="e3-marcar-titulo"></b><span id="e3-marcar-estado" class="nota"></span></div>
+        <p class="nota" data-i18n="e3_marcar_ayuda">Haz clic en un punto de la vista A y luego en el mismo lugar de la vista B (una esquina, una mancha, un borde). Repite con al menos 3 puntos separados entre sí. Gira cada vista como en el visor 3D.</p>
+        <div class="e3-dos">
+          <div class="md-3d"><canvas id="e3-lienzo-A"></canvas><svg id="e3-capa-A" aria-hidden="true"></svg><p class="visor-info">A</p></div>
+          <div class="md-3d"><canvas id="e3-lienzo-B"></canvas><svg id="e3-capa-B" aria-hidden="true"></svg><p class="visor-info">B</p></div>
+        </div>
+        <div class="e3-barra">
+          <button type="button" id="e3-marcar-deshacer" data-i18n="mk_deshacer">Deshacer</button>
+          <button type="button" id="e3-marcar-cerrar" data-i18n="cerrar">Cerrar</button>
+          <button type="button" id="e3-marcar-guardar" class="primario" data-i18n="e3_marcar_guardar">Guardar puntos y volver a unir</button>
+        </div>
+      </section>
+    </section>
+
     <section class="panel" data-panel="nube">
+      <div class="nm-barra">
+        <label class="nm-metodo"><span data-i18n="nm_metodo">Método de reconstrucción</span>
+          <select id="n-metodo"></select></label>
+        <button type="button" id="n-comparar" data-i18n="nm_comparar">Comparar métodos</button>
+        <button type="button" class="enlace mk-guia" data-manual="13.9" data-i18n="nm_guia">📖 ¿Qué hace cada método?</button>
+        <span id="n-metodo-estado" class="nota"></span>
+      </div>
+      <section id="nm-comparar" class="oculto">
+        <p class="nota" data-i18n="nm_elige">Elige los métodos para verlos lado a lado (o todos a la vez); al girar uno, giran todos.</p>
+        <div id="nm-elegir" class="nm-elegir"></div>
+        <div id="nm-rejilla" class="nm-rejilla"></div>
+        <div class="nm-tabla-cab">
+          <h4 data-i18n="nm_tabla">Todos los métodos en esta pose</h4>
+          <button type="button" id="nm-calcular" data-i18n="nm_calcular">Calcular estadísticas</button>
+          <span id="nm-tabla-estado" class="nota"></span>
+        </div>
+        <table id="nm-tabla" class="md-tabla nm-tabla">
+          <thead><tr><th data-i18n="nm_col_metodo">Método</th><th data-i18n="nm_col_puntos">Puntos</th><th>Z (mm)</th>
+            <th data-i18n="nm_col_dif" data-i18n-title="nm_col_dif_ayuda">Δ vs estéreo (mediana · P95)</th>
+            <th data-i18n="nm_col_planitud">Planitud</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </section>
       <div class="visor">
         <canvas id="lienzo" data-i18n-aria="lienzo" aria-label="Nube de puntos 3D"></canvas>
         <div class="visor-herramientas">
@@ -679,6 +762,8 @@
 <script src="/estatico/medicion.js"></script>
 <script src="/estatico/mascara.js"></script>
 <script src="/estatico/medir.js"></script>
+<script src="/estatico/escaneo.js"></script>
+<script src="/estatico/metodos.js"></script>
 <script src="/estatico/recalibrar.js"></script>
 <script src="/estatico/calibracion.js"></script>
 <script src="/estatico/app.js"></script>

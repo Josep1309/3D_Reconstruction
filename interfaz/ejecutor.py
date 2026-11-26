@@ -305,6 +305,16 @@ def main() -> None:
         solo_vista_previa(conf)
         return
     try:
+        if conf.get("escaneo"):  # pestaña 360°: unir vistas (no corre el pipeline)
+            from procesamiento import escaneo
+
+            e = conf["escaneo"]
+            print("[PIPELINE] Etapas: escaneo", flush=True)
+            print("# ETAPA: escaneo", flush=True)
+            escaneo.unir(str(e["nombre"]), [str(p) for p in e["poses"]], e.get("manual") or {},
+                         float(e.get("voxel") or escaneo.VOXEL_MM))
+            print("[PIPELINE] 'escaneo' terminada", flush=True)
+            return
         if conf.get("importar"):
             importar_y_elegir(conf["importar"])
         configurar(conf)

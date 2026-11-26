@@ -1,5 +1,7 @@
 .env/
 __pycache__/
 recursos/patterns/
+.pytest_cache/
+.ruff_cache/
 # Todo lo que genera el sistema (capturas, resultados, papelera, estado) va en datos/
 datos/

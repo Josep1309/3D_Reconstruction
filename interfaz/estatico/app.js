@@ -164,6 +164,7 @@ function pintarEjecucion(e) {
   if (rc.datos) pintarResumenRc();
   pintarPasos();
   if (!e.ejecutando) refrescarEstado();
+  if (!e.ejecutando && e3.esperando) { e3.esperando = false; cargarEscaneo(); }  // terminó de unir (360°)
 }
 
 // ============================== inventario de poses ==============================
@@ -360,6 +361,7 @@ function cargarPanel() {
   if (est.paso === "profundidad") cargarMedicion();
   if (est.paso === "mascara") return cargarMascara();
   if (est.paso === "medir") return cargarMedir();
+  if (est.paso === "escaneo") return cargarEscaneo();
   for (const fig of $$("figure[data-tipo]", panel)) cargarFigura(fig);
 }
 
@@ -408,16 +410,19 @@ async function cargarNube() {
     try { est.visor = new VisorNube($("#lienzo")); }
     catch (err) { $("#n-vacio").textContent = err.message; $("#n-vacio").classList.remove("oculto"); return; }
   }
-  const clave = `${est.cat}/${est.pose}/${version("reconstruida")}`;
+  const metodo = nm.metodo;
+  if (nm.comparando) { $(".panel[data-panel=nube] > .visor").classList.add("oculto"); return cargarComparacion(); }
+  $(".panel[data-panel=nube] > .visor").classList.remove("oculto");
+  const clave = `${est.cat}/${est.pose}/${version("reconstruida")}/${metodo}`;
   if (est.nubeCargada === clave) { textoNube(); return est.visor.dibujar(); }
   est.nubeCargada = clave;
   const vacio = $("#n-vacio"), info = $("#n-info");
   if (!est.pose || !infoPose()?.reconstruida) {
     est.visor.vaciar(); vacio.classList.remove("oculto"); vacio.textContent = t("sin_nube"); info.textContent = ""; return;
   }
-  info.textContent = t("nube_cargando");
+  info.textContent = metodo === "estereo" ? t("nube_cargando") : t("nm_calculando", { m: nombreMetodo(metodo) });
   try {
-    const r = await fetch(`/api/nube?cat=${est.cat}&pose=${est.pose}&max=400000`);
+    const r = await fetch(`/api/nube?cat=${est.cat}&pose=${est.pose}&max=400000&metodo=${metodo}`);
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
     const buf = await r.arrayBuffer();
     if (est.nubeCargada !== clave) return;
@@ -550,8 +555,9 @@ function textoNube() {
   const info = $("#n-info");
   if (!est.visor || !est.visor.n) { info.textContent = t("controles"); return; }
   const total = infoPose()?.puntos;
-  info.textContent = t("nube_mostrados", { n: est.visor.n.toLocaleString(locale()) }) +
-    (total ? t("nube_de", { t: total.toLocaleString(locale()) }) : "") + " · " + t("controles");
+  info.textContent = (nm.metodo !== "estereo" ? nombreMetodo(nm.metodo) + " · " : "") +
+    t("nube_mostrados", { n: est.visor.n.toLocaleString(locale()) }) +
+    (total && nm.metodo === "estereo" ? t("nube_de", { t: total.toLocaleString(locale()) }) : "") + " · " + t("controles");
 }
 
 // ============================== eventos del servidor ==============================
@@ -911,6 +917,8 @@ async function iniciar() {
   iniciarAvance();
   iniciarMascara();
   iniciarMedir();
+  iniciarEscaneo();
+  iniciarMetodos();
   if (Array.isArray(c.calib_poses)) {  // lista explícita en pipeline.py
     const o = document.createElement("option");
     o.value = "lista"; o.dataset.i18n = "calib_poses_lista"; o.textContent = t("calib_poses_lista");

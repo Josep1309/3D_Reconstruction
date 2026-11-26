@@ -31,7 +31,10 @@ import numpy as np
 from datos_sistema import configuracion as cfg
 from datos_sistema import rutas
 
-DEFECTO = {"umbral": None, "recortes": [], "exclusiones": [], "erosion": 0, "min_isla": 0, "mayor": False}
+# reflectancia: valor propio del filtro de bordes de manchas oscuras para esta pose (None = el de
+# ⚙ Ajustes, REFLECTANCIA_REL_MIN; 0 = no quitar). Lo aplica la reconstrucción (zonas_dificiles).
+DEFECTO = {"umbral": None, "recortes": [], "exclusiones": [], "erosion": 0, "min_isla": 0, "mayor": False,
+           "reflectancia": None}
 
 
 def ruta_png(cat: str, pose: str) -> Path:
@@ -89,7 +92,14 @@ def normalizar(params: dict | None) -> dict:
         "erosion": int(min(max(int(p["erosion"] or 0), 0), 50)),
         "min_isla": int(min(max(int(p["min_isla"] or 0), 0), 10_000_000)),
         "mayor": bool(p["mayor"]),
+        "reflectancia": None if p["reflectancia"] in (None, "") else min(max(float(p["reflectancia"]), 0.0), 0.95),
     }
+
+
+def reflectancia_de(cat: str, pose: str) -> float:
+    """Umbral del filtro de manchas para la pose: el propio de su máscara o el general."""
+    propio = (leer_parametros(cat, pose) or {}).get("reflectancia")
+    return cfg.REFLECTANCIA_REL_MIN if propio is None else float(propio)
 
 
 def _rellenar(poligonos: list, forma: tuple[int, int]) -> np.ndarray:

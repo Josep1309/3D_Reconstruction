@@ -6,13 +6,13 @@
 
 const mk = {
   clave: null, estado: null, turno: 0, temporizador: null, vista: "textura",
-  p: { umbral: null, recortes: [], exclusiones: [], erosion: 0, min_isla: 0, mayor: false },
+  p: { umbral: null, recortes: [], exclusiones: [], erosion: 0, min_isla: 0, mayor: false, reflectancia: null },
   dibujo: null,  // {tipo: "recortes"|"exclusiones", puntos: [[x, y], …]} mientras se dibuja
   guardado: "",
   orden: [],     // tipos de las zonas en el orden en que se agregaron (para «Deshacer»)  // parámetros guardados (JSON) para saber si hay cambios sin guardar
 };
 
-const MK_DEFECTO = () => ({ umbral: null, recortes: [], exclusiones: [], erosion: 0, min_isla: 0, mayor: false });
+const MK_DEFECTO = () => ({ umbral: null, recortes: [], exclusiones: [], erosion: 0, min_isla: 0, mayor: false, reflectancia: null });
 
 async function cargarMascara() {
   const clave = `${est.cat}/${est.pose}`;
@@ -37,7 +37,7 @@ async function cargarMascara() {
 }
 
 const soloParametros = (p) => ({ umbral: p.umbral, recortes: p.recortes, exclusiones: p.exclusiones,
-                                 erosion: p.erosion, min_isla: p.min_isla, mayor: p.mayor });
+                                 erosion: p.erosion, min_isla: p.min_isla, mayor: p.mayor, reflectancia: p.reflectancia ?? null });
 
 function pintarControlesMascara() {
   const e = mk.estado, p = mk.p;
@@ -49,6 +49,12 @@ function pintarControlesMascara() {
   $("#mk-erosion").value = $("#mk-erosion-n").value = p.erosion;
   $("#mk-isla").value = $("#mk-isla-n").value = p.min_isla;
   $("#mk-mayor").checked = p.mayor;
+  // filtro de manchas: valor propio de la pose o el general (⚙ Ajustes)
+  const propio = p.reflectancia != null;
+  $("#mk-refl-on").checked = propio;
+  $("#mk-refl-etq").textContent = t("mk_manchas_propio", { v: fmt(e.reflectancia_general, 2) });
+  $("#mk-refl").disabled = $("#mk-refl-n").disabled = !propio;
+  $("#mk-refl").value = $("#mk-refl-n").value = propio ? p.reflectancia : e.reflectancia_general;
   for (const b of $$("#mk-vista button")) b.classList.toggle("activo", b.dataset.vista === mk.vista);
   pintarHistogramaGamma();
   pintarMascara();
@@ -121,6 +127,7 @@ async function previaMascara() {
   $("#mk-img").src = r.imagen;
   const pct = (a, b) => (b ? Math.round((100 * a) / b) : 0);
   let texto = t("mk_conserva", { c: r.conservados.toLocaleString(), v: r.validos.toLocaleString(), p: pct(r.conservados, r.validos) });
+  if (r.manchas) texto += " · " + t("mk_n_manchas", { n: r.manchas.toLocaleString() });
   if (r.puntos_actuales != null) {
     texto += " · " + t("mk_nube", { q: r.puntos_quedan.toLocaleString(), a: r.puntos_actuales.toLocaleString(),
                                     d: (r.puntos_actuales - r.puntos_quedan).toLocaleString() });
@@ -165,6 +172,12 @@ function iniciarMascara() {
   enlazar("#mk-erosion", "#mk-erosion-n", "erosion");
   enlazar("#mk-isla", "#mk-isla-n", "min_isla");
   enlazar("#mk-umbral", "#mk-umbral-n", "umbral", false);
+  enlazar("#mk-refl", "#mk-refl-n", "reflectancia", false);
+  $("#mk-refl-on").addEventListener("change", (e) => {
+    mk.p.reflectancia = e.target.checked ? +$("#mk-refl").value : null;
+    $("#mk-refl").disabled = $("#mk-refl-n").disabled = !e.target.checked;
+    cambioMascara();
+  });
   $("#mk-umbral-on").addEventListener("change", (e) => {
     mk.p.umbral = e.target.checked ? +$("#mk-umbral").value : null;
     $("#mk-umbral").disabled = $("#mk-umbral-n").disabled = !e.target.checked;
