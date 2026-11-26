@@ -172,3 +172,32 @@ def test_capturas_nuevas_se_suman_al_proceso_elegido(datos):
     v = sesiones.configuracion_vigente()
     assert "pose_01" in v["poses"]["objeto"] and "pose_00" not in v["poses"]["objeto"]
     assert v["poses"]["patron"] == {"pose_00", "pose_01", "pose_02"}
+
+
+def test_exportar_parametros_de_calibracion(tmp_path):
+    """Formato SL_TSC: solo cámara y proyector; tamaños [alto, ancho]; k3 solo si no es 0."""
+    import numpy as np
+
+    z = {"Ac": np.eye(3) * 2, "Ap": np.eye(3) * 3, "dist_cam": np.array([0.1, 0.2, 0.3, 0.4, 0.0]),
+         "dist_proj": np.array([1.0, 2.0, 3.0, 4.0, 5.0]), "R": np.eye(3), "T": np.array([[3.0], [4.0], [0.0]]),
+         "cam_size_wh": [1280, 960], "proj_size_wh": [1280, 800]}
+    historial = tmp_path / "historial" / "20260101_120000"
+    historial.mkdir(parents=True)
+    for carpeta in (tmp_path, historial):
+        np.savez(carpeta / "Estereo_TSC_0_2.npz", **z)
+    for ident in (None, "20260101_120000"):
+        d = ce.exportar_parametros(ident, tmp_path, "independiente")
+        json.dumps(d, allow_nan=False)
+        assert set(d) == {"camera", "projector"}
+        assert set(d["camera"]) == {"K", "radial_distortion", "tangential_distortion", "image_size"}
+        assert d["camera"]["image_size"] == [960, 1280] and d["projector"]["image_size"] == [800, 1280]
+        assert d["camera"]["radial_distortion"] == [0.1, 0.2] and d["camera"]["tangential_distortion"] == [0.3, 0.4]
+        assert d["projector"]["radial_distortion"] == [1.0, 2.0, 5.0]
+        assert d["camera"]["K"][0][0] == 2 and d["projector"]["R"][1][1] == 1 and d["projector"]["t"] == [3.0, 4.0, 0.0]
+    with pytest.raises(FileNotFoundError):  # sin la variante conjunta
+        ce.exportar_parametros(None, tmp_path, "conjunta")
+    for malo in ("../x", ".oculto", "a/b"):
+        with pytest.raises(ValueError):
+            ce.exportar_parametros(malo, tmp_path)
+    with pytest.raises(FileNotFoundError):
+        ce.exportar_parametros("no_existe", tmp_path)

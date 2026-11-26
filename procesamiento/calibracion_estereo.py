@@ -783,6 +783,48 @@ def listar_calibraciones(dir_calibracion: Path = cfg.DIR_CALIBRACION) -> list[di
     return salida
 
 
+def exportar_parametros(ident: str | None = None, dir_calibracion: Path = cfg.DIR_CALIBRACION,
+                        variante: str | None = None) -> dict:
+    """Parámetros de cámara y proyector de una calibración, en el formato `SL_TSC_*.json`:
+
+    - `K` = [[fx, 0, cx], [0, fy, cy], [0, 0, 1]] en píxeles;
+    - `radial_distortion` = [k1, k2] (más k3 si no es 0) y `tangential_distortion` = [p1, p2];
+    - `image_size` = [alto, ancho];
+    - `projector.R`, `projector.t`: X_p = R·X_c + t, en mm (de la cámara al proyector).
+
+    `ident` = carpeta de `historial/`; None = la calibración en uso. `variante` = "independiente"
+    (Estereo_TSC_0_2) o "conjunta" (_J); None = la de `cfg.CALIBRACION`.
+    """
+    if ident:
+        if "/" in ident or "\\" in ident or ident.startswith("."):
+            raise ValueError(f"calibración inválida: {ident!r}")
+        carpeta = dir_calibracion / "historial" / ident
+    else:
+        carpeta = dir_calibracion
+    variante = variante or cfg.CALIBRACION
+    ruta = carpeta / ("Estereo_TSC_0_2_J.npz" if variante == "conjunta" else "Estereo_TSC_0_2.npz")
+    if not ruta.exists():
+        raise FileNotFoundError(f"No existe la calibración {ident or 'en uso'} ({ruta.name}) en {dir_calibracion}")
+
+    def optica(K, dist, tamano_wh) -> dict:
+        d = np.zeros(5)
+        dist = np.asarray(dist, float).ravel()
+        d[:min(len(dist), 5)] = dist[:5]
+        k1, k2, p1, p2, k3 = d
+        return {"K": np.asarray(K, float).tolist(),
+                "radial_distortion": [k1, k2] + ([k3] if k3 != 0 else []),
+                "tangential_distortion": [p1, p2],
+                "image_size": [int(tamano_wh[1]), int(tamano_wh[0])]}
+
+    with np.load(ruta) as z:
+        return {
+            "camera": optica(z["Ac"], z["dist_cam"], z["cam_size_wh"]),
+            "projector": {**optica(z["Ap"], z["dist_proj"], z["proj_size_wh"]),
+                          "R": np.asarray(z["R"], float).tolist(),
+                          "t": np.asarray(z["T"], float).ravel().tolist()},
+        }
+
+
 def _origen_poses(info: dict) -> list[dict]:
     """De qué captura sale cada pose del patrón de una calibración (hora y si sigue organizada)."""
     detalle = info.get("errores_por_pose", {})

@@ -29,6 +29,7 @@ import argparse
 import json
 import queue
 import os
+import re
 import sys
 import threading
 import webbrowser
@@ -379,6 +380,15 @@ class Manejador(BaseHTTPRequestHandler):
                 raise FileNotFoundError("no hay calibración")
             return self._enviar(200, ruta.read_bytes(), "application/json; charset=utf-8",
                                 {"Content-Disposition": f'attachment; filename="calibracion_{ruta.stat().st_mtime:.0f}.json"'})
+        if tipo == "parametros_calibracion":  # todos los parámetros de la calibración elegida (o la en uso)
+            from procesamiento import calibracion_estereo as ce
+
+            ident = q.get("id") or None
+            datos = ce.exportar_parametros(ident, DIR_CALIBRACION)
+            nombre = re.sub(r"[^\w.-]", "_", f"SL_TSC_{cfg.MONTAJE}_{ident or 'en_uso'}.json")
+            return self._enviar(200, json.dumps(datos, indent=2, ensure_ascii=False).encode(),
+                                "application/json; charset=utf-8",
+                                {"Content-Disposition": f'attachment; filename="{nombre}"'})
         cat, pose = self._cat_pose(q)
         if tipo == "ply":
             from datos_sistema import rutas

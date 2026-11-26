@@ -1646,8 +1646,16 @@ original.
 
 Más abajo, **Calibración en uso** permite elegir
 cualquier calibración del historial (fecha, poses y error estéreo; ⚠ = error estéreo muy alto) y
-ponerla en uso con **Usar esta calibración** (§20.5). Al calibrar en *Proceso por etapas*, la
-nueva queda en uso sola. Debajo, los errores de reproyección de cada pose del tablero con la
+ponerla en uso con **Usar esta calibración** (§20.5). **Exportar parámetros .json** descarga la
+calibración elegida en el selector, esté en uso o no, en el formato `SL_TSC_*.json`, para llevarla
+a otro programa (p. ej. Blender). Usa la variante de la opción **Calibración** (*independiente* o
+*conjunta*). Contiene solo `camera` y `projector`:
+- `K` = [[fx, 0, cx], [0, fy, cy], [0, 0, 1]] en píxeles;
+- `radial_distortion` = [k1, k2] (más k3 si no es 0) y `tangential_distortion` = [p1, p2];
+- `image_size` = [alto, ancho];
+- `projector.R` y `projector.t`: `X_p = R·X_c + t`, en mm (de la cámara al proyector).
+
+Al calibrar en *Proceso por etapas*, la nueva queda en uso sola. Debajo, los errores de reproyección de cada pose del tablero con la
 calibración en uso (*independiente* o *conjunta*, según la opción **Calibración**):
 - resumen: fecha, poses usadas, criterio y RMS de cámara, proyector y estéreo;
 - gráfico de barras por pose, con cámara, proyector y estéreo, separado por sesiones. Las poses

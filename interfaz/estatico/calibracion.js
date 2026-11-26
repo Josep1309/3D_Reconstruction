@@ -85,6 +85,9 @@ function pintarListaCalib() {
 function actualizarBotonUsar() {
   const c = ec.lista.find((x) => x.id === $("#ec-elegir").value);
   $("#ec-usar").disabled = !c || c.activa || est.ejec.ejecutando;
+  const exportar = $("#ec-exportar");  // parámetros de la calibración elegida en el selector
+  exportar.hidden = !c;
+  if (c) exportar.href = `/api/descargar?tipo=parametros_calibracion&id=${encodeURIComponent(c.id)}`;
   pintarOrigenCalib(c);
 }
 
