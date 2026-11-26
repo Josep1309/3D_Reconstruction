@@ -17,7 +17,9 @@ from pathlib import Path
 
 from datos_sistema import configuracion as cfg
 
-RUTA = cfg.DATOS / "ajustes.json"
+# Un archivo por montaje: los umbrales de un proyector no sirven para otro (el del LightCrafter
+# conserva el nombre de siempre)
+RUTA = cfg.DATOS / ("ajustes.json" if cfg.MONTAJE == "lightcrafter" else f"ajustes_{cfg.MONTAJE}.json")
 
 # Variables que puede cambiar la interfaz, y el valor que las «desactiva»
 NEUTROS = {

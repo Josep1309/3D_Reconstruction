@@ -42,6 +42,12 @@
       <h2 data-i18n="medir">Medir</h2>
       <div class="campos">
         <div class="campo ancho">
+          <span class="etiqueta"><label for="m-montaje" data-i18n="montaje">Montaje</label>
+            <button type="button" class="ayuda" data-i18n-ayuda="ayuda_montaje" data-i18n-etiqueta="montaje">?</button></span>
+          <select id="m-montaje"></select>
+          <small id="m-montaje-info" class="nota"></small>
+        </div>
+        <div class="campo ancho">
           <span class="etiqueta"><label for="m-categoria" data-i18n="categoria">Categoría</label>
             <button type="button" class="ayuda" data-i18n-ayuda="ayuda_categoria" data-i18n-etiqueta="categoria">?</button></span>
           <select id="m-categoria">
@@ -706,12 +712,16 @@
         <div id="aj-calib" class="aj-lista"></div>
       </section>
       <section>
-        <h3 data-i18n="aj_proyector">Proyector (LightCrafter)</h3>
+        <h3 data-i18n="aj_proyector">Proyector</h3>
         <p class="nota" data-i18n="aj_proyector_nota">Se hace una sola vez, o cuando el proyector se reinicia o pierde su configuración. No hace falta para medir.</p>
         <div class="aj-acciones">
-          <div class="aj-accion">
+          <div class="aj-accion" data-proyeccion="lightcrafter">
             <button type="button" id="aj-lightcrafter" data-i18n="aj_lightcrafter">Configurar el LightCrafter</button>
             <small data-i18n="corta_lightcrafter"></small>
+          </div>
+          <div class="aj-accion" data-proyeccion="hdmi">
+            <button type="button" id="aj-latencia" data-i18n="aj_latencia">Medir la latencia del proyector</button>
+            <small id="aj-latencia-info"></small>
           </div>
           <div class="aj-accion">
             <button type="button" id="aj-patrones" data-i18n="aj_patrones">Generar los patrones</button>

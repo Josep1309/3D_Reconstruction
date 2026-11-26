@@ -28,6 +28,8 @@ from __future__ import annotations
 import argparse
 import json
 import queue
+import os
+import sys
 import threading
 import webbrowser
 import zipfile
@@ -320,6 +322,14 @@ class Manejador(BaseHTTPRequestHandler):
                 if ejecucion.estado()["ejecutando"]:
                     raise RuntimeError("hay un proceso en curso: espera a que termine")
                 return self._json(archivos.borrar_poses(cat, poses))
+            if url.path == "/api/montaje":  # cambia el montaje y reinicia el servidor (todo lee la configuración al arrancar)
+                from datos_sistema import montajes
+
+                if ejecucion.estado()["ejecutando"]:
+                    raise RuntimeError("hay un proceso en curso: espera a que termine")
+                montajes.fijar(str(self._cuerpo().get("id", "")))
+                threading.Timer(0.6, _reiniciar).start()
+                return self._json({"reinicia": True})
             if url.path == "/api/procesos/renombrar":
                 from datos_sistema import archivos
 
@@ -503,6 +513,14 @@ class Manejador(BaseHTTPRequestHandler):
         self.wfile.flush()
 
 
+def _reiniciar() -> None:
+    """Vuelve a lanzar el servidor con los mismos argumentos (tras cambiar de montaje). La página
+    espera a que vuelva y se recarga; no se abre otro navegador."""
+    print("[INFO] Reiniciando el servidor para aplicar el montaje nuevo…", flush=True)
+    os.environ["TESIS_REINICIO"] = "1"
+    os.execv(sys.executable, [sys.executable, *sys.argv])
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Interfaz web del sistema de proyección de franjas.")
     parser.add_argument("--host", default="127.0.0.1",
@@ -519,7 +537,8 @@ def main() -> None:
     print(f"[OK] Interfaz en {url}  (datos: {cfg.DATOS})  — Ctrl+C para salir")
     if args.host == "0.0.0.0":
         print("[AVISO] Accesible desde la red sin contraseña: cualquiera en la red puede lanzar capturas.")
-    if not args.sin_navegador:
+    print(f"[OK] Montaje: {cfg.MONTAJE_INFO['nombre']}")
+    if not args.sin_navegador and not os.environ.get("TESIS_REINICIO"):
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     try:
         servidor.serve_forever()

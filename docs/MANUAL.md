@@ -169,6 +169,67 @@ sudo chmod a+rw /dev/hidrawX       # el script dice cuál es X
 
 ---
 
+### 3.1 Montaje con proyector HDMI (Dell 1280×1024, VSYNC)
+
+El sistema admite dos **montajes**. Se elige en la tarjeta *Medir* → **Montaje**: el servidor se
+reinicia unos segundos y la página se recarga sola.
+
+| | LightCrafter 4500 | Proyector HDMI (Dell) |
+|---|---|---|
+| Proyector | 912 × 1140, DMD en diamante | 1280 × 1024, DLP con rueda de color |
+| Cómo proyecta | Secuencia guardada en su memoria | El PC muestra cada patrón a pantalla completa (ventana de OpenCV) |
+| Disparo de la cámara | Arduino a 20 Hz (proyector y cámara a la vez) | El **VSYNC** del HDMI, en cada cuadro (60 Hz) |
+| Bits Gray / imágenes por ciclo | 6 / 50 | **7** / **52** (2⁷ · 18 = 2304 ≥ 1280) |
+| Exposición de la cámara | 12 ms | **16 ms**, con disparo solapado a la lectura (`TriggerOverlap = ReadOut`) |
+| Tiempo por pose | ~2.5 s | ~4–5 s (depende de la latencia) |
+| Calibración | `calibraciones/` | `calibraciones/hdmi_dell/` |
+| Patrones | `recursos/patterns/secuencia_completa_bmp/` | `recursos/patterns/hdmi_dell_1280x1024/` |
+| Ajustes de ⚙ | `datos/ajustes.json` | `datos/ajustes_hdmi_dell.json` |
+
+**Separación entre montajes:**
+- Cada proceso de captura guarda con qué montaje se hizo (`proceso.json`).
+- La configuración vigente, la calibración y las listas solo muestran el montaje en uso.
+- Las capturas del otro montaje no se borran: vuelven al regresar a él. Nunca se calibra ni se
+  reconstruye mezclando proyectores.
+
+**Cómo captura por HDMI** (`captura/proyector_hdmi.py`). La cámara recibe un disparo en **cada
+cuadro**, cambie o no el patrón. Por eso, para cada patrón:
+1. se muestra el patrón;
+2. se **vacía el búfer** de la cámara: esos cuadros se expusieron con el patrón anterior;
+3. se descartan `HDMI_LATENCIA_CUADROS` cuadros: lo que tarda el proyector en mostrar la imagen
+   nueva;
+4. se guarda el siguiente.
+
+Salen las 52 imágenes ordenadas de siempre, así que *Organizar*, fases, calibración y
+reconstrucción funcionan igual. En la pausa entre poses el proyector muestra blanco, para
+encuadrar.
+
+**Puesta en marcha:**
+1. **Pantalla:** conecta el Dell por HDMI y configúralo en el sistema como **pantalla extendida**
+   (no duplicada), a **1280 × 1024 y 60 Hz**. Desactiva en el proyector el *keystone*, el modo
+   dinámico de brillo y el «realce de color»: alteran la intensidad de las franjas.
+2. **Disparo:** lleva la señal VSYNC del HDMI a la entrada **Line0** de la cámara (flanco de
+   subida). En la tarjeta *Medir* elige el montaje *Proyector HDMI*.
+3. **Patrones:** ⚙ Ajustes → Proyector → **Generar los patrones** (52 imágenes de 1280 × 1024).
+4. **Latencia:** con la cámara apuntando al área proyectada, ⚙ Ajustes → Proyector → **Medir la
+   latencia del proyector**.
+   - Alterna negro y blanco 5 veces y cuenta los cuadros hasta que la cámara ve el cambio.
+   - Guarda el máximo más uno de margen, y la captura lo usa.
+   - Informa también el ritmo de disparos. Debe dar **~60 Hz**. Si da ~30, la cámara pierde un
+     disparo de cada dos (exposición demasiado larga); si da 0, el VSYNC no llega a Line0.
+5. **Verificación:** `.env/bin/python verificar.py` comprueba que se detecte la pantalla del
+   proyector a su resolución.
+6. **Calibrar:** captura el **patrón** (tablero) con este montaje y calibra. Hasta tener calibración
+   propia se capturan, organizan y calculan las fases, pero no se reconstruye (el registro lo
+   avisa).
+7. **Ajustar los umbrales:** los de la fase parten de γ ≥ 0.10 en X e Y (píxeles cuadrados, sin
+   el poco contraste del DMD en diamante). Ajústalos en ⚙ con las primeras capturas de plano.
+
+**Modo demo:** con el montaje HDMI no se abre el proyector ni la cámara. Una cámara simulada «ve»
+los patrones como un plano frente a ella, y sirve para probar captura, organizar y fases sin el
+montaje. Con ella la decodificación de los 7 bits es exacta: u_p y v_p coinciden con la columna y
+la fila con 0.008 px de error.
+
 ## 4. Estructura del proyecto
 
 ```

@@ -135,7 +135,8 @@ function pintarEjecucion(e) {
   $("#b-medir").disabled = e.ejecutando;
   $("#b-ejecutar").disabled = e.ejecutando;
   $("#b-previa").disabled = e.ejecutando;
-  $("#aj-lightcrafter").disabled = $("#aj-patrones").disabled = e.ejecutando;
+  $("#aj-lightcrafter").disabled = $("#aj-patrones").disabled = $("#aj-latencia").disabled = e.ejecutando;
+  $("#m-montaje").disabled = e.ejecutando;
   $("#b-borrar-pose").disabled = e.ejecutando || !est.pose;
   $("#b-detener").classList.toggle("oculto", !e.ejecutando || previa);
   $("#pausa").classList.toggle("oculto", !pausaCaptura);
@@ -808,7 +809,7 @@ function confMedir() {
                nombre: $("#m-nombre").value.trim() },
     rehacer: false, fase: $("#a-fase").value, calibracion: $("#a-calib").value, ...posesCalib(),
     ajustes: ajustesParaEnviar(),
-    simular: $("#m-demo").checked ? $("#m-fuente").value : null,
+    simular: fuenteDemo(),
   };
 }
 
@@ -822,6 +823,48 @@ function planAvanzado() {
     plan[c.value] = Math.max(1, +$(`#plan .plan-poses[data-cat=${c.value}]`).value || 1);
   }
   return plan;
+}
+
+// Modo demo: la captura a reproducir; en el montaje HDMI la cámara simulada «ve» el patrón proyectado
+// y no necesita ninguna
+const fuenteDemo = () => (!$("#m-demo").checked ? null : est.config?.montaje?.proyeccion === "hdmi" ? "hdmi" : $("#m-fuente").value);
+
+// ============================== montaje ==============================
+// Qué proyector y cómo se dispara la cámara (configuracion.MONTAJES). Cambiarlo reinicia el servidor
+// (todo el sistema lee la configuración al arrancar) y la página se recarga sola.
+function pintarMontaje() {
+  const m = est.config.montaje, sel = $("#m-montaje");
+  sel.innerHTML = "";
+  for (const x of est.config.montajes) sel.appendChild(new Option(x.nombre, x.id));
+  sel.value = m.id;
+  $("#m-montaje-info").textContent = t("montaje_info", { w: m.proyector[0], h: m.proyector[1], b: m.bits_gray, n: m.imagenes_por_ciclo }) +
+    (m.proyeccion === "hdmi" ? " · " + t("montaje_latencia", { n: m.latencia_cuadros }) : "");
+  for (const el of $$("[data-proyeccion]")) el.classList.toggle("oculto", el.dataset.proyeccion !== m.proyeccion);
+  const med = m.medido;
+  $("#aj-latencia-info").textContent = med
+    ? t("aj_latencia_medida", { c: Math.max(...med.cuadros), r: med.recomendada, hz: med.disparos_hz ? med.disparos_hz.toFixed(1) : "?" })
+    : t("aj_latencia_sin");
+}
+
+async function cambiarMontaje(ev) {
+  const nuevo = ev.target.value, actual = est.config.montaje.id;
+  if (nuevo === actual) return;
+  const nombre = est.config.montajes.find((x) => x.id === nuevo)?.nombre || nuevo;
+  if (!confirm(t("montaje_confirmar", { m: nombre }))) { ev.target.value = actual; return; }
+  try { await api("/api/montaje", { id: nuevo }); }
+  catch (err) { alert(t("error_x", { m: err.message })); ev.target.value = actual; return; }
+  document.body.classList.add("reiniciando");
+  agregarLog(t("montaje_reiniciando"));
+  // esperar a que el servidor vuelva con el montaje nuevo y recargar
+  const inicio = Date.now();
+  const probar = async () => {
+    try {
+      const c = await (await fetch("/api/config", { cache: "no-store" })).json();
+      if (c.montaje?.id === nuevo) return location.reload();
+    } catch { /* todavía reiniciando */ }
+    if (Date.now() - inicio < 30000) setTimeout(probar, 700); else location.reload();
+  };
+  setTimeout(probar, 1200);
 }
 
 // ⚙ Ajustes → Proyector: corre solo esa etapa
@@ -847,7 +890,7 @@ function confAvanzada() {
     },
     rehacer: $("#a-rehacer").checked, fase: $("#a-fase").value, calibracion: $("#a-calib").value, ...posesCalib(),
     ajustes: ajustesParaEnviar(),
-    simular: $("#m-demo").checked ? $("#m-fuente").value : null,
+    simular: fuenteDemo(),
   };
 }
 
@@ -879,10 +922,10 @@ function notaMedir() {
   const cat = $("#m-categoria").value, nota = $("#m-nota");
   const partes = [];
   if (cat === "patron") partes.push(t("nota_patron"));
-  if ($("#m-demo").checked) partes.push(t("nota_demo"));
+  if ($("#m-demo").checked) partes.push(t(est.config?.montaje?.proyeccion === "hdmi" ? "nota_demo_hdmi" : "nota_demo"));
   nota.textContent = partes.join(" ");
   nota.classList.toggle("aviso", partes.length > 0);
-  $("#m-fuente").classList.toggle("oculto", !$("#m-demo").checked);
+  $("#m-fuente").classList.toggle("oculto", !$("#m-demo").checked || est.config?.montaje?.proyeccion === "hdmi");
 }
 
 // Al cambiar de idioma: aplicarIdioma() ya tradujo el HTML fijo; aquí se redibuja lo dinámico
@@ -905,6 +948,7 @@ async function iniciar() {
   try { est.config = await api("/api/config"); }
   catch (err) { agregarLog(`[ERROR] ${t("error_config", { m: err.message })}`); return; }
   const c = est.config;
+  pintarMontaje();
   construirSecuencia(c.etapas);
   for (const i of $$("#plan input[name=cat]")) i.checked = c.categorias.includes(i.value);
   $("#a-ciclos").value = c.captura.ciclos;
@@ -952,13 +996,18 @@ async function iniciar() {
   iniciarMedicion();
   iniciarRecalibrar();
   $("#b-previa").addEventListener("click", () =>
-    ejecutar({ solo_previa: true, simular: $("#m-demo").checked ? $("#m-fuente").value : null }));
+    ejecutar({ solo_previa: true, simular: fuenteDemo() }));
   for (const id of ["#m-categoria", "#m-demo"]) $(id).addEventListener("change", notaMedir);
   $("#v-categoria").addEventListener("change", (e) => { $("#v-seguir").checked = false; const ps = est.poses[e.target.value] || []; seleccionar(e.target.value, ps.length ? ps[ps.length - 1].pose : null); });
   $("#v-pose").addEventListener("change", (e) => { $("#v-seguir").checked = false; seleccionar(est.cat, e.target.value); });
   $("#b-borrar-pose").addEventListener("click", borrarPoseActual);
   $("#aj-lightcrafter").addEventListener("click", () => ejecutarSoloEtapa("lightcrafter"));
   $("#aj-patrones").addEventListener("click", () => ejecutarSoloEtapa("patrones"));
+  $("#aj-latencia").addEventListener("click", () => {
+    $("#ajustes").close();
+    ejecutar({ latencia: true, etapas: {}, simular: $("#m-demo").checked ? "demo" : null });
+  });
+  $("#m-montaje").addEventListener("change", cambiarMontaje);
   for (const b of $$("#pasos button")) b.addEventListener("click", () => mostrarPaso(b.dataset.paso));
   for (const b of $$(".segmentado.color button")) b.addEventListener("click", () => {
     $$(".segmentado.color button").forEach((x) => x.classList.toggle("activo", x === b));

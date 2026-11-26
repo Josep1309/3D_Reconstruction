@@ -180,6 +180,26 @@ def verificar_lightcrafter(con_hardware: bool) -> None:
                  "Apágalo y enciéndelo; cierra el software de TI si está abierto.", "§16.2")
 
 
+def verificar_proyector_hdmi() -> None:
+    """Montaje HDMI: el proyector debe ser una pantalla extendida a su resolución nativa."""
+    from captura import proyector_hdmi as ph
+    from datos_sistema import configuracion as cfg
+
+    titulo(f"Proyector HDMI ({cfg.PROYECTOR_ANCHO}×{cfg.PROYECTOR_ALTO})")
+    try:
+        p = ph.ubicar_pantalla()
+    except RuntimeError as exc:
+        informar("error", str(exc).split(". Pantallas")[0],
+                 "Conéctalo por HDMI, ponlo como pantalla EXTENDIDA (no duplicada) a su resolución nativa y 60 Hz.", "§3.1")
+        return
+    if (p.get("ancho"), p.get("alto")) != (cfg.PROYECTOR_ANCHO, cfg.PROYECTOR_ALTO):
+        informar("aviso", f"Pantalla {p['nombre']} a {p.get('ancho')}×{p.get('alto')}, no a {cfg.PROYECTOR_ANCHO}×{cfg.PROYECTOR_ALTO}",
+                 "Ajusta la resolución del proyector en la configuración de pantallas del sistema.", "§3.1")
+    else:
+        informar("ok", f"Proyector en la pantalla {p['nombre']} (+{p['x']}+{p['y']}), {p['ancho']}×{p['alto']}")
+    informar("info", f"Latencia usada: {cfg.HDMI_LATENCIA_CUADROS} cuadros (mídela en ⚙ Ajustes → Proyector)")
+
+
 def verificar_patrones() -> None:
     titulo("Patrones del proyector")
     import cv2
@@ -328,7 +348,13 @@ def _comprobar(con_hw: bool) -> None:
         print("\nFaltan paquetes básicos: corrige eso primero (./instalar.sh) y vuelve a verificar.")
         raise SystemExit(1)
     tamano = verificar_camara(con_hw)
-    verificar_lightcrafter(con_hw)
+    from datos_sistema import configuracion as cfg
+
+    print(f"\nMontaje en uso: {cfg.MONTAJE_INFO['nombre']}")
+    if cfg.MONTAJE_INFO["proyeccion"] == "hdmi":
+        verificar_proyector_hdmi()
+    else:
+        verificar_lightcrafter(con_hw)
     verificar_patrones()
     verificar_calibracion(tamano)
     verificar_datos()

@@ -228,7 +228,9 @@ def configurar(conf: dict) -> None:
     extra: dict = {"al_frame": vista, "al_previa": vista.previa}
     simular = conf.get("simular")
     if simular and p.ETAPAS.get("captura"):
-        extra["camara"] = cp.CamaraSimulada(cfg.DIR_CAPTURAS / simular)
+        # montaje HDMI: la cámara simulada «ve» el patrón proyectado (no usa una captura guardada)
+        extra["camara"] = (cp.CamaraSimuladaHDMI() if cfg.MONTAJE_INFO["proyeccion"] == "hdmi"
+                           else cp.CamaraSimulada(cfg.DIR_CAPTURAS / simular))
         extra["sufijo"] = "_simulada"
     cp.capturar_poses = partial(cp.capturar_poses, **extra)
 
@@ -241,7 +243,10 @@ def solo_vista_previa(conf: dict) -> None:
     vista = VistaEnVivo(cfg.IMAGENES_POR_CICLO)
     simular = conf.get("simular")
     try:
-        camara = cp.CamaraSimulada(cfg.DIR_CAPTURAS / simular) if simular else cp.CamaraFLIR()
+        if simular:
+            camara = cp.CamaraSimuladaHDMI() if cfg.MONTAJE_INFO["proyeccion"] == "hdmi" else cp.CamaraSimulada(cfg.DIR_CAPTURAS / simular)
+        else:
+            camara = cp.CamaraFLIR()
         with camara:
             camara.iniciar_vista_previa(vista.previa)
             try:
@@ -278,6 +283,35 @@ def _al_detener(_senal, _marco) -> None:
     raise KeyboardInterrupt
 
 
+def medir_latencia(conf: dict) -> None:
+    """Alterna negro y blanco en el proyector HDMI y cuenta los cuadros hasta que la cámara ve el
+    cambio; guarda la latencia recomendada (la usa la captura) y el ritmo de los disparos."""
+    from captura import capturar_patrones as cp
+    from captura import proyector_hdmi as ph
+    from datos_sistema import montajes
+
+    print("[PIPELINE] Etapas: latencia", flush=True)
+    print("# ETAPA: latencia", flush=True)
+    if cfg.MONTAJE_INFO["proyeccion"] != "hdmi":
+        raise SystemExit("[ERROR] La latencia solo se mide en un montaje con proyector HDMI")
+    simulada = bool(conf.get("simular"))
+    camara = cp.CamaraSimuladaHDMI() if simulada else cp.CamaraFLIR()
+    proyector = ph.ProyectorSimulado() if simulada else ph.ProyectorHDMI()
+    print("[INFO] Apunta la cámara al área proyectada. Se alterna negro y blanco 5 veces…", flush=True)
+    with camara, proyector:
+        if hasattr(camara, "proyector"):
+            camara.proyector = proyector
+        r = ph.medir_latencia(camara, proyector)
+    montajes.guardar_latencia(r)
+    hz = f"{r['disparos_hz']:.1f} Hz" if r["disparos_hz"] else "?"
+    print(f"[OK] Latencia del proyector: {max(r['cuadros'])} cuadros (medidas: {r['cuadros']}). Se usarán "
+          f"{r['recomendada']} (uno de margen). Disparos de la cámara: {hz}.", flush=True)
+    if not simulada and r["disparos_hz"] and abs(r["disparos_hz"] - 60) > 6:
+        print(f"[AVISO] La cámara recibe disparos a {hz}, no a ~60 Hz: si es ~30 Hz se pierde un cuadro de cada dos "
+              "(baja la exposición o revisa CAM_TRIGGER_OVERLAP); si es 0, no llega el VSYNC a Line0.", flush=True)
+    print("[PIPELINE] 'latencia' terminada en 0.0 s", flush=True)
+
+
 def importar_y_elegir(opciones: dict) -> None:
     """Importa una carpeta de capturas como proceso nuevo y lo deja como configuración en uso, para
     que las etapas siguientes procesen exactamente esas capturas (pestaña Archivos → Importar)."""
@@ -305,6 +339,9 @@ def main() -> None:
         solo_vista_previa(conf)
         return
     try:
+        if conf.get("latencia"):  # ⚙ Ajustes → Proyector: medir la latencia del proyector HDMI
+            medir_latencia(conf)
+            return
         if conf.get("escaneo"):  # pestaña 360°: unir vistas (no corre el pipeline)
             from procesamiento import escaneo
 

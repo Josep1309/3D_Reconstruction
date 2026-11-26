@@ -15,6 +15,7 @@ Ejemplos:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import threading
 import time
@@ -136,9 +137,11 @@ class CamaraFLIR:
             cam.TriggerDelay.SetValue(
                 min(max(self.trigger_delay_us, cam.TriggerDelay.GetMin()), cam.TriggerDelay.GetMax())
             )
-        # Evitar que se encolen triggers espurios durante la exposición
+        # LightCrafter (20 Hz): sin solapamiento, para que no se encolen triggers espurios. VSYNC
+        # (60 Hz) con exposición de casi un cuadro: la cámara debe exponer mientras lee el anterior
         if cam.TriggerOverlap.GetAccessMode() == ps.RW:
-            cam.TriggerOverlap.SetValue(ps.TriggerOverlap_Off)
+            solape = {"ReadOut": ps.TriggerOverlap_ReadOut}.get(cfg.CAM_TRIGGER_OVERLAP, ps.TriggerOverlap_Off)
+            cam.TriggerOverlap.SetValue(solape)
 
         # Entregar los frames en orden de llegada
         handling = ps.CEnumerationPtr(cam.GetTLStreamNodeMap().GetNode("StreamBufferHandlingMode"))
@@ -182,6 +185,20 @@ class CamaraFLIR:
 
         _reportar_tiempos(tiempos)
         return frames
+
+    # ------------------------------------------------------------------ montaje HDMI (VSYNC)
+    @contextlib.contextmanager
+    def adquisicion(self):
+        """Adquisición abierta para leer cuadro a cuadro (montaje HDMI: el VSYNC dispara siempre)."""
+        self.camera.BeginAcquisition()
+        try:
+            yield _LectorFLIR(self)
+        finally:
+            self.camera.EndAcquisition()
+
+    def capturar_sincronizado(self, proyector, patrones: list[np.ndarray], latencia: int,
+                              al_frame: AlFrame | None = None) -> list[np.ndarray]:
+        return _capturar_sincronizado(self, proyector, patrones, latencia, al_frame)
 
     # ------------------------------------------------------------------ vista previa
     def iniciar_vista_previa(self, al_frame: AlPrevia, fps: float = 15.0) -> None:
@@ -237,6 +254,126 @@ class CamaraFLIR:
         except ps.SpinnakerException:
             pass
         cam.TriggerMode.SetValue(ps.TriggerMode_On)
+
+
+class _LectorFLIR:
+    def __init__(self, camara: CamaraFLIR) -> None:
+        self.c = camara
+
+    def vaciar(self) -> int:
+        """Descarta los cuadros ya recibidos (se expusieron con el patrón anterior)."""
+        n = 0
+        while True:
+            try:
+                img = self.c.camera.GetNextImage(1)
+            except self.c.ps.SpinnakerException:
+                return n
+            img.Release()
+            n += 1
+
+    def siguiente(self) -> tuple[np.ndarray, float]:
+        try:
+            img = self.c.camera.GetNextImage(self.c.timeout_ms)
+        except self.c.ps.SpinnakerException as exc:
+            raise RuntimeError(f"Sin disparo tras {self.c.timeout_ms} ms: ¿llega el VSYNC del HDMI a Line0? ({exc})") from exc
+        try:
+            if img.IsIncomplete():
+                raise RuntimeError(f"Cuadro incompleto: {img.GetImageStatus()}")
+            return np.array(img.GetNDArray(), copy=True), time.perf_counter()
+        finally:
+            img.Release()
+
+
+def _capturar_sincronizado(camara, proyector, patrones: list[np.ndarray], latencia: int,
+                           al_frame: AlFrame | None = None) -> list[np.ndarray]:
+    """Montaje HDMI: muestra cada patrón, vacía el búfer, espera la latencia del proyector y guarda
+    un cuadro. Devuelve las imágenes en el orden de `patrones`."""
+    frames, tiempos = [], []
+    with camara.adquisicion() as leer:
+        for indice, patron in enumerate(patrones):
+            proyector.mostrar(patron)
+            leer.vaciar()
+            for _ in range(max(latencia, 0)):
+                leer.siguiente()
+            img, t = leer.siguiente()
+            frames.append(img)
+            tiempos.append(t)
+            if al_frame is not None:
+                al_frame(indice, img)
+    _reportar_tiempos(tiempos)
+    return frames
+
+
+class CamaraSimuladaHDMI:
+    """Modo demo del montaje HDMI: la cámara «ve» el patrón que muestra el proyector (borroso,
+    con brillo de fondo y ruido), como un plano frente a la cámara. Sirve para probar captura,
+    organizar y fases sin hardware."""
+
+    simulada = True
+
+    def __init__(self, periodo_s: float = 1 / 60) -> None:
+        self.periodo_s = periodo_s
+        self.proyector = None
+        self.ganancia = 1.0
+        self.rng = np.random.default_rng(0)
+        print("[OK] Cámara SIMULADA (montaje HDMI): ve el patrón proyectado", flush=True)
+
+    def __enter__(self) -> CamaraSimuladaHDMI:
+        global camara_activa
+        camara_activa = self
+        self.fijar_exposicion(cfg.CAM_EXPOSICION_US)
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        global camara_activa
+        camara_activa = None
+
+    def fijar_exposicion(self, exposicion_us: float) -> float:
+        self.ganancia = float(exposicion_us) / cfg.VALORES_ORIGINALES["CAM_EXPOSICION_US"]
+        return float(exposicion_us)
+
+    def _ver(self) -> np.ndarray:
+        p = self.proyector.actual if self.proyector is not None and self.proyector.actual is not None else None
+        if p is None:
+            p = np.zeros((cfg.PROYECTOR_ALTO, cfg.PROYECTOR_ANCHO), np.uint8)
+        img = cv2.resize(p, (1280, 1024), interpolation=cv2.INTER_AREA).astype(np.float32)
+        img = cv2.GaussianBlur(img, (0, 0), 1.2) * 0.7 * self.ganancia + 20 + self.rng.normal(0, 1.5, img.shape)
+        return np.clip(img, 0, 255).astype(np.uint8)
+
+    @contextlib.contextmanager
+    def adquisicion(self):
+        cam = self
+
+        class Lector:
+            def vaciar(self) -> int:
+                return 0
+
+            def siguiente(self):
+                time.sleep(cam.periodo_s)
+                return cam._ver(), time.perf_counter()
+
+        yield Lector()
+
+    def capturar_sincronizado(self, proyector, patrones, latencia, al_frame=None):
+        self.proyector = proyector
+        return _capturar_sincronizado(self, proyector, patrones, latencia, al_frame)
+
+    def iniciar_vista_previa(self, al_frame: AlPrevia, fps: float = 15.0) -> None:
+        self._previa_activa = True
+
+        def bucle() -> None:
+            while self._previa_activa:
+                time.sleep(1.0 / fps)
+                al_frame(self._ver())
+
+        self._hilo_previa = threading.Thread(target=bucle, daemon=True)
+        self._hilo_previa.start()
+
+    def detener_vista_previa(self) -> None:
+        if getattr(self, "_hilo_previa", None) is not None:
+            self._previa_activa = False
+            self._hilo_previa.join(timeout=2.0)
+            self._hilo_previa = None
 
 
 def _reportar_tiempos(tiempos: list[float]) -> None:
@@ -382,7 +519,8 @@ def nuevo_proceso(plan: list[tuple[str, int]], salida: Path = cfg.DIR_CAPTURAS, 
     nombre = rutas.nombre_proceso(datetime.now(), etiqueta=nombre_usuario)
     carpeta = salida / nombre
     carpeta.mkdir(parents=True, exist_ok=False)
-    datos = {"proceso": nombre, **({"nombre": nombre_usuario.strip()[:80]} if (nombre_usuario or "").strip() else {}),
+    datos = {"proceso": nombre, "montaje": cfg.MONTAJE,
+             **({"nombre": nombre_usuario.strip()[:80]} if (nombre_usuario or "").strip() else {}),
              "inicio": datetime.now().isoformat(timespec="seconds"),
              "plan": {c: n for c, n in plan}, "capturas": {}, "poses": {}}
     (carpeta / "proceso.json").write_text(json.dumps(datos, indent=1, ensure_ascii=False), encoding="utf-8")
@@ -445,8 +583,22 @@ def capturar_poses(
     cantidad = cfg.IMAGENES_POR_CICLO * max(ciclos, 1)
     carpetas: list[Path] = []
     pose = 0
-    with (camara if camara is not None else CamaraFLIR()) as camara:
+    hdmi = cfg.MONTAJE_INFO["proyeccion"] == "hdmi"
+    camara = camara if camara is not None else CamaraFLIR()
+    if hdmi:  # el PC proyecta los patrones; la cámara se dispara con el VSYNC
+        from captura import proyector_hdmi
+
+        patrones = proyector_hdmi.cargar_patrones() * max(ciclos, 1)
+        proyector_ctx = (proyector_hdmi.ProyectorSimulado() if getattr(camara, "simulada", False)
+                         else proyector_hdmi.ProyectorHDMI())
+    else:
+        proyector_ctx = contextlib.nullcontext(None)
+    with camara as camara, proyector_ctx as proyector:
+        if hdmi and hasattr(camara, "proyector"):
+            camara.proyector = proyector
         while pose < poses:
+            if hdmi:
+                proyector.blanco()  # durante la pausa: luz blanca para encuadrar
             if esperar_enter:
                 previa = al_previa is not None and hasattr(camara, "iniciar_vista_previa")
                 if previa:
@@ -468,7 +620,10 @@ def capturar_poses(
                     continue
             print(f"    Capturando {cantidad} frames...", flush=True)
             try:
-                frames = camara.capturar(cantidad, al_frame)
+                if hdmi:
+                    frames = camara.capturar_sincronizado(proyector, patrones, cfg.HDMI_LATENCIA_CUADROS, al_frame)
+                else:
+                    frames = camara.capturar(cantidad, al_frame)
             except RuntimeError as exc:  # p. ej. sin trigger: Arduino apagado o desconectado
                 print(f"    [ERROR] {exc}", flush=True)
                 if not esperar_enter:

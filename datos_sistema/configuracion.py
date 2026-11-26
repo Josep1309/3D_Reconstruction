@@ -146,6 +146,73 @@ SATURACION_NIVEL = 256
 FILTRO_VECINOS_SIGMA = 0.0     # quita puntos aislados en 3D (mascara.filtrar_vecinos); 0 = desactivado
 PLANO_UMBRAL_MM = 3.0          # distancia máxima al plano (RANSAC) para medir la planitud de `plano`
 
+# ==============================================================================
+# --- MONTAJE (qué proyector y cómo se dispara la cámara) ---
+# ==============================================================================
+# Cada montaje cambia algunos de los valores de arriba. Lo elige la interfaz (selector «Montaje»,
+# guardado en <DATOS>/montaje.json) o la variable de entorno TESIS_MONTAJE. Cada montaje tiene su
+# propia calibración (calibraciones/ o calibraciones/<id>/), sus patrones y sus ajustes de ⚙; los
+# procesos de captura guardan con qué montaje se hicieron y nunca se mezclan.
+MONTAJES = {
+    "lightcrafter": {
+        "nombre": "LightCrafter 4500 · Arduino 20 Hz",
+        "proyeccion": "lightcrafter",   # la secuencia está cargada en la memoria del proyector
+        "disparo": "arduino",           # el Arduino dispara proyector y cámara a la vez
+        "parametros": {},               # los valores de arriba
+    },
+    "hdmi_dell": {
+        "nombre": "Proyector HDMI (Dell 1280×1024) · VSYNC 60 Hz",
+        "proyeccion": "hdmi",           # el PC muestra cada patrón a pantalla completa en el proyector
+        "disparo": "vsync",             # el VSYNC del HDMI dispara la cámara en cada cuadro (60 Hz)
+        "parametros": {
+            "PROYECTOR_ANCHO": 1280,
+            "PROYECTOR_ALTO": 1024,
+            "N_BITS_GRAY": 7,           # 2^7 * 18 = 2304 px >= 1280 (con 6 bits: 1152 < 1280)
+            # DLP con rueda de color: la exposición debe cubrir casi un cuadro completo (16.7 ms a
+            # 60 Hz) para integrar todos los colores; la cámara expone mientras lee el anterior
+            "CAM_EXPOSICION_US": 16000.0,
+            "CAM_TRIGGER_OVERLAP": "ReadOut",
+            # Píxeles cuadrados (no DMD en diamante): el contraste es parecido en H y V. Valores de
+            # partida: ajustarlos en ⚙ con las primeras capturas de plano.
+            "GAMMA_TH": 0.10,
+            "GAMMA_TH_Y": 0.10,
+        },
+    },
+}
+# Trigger con solapamiento: "Off" (LightCrafter, 20 Hz: sobra tiempo entre disparos) o "ReadOut"
+CAM_TRIGGER_OVERLAP = "Off"
+# Proyección por HDMI: dónde está la pantalla del proyector ("auto" = la que tenga su resolución,
+# o la que no es la principal) y cuántos cuadros esperar tras cambiar de patrón (latencia del
+# proyector; se mide con «Medir latencia» en ⚙ Ajustes → Proyector)
+HDMI_PANTALLA = "auto"
+HDMI_LATENCIA_CUADROS = 3
+
+
+def _leer_montaje_json() -> dict:
+    try:
+        import json
+
+        datos = json.loads((DATOS / "montaje.json").read_text(encoding="utf-8"))
+        return datos if isinstance(datos, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+_MONTAJE_JSON = _leer_montaje_json()
+MONTAJE = os.environ.get("TESIS_MONTAJE") or _MONTAJE_JSON.get("montaje", "lightcrafter")
+MONTAJE = MONTAJE if MONTAJE in MONTAJES else "lightcrafter"
+# latencia medida del proyector (⚙ Ajustes → Proyector → «Medir latencia»)
+HDMI_LATENCIA_CUADROS = int(_MONTAJE_JSON.get("latencia_cuadros", {}).get(MONTAJE, HDMI_LATENCIA_CUADROS))
+MONTAJE_INFO = MONTAJES[MONTAJE]
+globals().update(MONTAJE_INFO["parametros"])
+# derivados que dependen del montaje
+IMAGENES_POR_ORIENTACION = N_PASOS + N_BITS_GRAY
+IMAGENES_POR_CICLO = 2 * IMAGENES_POR_ORIENTACION + 2
+if MONTAJE != "lightcrafter":
+    DIR_PATRONES = RAIZ / "recursos" / "patterns" / f"{MONTAJE}_{PROYECTOR_ANCHO}x{PROYECTOR_ALTO}"
+    if not os.environ.get("TESIS_DIR_CALIBRACION"):
+        DIR_CALIBRACION = RAIZ / "calibraciones" / MONTAJE
+
 # Valores tal como están en este archivo, antes de que la interfaz aplique sus ajustes (los usa
 # fase.py para saber con qué parámetros se calcularon los resultados anteriores a la «firma»)
 VALORES_ORIGINALES = {k: v for k, v in dict(globals()).items() if k.isupper()}

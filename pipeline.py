@@ -105,13 +105,20 @@ def etapa_patrones() -> None:
     from captura import secuencia_patrones as sp
 
     sp.guardar_secuencia(sp.crear_secuencia_completa())
-    print(f"[OK] Patrones en '{cfg.DIR_PATRONES}'. Cárgalos en el LightCrafter en ese orden "
-          f"(f_00 .. f_{cfg.IMAGENES_POR_CICLO - 1:02d}).")
+    if cfg.MONTAJE_INFO["proyeccion"] == "hdmi":
+        print(f"[OK] Patrones en '{cfg.DIR_PATRONES}' ({cfg.PROYECTOR_ANCHO}×{cfg.PROYECTOR_ALTO}, "
+              f"{cfg.IMAGENES_POR_CICLO} por ciclo): la captura los proyecta por HDMI en ese orden.")
+    else:
+        print(f"[OK] Patrones en '{cfg.DIR_PATRONES}'. Cárgalos en el LightCrafter en ese orden "
+              f"(f_00 .. f_{cfg.IMAGENES_POR_CICLO - 1:02d}).")
 
 
 def etapa_lightcrafter() -> None:
     from captura import configurar_lightcrafter as lcr
 
+    if cfg.MONTAJE_INFO["proyeccion"] != "lightcrafter":
+        print(f"[INFO] El montaje en uso es «{cfg.MONTAJE_INFO['nombre']}»: no hay LightCrafter que configurar.")
+        return
     lcr.main(cfg.LCR_EXPOSICION_US, cfg.LCR_PERIODO_US, reiniciar=True, solo_leer=False)
 
 
@@ -183,6 +190,12 @@ def _verificar_calibracion_existente() -> None:
     """Si se reconstruye sin recalibrar, comprueba ANTES de capturar que haya una calibración y la
     describe, para no descubrir el problema al final del proceso."""
     ruta = ruta_calibracion()
+    if not ruta.exists() and any(ETAPAS.get(e) for e in ("captura", "organizar", "fase_relativa", "fase_absoluta")):
+        # montaje nuevo (aún sin calibrar): se hace todo lo demás y solo se salta la reconstrucción
+        ETAPAS["reconstruccion"] = False
+        print(f"[AVISO] El montaje «{cfg.MONTAJE_INFO['nombre']}» todavía no tiene calibración: se captura, organiza "
+              f"y calculan las fases, pero no se reconstruye. Calibra primero (capturando el patrón).")
+        return
     if not ruta.exists():
         raise SystemExit(
             f"[PIPELINE] No existe la calibración '{ruta}'.\n"
@@ -284,6 +297,7 @@ def main() -> None:
         print("[AVISO] 'captura' activa sin 'organizar': las capturas nuevas no se procesarán.")
     if ETAPAS.get("reconstruccion") and not ETAPAS.get("calibracion"):
         _verificar_calibracion_existente()
+        elegidas = [e for e in elegidas if ETAPAS.get(e)]  # puede haber apagado la reconstrucción
     from datos_sistema import sesiones
 
     if not AJUSTES_APLICADOS:  # por terminal: los mismos ajustes que la interfaz (<DATOS>/ajustes.json)

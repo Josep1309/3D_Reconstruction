@@ -156,7 +156,7 @@ def importar(carpeta: str | Path, nombre: str | None = None, mover: bool = False
                 shutil.copytree(origen, destino, copy_function=shutil.copy2)
             copiadas.append(destino)
     sesiones.escribir_json(destino_proceso / "proceso.json", {
-        "proceso": proceso, **({"nombre": etiqueta[:80]} if etiqueta else {}),
+        "proceso": proceso, "montaje": cfg.MONTAJE, **({"nombre": etiqueta[:80]} if etiqueta else {}),
         "inicio": plan["inicio"], "importado": datetime.now().isoformat(timespec="seconds"),
         "origen": plan["origen"], "capturas": {cat: [c["nombre"] for c in lista] for cat, lista in plan["capturas"].items()},
         "poses": {},

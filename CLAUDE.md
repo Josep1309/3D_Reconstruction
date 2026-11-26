@@ -111,6 +111,15 @@ Las etapas corren en un orden fijo desde `pipeline.py` (`ETAPAS`):
       `conf.seleccion` + `calib_poses`.
     - La calibración la guarda en su `.json` y `usar_configuracion_de()` la restaura al
       activarla.
+- **Montajes** (`configuracion.MONTAJES`, elegido en `datos/montaje.json` o `TESIS_MONTAJE`):
+  `lightcrafter` (Arduino 20 Hz) y `hdmi_dell` (Dell DLP 1280×1024, el PC proyecta con una
+  ventana de OpenCV/Qt y el VSYNC dispara la cámara a 60 Hz; 7 bits Gray, 52 imágenes por ciclo).
+  - Al importar `configuracion` se aplican los parámetros del montaje y se recalculan los derivados.
+  - Cada montaje tiene calibración (`calibraciones/<id>/`), patrones y `ajustes_<id>.json` propios.
+  - `proceso.json` guarda el montaje, y `sesiones.configuracion_vigente` solo ve el montaje en uso.
+  - Cambiarlo en la interfaz reinicia el servidor (`os.execv`).
+  - La captura HDMI está en `captura/proyector_hdmi.py` y `CamaraFLIR.capturar_sincronizado`
+    (vaciar búfer + latencia + 1 cuadro). Hay cámara simulada `CamaraSimuladaHDMI` para el demo.
 - **Configuración elegida + capturas nuevas:** `configuracion_elegida.json` guarda `fijada`. Las
   capturas de plano/objeto de procesos sin patrón posteriores se suman solas
   (`sesiones._capturas_nuevas`), sin cambiar la calibración.

@@ -337,7 +337,10 @@ def _distancia_tablero() -> tuple[float, float]:
 def configuracion_por_defecto() -> dict:
     import pipeline as p
 
+    from datos_sistema import montajes
+
     return {
+        "montaje": montajes.info(), "montajes": montajes.listar(),
         "etapas": {**p.ETAPAS, "visualizacion": False},
         "categorias": p.CATEGORIAS,
         "captura": {"categoria": p.CAPTURA_CATEGORIA, "poses": p.CAPTURA_POSES,

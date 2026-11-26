@@ -194,7 +194,10 @@ def procesos(dir_capturas: Path | None = None, dir_ordenadas: Path | None = None
         salida.append({"id": inicio.isoformat(timespec="seconds"), "inicio": inicio, "fin": items[-1]["hora"],
                        "items": items, "patron": any(x["cat"] == "patron" for x in items),
                        "registrado": registrado, "carpeta": items[0].get("proceso_dir"),
-                       "nombre": _rutas().nombre_legible(items[0].get("proceso_dir"))})
+                       "nombre": _rutas().nombre_legible(items[0].get("proceso_dir")),
+                       # con qué montaje se capturó (los procesos sin marca son del LightCrafter)
+                       "montaje": _rutas().leer_proceso_json(items[0]["proceso_dir"]).get("montaje", "lightcrafter")
+                       if items[0].get("proceso_dir") else "lightcrafter"})
     return sorted(salida, key=lambda p: p["inicio"])
 
 
@@ -299,7 +302,8 @@ def configuracion_vigente() -> dict | None:
     with _lock:
         if clave in _cache:
             return _cache[clave]
-        lista = procesos()
+        # solo los procesos del montaje en uso: poses y calibraciones de proyectores distintos no se mezclan
+        lista = [p for p in procesos() if p.get("montaje", "lightcrafter") == cfg.MONTAJE]
         resultado = None
         rangos = configuraciones(lista)
         manual = seleccion_manual()
@@ -334,6 +338,12 @@ def configuracion_vigente() -> dict | None:
         if resultado and (solo or manual) and lista:
             ya = resultado["carpetas"]
             _sumar_nuevas(resultado, [it for it in _capturas_nuevas(lista, _fijada()) if it["carpeta"] not in ya])
+        if resultado is None and procesos() and not lista:
+            # el montaje en uso aún no tiene capturas: no se muestra nada de los otros montajes
+            ahora = datetime.now()
+            resultado = {"desde": ahora, "hasta": ahora, "proceso": None, "auto": True,
+                         "poses": {c: set() for c in cfg.CATEGORIAS}, "carpetas": set(),
+                         "procesos_ocultos": len(procesos()), "es_ultima": True}
         _cache.clear()
         _cache[clave] = resultado
         return resultado
