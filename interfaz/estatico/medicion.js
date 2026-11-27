@@ -134,7 +134,7 @@ async function cargarComparar() {
     opciones.push(`<option value="copia:${c.id}">${escHTML(t("cmp_copia", { f: fechaCorta(c.fecha), a: c.calculada_con || "" }))}</option>`);
   }
   for (const p of (est.poses[est.cat] || []).filter((p) => p.reconstruida && p.pose !== est.pose)) {
-    opciones.push(`<option value="pose:${p.pose}">${escHTML(t("cmp_otra_pose", { p: p.pose + (p.nota ? " · " + p.nota : "") }))}</option>`);
+    opciones.push(`<option value="pose:${p.pose}">${escHTML(t("cmp_otra_pose", { p: [p.pose, p.proceso_nombre, p.nota].filter(Boolean).join(" · ") }))}</option>`);
   }
   sel.innerHTML = opciones.join("");
   if ([...sel.options].some((o) => o.value === previa)) sel.value = previa;

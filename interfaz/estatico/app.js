@@ -252,7 +252,7 @@ function pintarListaPoses() {
       const b = document.createElement("button");
       b.className = "pose-btn" + (cat === est.cat && p.pose === est.pose ? " sel" : "") + (p.ajustes_ok === false ? " otros-ajustes" : "");
       const etapas = ["organizada", "relativa", "absoluta", "reconstruida"];
-      b.title = `${nombreCat(cat)}/${p.pose}` + (p.puntos ? ` · ${t("pose_puntos", { n: p.puntos.toLocaleString(locale()) })}` : "") +
+      b.title = `${nombreCat(cat)}/${p.pose}` + (p.proceso_nombre ? ` · ${p.proceso_nombre}` : "") + (p.puntos ? ` · ${t("pose_puntos", { n: p.puntos.toLocaleString(locale()) })}` : "") +
         (p.erms_mm ? ` · ${t("pose_planitud", { v: fmt(p.erms_mm, 3) })}` : "") +
         (p.calculada_con ? `\n${t("pose_calculada_con", { a: p.calculada_con })}` : "") +
         (p.ajustes_ok === false ? `\n⚠ ${t("pose_otros_ajustes")}` : "");
@@ -278,8 +278,9 @@ function pintarSelectores() {
   sc.value = est.cat;
   const poses = (est.poses[est.cat] || []).map((p) => p.pose);
   if (!poses.includes(est.pose)) est.pose = poses[poses.length - 1] || null;
-  const notaDe = (p) => (est.poses[est.cat] || []).find((x) => x.pose === p)?.nota;
-  sp.innerHTML = poses.length ? poses.map((p) => `<option value="${p}">${p}${notaDe(p) ? " · " + escHTML(notaDe(p)) : ""}</option>`).join("")
+  // «pose_42 · bolaBeisbol · nota»: el nombre del proceso de captura sirve para encontrarla
+  const etiqueta = (x) => [x.pose, x.proceso_nombre, x.nota].filter(Boolean).map(escHTML).join(" · ");
+  sp.innerHTML = poses.length ? (est.poses[est.cat] || []).map((x) => `<option value="${x.pose}">${etiqueta(x)}</option>`).join("")
     : `<option value=''>${t("sin_poses")}</option>`;
   sp.value = est.pose || "";
 }
@@ -792,6 +793,8 @@ async function ejecutar(conf) {
     }
     $("#registro").open = true;
     await api("/api/ejecutar", conf);
+    // la captura ya arrancó con su nombre: el campo queda vacío para la siguiente (si falla, se conserva)
+    if (conf.etapas?.captura && conf.captura) for (const id of ["#m-nombre", "#a-nombre"]) $(id).value = "";
   } catch (err) { agregarLog(`[ERROR] ${err.message}`); }
 }
 

@@ -41,9 +41,10 @@ def inventario() -> dict:
     from datos_sistema import ajustes
 
     esperada_rel, esperada_abs = ajustes.firmas_esperadas()
-    from datos_sistema import archivos
+    from datos_sistema import archivos, rutas
 
     notas = archivos.leer_notas()
+    nombres: dict[str | None, str | None] = {}  # proceso -> nombre que le dio el usuario (proceso.json)
     datos = {}
     for cat in cfg.CATEGORIAS:
         resumen_ruta = rutas.dir_resumen(cat) / f"{cat}_resumen.json"
@@ -62,7 +63,11 @@ def inventario() -> dict:
             f_rel, f_abs = _firma_pose(archivos["relativa"], "rel"), _firma_pose(archivos["absoluta"], "abs")
             distintos = [f for f, esperada in ((f_rel, esperada_rel), (f_abs, esperada_abs)) if f and f != esperada]
             firma_mascara = mascara.firma(cat, pose)
+            proceso = rutas.proceso_de_pose(cat, pose)
+            if proceso not in nombres:
+                nombres[proceso] = rutas.nombre_legible(proceso)
             poses.append({"pose": pose, **estado, "puntos": info.get("puntos"), "erms_mm": info.get("erms_mm"),
+                          "proceso_nombre": nombres[proceso],
                           # máscara de la pestaña «Máscara»; pendiente = guardada pero la nube no la usa aún
                           "mascara": firma_mascara is not None,
                           "mascara_pendiente": estado["reconstruida"] and info.get("mascara") != firma_mascara,
