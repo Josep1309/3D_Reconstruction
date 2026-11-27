@@ -30,6 +30,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+from datos_sistema import compat
 from datos_sistema import configuracion as cfg
 from datos_sistema import rutas
 from datos_sistema import sesiones
@@ -206,7 +207,7 @@ def main() -> None:
         return
     respaldo = aplicar(plan)
     print(f"\n[OK] Migración hecha. Respaldo y lista de movimientos en {respaldo}")
-    print(f"     Para deshacerla: .env/bin/python -m datos_sistema.migrar_por_proceso --deshacer {respaldo.name}")
+    print(f"     Para deshacerla: {compat.PYTHON} -m datos_sistema.migrar_por_proceso --deshacer {respaldo.name}")
 
 
 if __name__ == "__main__":

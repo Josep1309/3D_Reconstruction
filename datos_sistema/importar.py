@@ -70,7 +70,8 @@ def elegir_carpeta(inicial: str | None = None, titulo: str = "Carpeta con patron
                      inicio, titulo])
     for cmd in opciones:
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=os.environ)
+            r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900,
+                               env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         except (OSError, subprocess.TimeoutExpired):
             continue
         if r.returncode == 0:

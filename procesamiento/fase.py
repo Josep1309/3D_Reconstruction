@@ -26,7 +26,7 @@ from typing import Sequence
 import cv2
 import numpy as np
 
-from datos_sistema import rutas
+from datos_sistema import compat, rutas
 
 
 EXTENSIONES_IMAGEN = (".tiff", ".tif", ".png", ".bmp", ".jpg", ".jpeg")
@@ -584,7 +584,7 @@ def guardar_npz_atomico(ruta: Path, **datos) -> None:
     try:
         with open(tmp, "wb") as f:
             np.savez_compressed(f, **datos)
-        os.replace(tmp, ruta)
+        compat.reemplazar(tmp, ruta)
     finally:
         tmp.unlink(missing_ok=True)
 

@@ -35,7 +35,7 @@ import numpy as np
 
 from datos_sistema import configuracion as cfg
 from procesamiento import fase
-from datos_sistema import rutas
+from datos_sistema import compat, rutas
 
 
 # ==============================================================================
@@ -796,7 +796,7 @@ def exportar_parametros(ident: str | None = None, dir_calibracion: Path = cfg.DI
     (Estereo_TSC_0_2) o "conjunta" (_J); None = la de `cfg.CALIBRACION`.
     """
     if ident:
-        if "/" in ident or "\\" in ident or ident.startswith("."):
+        if not compat.nombre_seguro(ident):
             raise ValueError(f"calibración inválida: {ident!r}")
         carpeta = dir_calibracion / "historial" / ident
     else:
@@ -863,7 +863,7 @@ def activar_calibracion(ident: str, dir_calibracion: Path = cfg.DIR_CALIBRACION)
     depende de la fecha del archivo) y recalcula las poses en la siguiente ejecución.
     """
     origen = dir_calibracion / "historial" / ident
-    if "/" in ident or ident.startswith(".") or not (origen / "Estereo_TSC_0_2.npz").exists():
+    if not compat.nombre_seguro(ident) or not (origen / "Estereo_TSC_0_2.npz").exists():
         raise FileNotFoundError(f"No existe la calibración '{ident}' en {dir_calibracion / 'historial'}")
     lista = listar_calibraciones(dir_calibracion)
     if (dir_calibracion / "Estereo_TSC_0_2.npz").exists() and not any(c["activa"] for c in lista):
@@ -878,7 +878,7 @@ def activar_calibracion(ident: str, dir_calibracion: Path = cfg.DIR_CALIBRACION)
             # copyfile (no copy2): fecha nueva, para que la caché de la reconstrucción la vea cambiar
             tmp = dir_calibracion / (nombre + ".tmp")
             shutil.copyfile(origen / nombre, tmp)
-            tmp.replace(dir_calibracion / nombre)
+            compat.reemplazar(tmp, dir_calibracion / nombre)
         else:  # p. ej. los puntos de una calibración anterior: no deben quedar los de otra
             (dir_calibracion / nombre).unlink(missing_ok=True)
     print(f"[OK] Calibración en uso: {ident}")

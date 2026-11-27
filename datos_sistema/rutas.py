@@ -24,6 +24,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
+from datos_sistema import compat
 from datos_sistema import configuracion as cfg
 
 # AAAA-MM-DD_HHMM, con segundos o contador si se repite, y opcionalmente el nombre que le dio el
@@ -176,7 +177,7 @@ def ruta_captura(clave: str) -> Path:
 
     La clave «categoría/nombre» identifica una captura: el nombre (fecha y hora) es único."""
     cat, _, nombre = clave.partition("/")
-    if cat not in cfg.CATEGORIAS or not nombre or "/" in nombre or nombre.startswith(".") or ".." in nombre:
+    if cat not in cfg.CATEGORIAS or not compat.nombre_seguro(nombre):
         raise ValueError(f"captura inválida: {clave}")
     for p in _carpetas_proceso(cfg.DIR_CAPTURAS):
         if (p / cat / nombre).exists():

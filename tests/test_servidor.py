@@ -20,14 +20,18 @@ def puerto():
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     yield srv.server_address[1]
     srv.shutdown()
+    srv.server_close()
 
 
 def pedir(puerto, metodo, ruta, cuerpo=None, cabeceras=None):
     con = http.client.HTTPConnection("127.0.0.1", puerto, timeout=10)
     datos = json.dumps(cuerpo).encode() if isinstance(cuerpo, dict) else cuerpo
-    con.request(metodo, ruta, body=datos, headers=cabeceras or {})
-    r = con.getresponse()
-    return r.status, r.read()
+    try:
+        con.request(metodo, ruta, body=datos, headers=cabeceras or {})
+        r = con.getresponse()
+        return r.status, r.read()
+    finally:
+        con.close()
 
 
 def test_get_normal(puerto):

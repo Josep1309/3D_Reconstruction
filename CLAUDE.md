@@ -23,6 +23,16 @@ de `recursos/Matlab_Codes/Codes/`, que son solo referencia y no se ejecutan. El 
   **opencv 4.11** y matplotlib, más spinnaker-python (PySpin, solo para capturar).
   - PySpin 4.x exige numpy<2 y OpenCV ≥4.12 exige numpy≥2: **no subas OpenCV**.
   - Se verificó que 4.11 da los mismos resultados que 5.0.
+- **Windows** (MANUAL §20.9): `instalar.bat [-PySpin <whl>]`, `iniciar_interfaz.bat`,
+  `verificar.bat`; intérprete `.env\Scripts\python.exe`. Lo que cambia entre sistemas está en
+  `datos_sistema/compat.py`. Al tocar el código:
+  - usa `compat.reemplazar` y no `os.replace` (en Windows falla si otro proceso tiene abierto el
+    destino);
+  - valida con `compat.nombre_seguro` todo nombre de archivo que llegue del navegador (en Windows
+    también separan `\` y `:`);
+  - en mensajes al usuario, `compat.PYTHON` / `compat.INSTALADOR` en vez de `.env/bin/python`;
+  - *Detener* envía Ctrl+Break en Windows (grupo de procesos propio), y el cambio de montaje sale
+    con código 3 para que el `.bat` reabra el servidor. Nada de esto se puede probar desde Linux.
 - `.env/bin/python verificar.py [--sin-hardware]` diagnostica la instalación. La guía de problemas
   por etapa está en MANUAL.md §16 e instalación/PySpin en §20. Si agregas un error nuevo,
   documéntalo en la tabla de su etapa.

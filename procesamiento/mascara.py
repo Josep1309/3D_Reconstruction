@@ -29,7 +29,7 @@ import cv2
 import numpy as np
 
 from datos_sistema import configuracion as cfg
-from datos_sistema import rutas
+from datos_sistema import compat, rutas
 
 # reflectancia: valor propio del filtro de bordes de manchas oscuras para esta pose (None = el de
 # ⚙ Ajustes, REFLECTANCIA_REL_MIN; 0 = no quitar). Lo aplica la reconstrucción (zonas_dificiles).
@@ -151,7 +151,7 @@ def guardar(cat: str, pose: str, mascara: np.ndarray, params: dict) -> Path:
     tmp = destino.with_name(f".{destino.stem}.{os.getpid()}.png")
     if not cv2.imwrite(str(tmp), mascara.astype(np.uint8) * 255):
         raise OSError(f"No se pudo escribir {destino}")
-    os.replace(tmp, destino)
+    compat.reemplazar(tmp, destino)
     from datos_sistema import sesiones
 
     sesiones.escribir_json(ruta_json(cat, pose), {**normalizar(params), "fase": fase_triangulacion(),

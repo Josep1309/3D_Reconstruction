@@ -1244,6 +1244,11 @@ corresponde. Cada subsección es una tabla de **síntoma → causa probable → 
 | `ModuleNotFoundError: PySpin` | PySpin no instalado | Solo hace falta para capturar: §20.3 |
 | `ImportError: libSpinnaker.so…` al importar PySpin | Falta el Spinnaker SDK o es de otra versión que el wheel | Instala el SDK de la **misma versión** que el wheel (§20.3) |
 | `No hay calibración en …` | Falta `calibraciones/` | Cópiala del otro equipo o recalibra (§20.5) |
+| Windows: `instalar.bat` dice que no encuentra Python 3.10 | No está instalado, o se instaló sin el lanzador `py` | Acepta instalarlo con winget cuando lo ofrece, o instala Python 3.10 de 64 bits de python.org y vuelve a ejecutar (§20.9) |
+| Windows: `ImportError: DLL load failed` al importar PySpin | Falta el Spinnaker SDK de Windows, o es de otra versión que el wheel | Instala el SDK de la **misma versión** que el wheel, de 64 bits (§20.9) |
+| Windows: acentos o símbolos raros (`Ã³`, `âœ”`) en la consola | Se abrió el servidor sin el lanzador | Ábrelo con `iniciar_interfaz.bat` o el acceso directo, que pasan la consola a UTF-8 |
+| Windows: la ventana de patrones sale en el monitor principal | El proyector está «duplicado», no «extendido», o no está a 1280×800 | Configuración → Pantalla → *Extender estas pantallas*, 1280×800 a 60 Hz; o fija su posición en `HDMI_PANTALLA` (`"x,y"`) (§20.9) |
+| Windows: las franjas se ven borrosas o escalonadas | La ventana se reescaló (escala de pantalla ≠ 100 %) | El código pide píxeles reales; si aun así pasa, pon la escala del monitor del proyector en 100 % (§20.9) |
 
 ### 16.2 Patrones y LightCrafter (etapas `patrones` y `lightcrafter`)
 
@@ -2126,8 +2131,8 @@ Lo que **no viaja**, porque pesa mucho o depende del equipo:
 
 ### 20.1 Requisitos
 
-- **Linux de 64 bits** (probado en Ubuntu 22.04). El procesamiento y la interfaz funcionarían en
-  otros sistemas, pero la etapa `lightcrafter` usa `/dev/hidraw`, que solo existe en Linux.
+- **Linux de 64 bits** (probado en Ubuntu 22.04) o **Windows 10/11 de 64 bits** (§20.9). En
+  Linux el LightCrafter se maneja por `/dev/hidraw`; en Windows, con `hidapi`.
 - **Python 3.10** (recomendado). Funciona desde 3.9, pero el wheel de PySpin debe corresponder
   exactamente a la versión de Python. En Ubuntu: `sudo apt install python3.10 python3.10-venv`.
 - **git**, y unos 5 GB libres por cada sesión de capturas.
@@ -2324,3 +2329,50 @@ En el equipo de destino:
 5. Con el montaje real, captura un plano de referencia y comprueba que el error de planitud sea
    el esperado (≈ 0.5 mm). Si es mucho mayor, algo cambió en el montaje: recalibra.
 
+### 20.9 Instalación en Windows
+
+Funcionan los dos montajes. El de uso normal en Windows es el **HDMI** (Dell M318WL con VSYNC);
+el LightCrafter también, con `hidapi` en vez de `/dev/hidraw`.
+
+**Requisitos:**
+
+- Windows 10 u 11 de **64 bits**, con internet para la instalación.
+- **git para Windows** (o copia la carpeta del proyecto sin `.env/`).
+- **Python 3.10 de 64 bits.** Si no está, `instalar.bat` ofrece instalarlo con `winget`.
+- Para capturar: el **Spinnaker SDK de FLIR para Windows** (64 bits, con los drivers USB3) y el
+  wheel de PySpin de la **misma versión**, para Python 3.10:
+  `spinnaker_python-<versión>-cp310-cp310-win_amd64.whl` (viene en un .zip en la descarga del
+  SDK). Instala el SDK antes del wheel.
+- La cámara en un puerto **USB 3** (azul o marcado SS). En USB 2 no llega a 60 fps.
+
+**Pasos:**
+
+1. `git clone <url-del-repositorio> Tesis` (o copia la carpeta).
+2. En la carpeta, doble clic en **`instalar.bat`**. Para la cámara, desde una consola:
+   `instalar.bat -PySpin C:\ruta\spinnaker_python-…-cp310-cp310-win_amd64.whl`. Hace lo mismo que
+   `instalar.sh`: entorno `.env\`, dependencias (más `hidapi`), PySpin, los patrones de **los dos
+   montajes** y un acceso directo **«Reconstrucción 3D»** en el escritorio. Se puede repetir.
+3. **Proyector:** Configuración → Sistema → Pantalla → *Extender estas pantallas*; el proyector
+   a **1280×800 y 60 Hz**, preferiblemente con escala **100 %**.
+4. **`verificar.bat`** con la cámara y el proyector conectados (equivale a `verificar.py`).
+5. Abre la interfaz con el acceso directo (o `iniciar_interfaz.bat`). Elige el montaje.
+6. ⚙ Ajustes → Proyector → **Medir latencia**. Windows compone las ventanas distinto que Linux:
+   no supongas que la latencia es la misma (aquí fueron 4 cuadros).
+7. Prueba con un plano (planitud ≈ 0.5 mm). La calibración viaja con el código y sirve si la
+   cámara y el proyector no se movieron entre sí; si se desarmó el montaje, recalibra.
+
+**Diferencias con Linux** (`datos_sistema/compat.py`):
+
+| | Linux | Windows |
+|---|---|---|
+| Intérprete | `.env/bin/python` | `.env\Scripts\python.exe` |
+| Abrir la interfaz | `.env/bin/python interfaz/servidor.py` | `iniciar_interfaz.bat` (consola en UTF-8) |
+| *Detener* | SIGTERM | Ctrl+Break al grupo del proceso (se cierra la cámara igual) |
+| Cambiar de montaje | el servidor se reinicia a sí mismo | el servidor sale con código 3 y el `.bat` lo vuelve a abrir |
+| Ubicar el proyector | `xrandr` | monitores de Windows, en píxeles reales (sin reescalado) |
+| LightCrafter | `/dev/hidraw` + regla udev | `hidapi`, sin drivers ni permisos |
+| Datos en otro disco | `TESIS_DIR_DATOS=/media/… ` | `set TESIS_DIR_DATOS=D:\tesis` antes de `iniciar_interfaz.bat` |
+
+Si cierras la ventana de la consola con una captura en marcha, Windows termina todo de golpe y la
+cámara puede quedar tomada: desconéctala y conéctala. Usa *Detener* o Ctrl+C en la consola.
+Los problemas propios de Windows están en §16.1.

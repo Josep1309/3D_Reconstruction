@@ -1,7 +1,7 @@
 """Proyección de los patrones por HDMI (montaje «hdmi_dell»).
 
 El PC muestra cada patrón a pantalla completa en el proyector (una segunda pantalla del
-escritorio) con una ventana de OpenCV (Qt, ya incluida: no hace falta instalar nada). La cámara se
+escritorio) con una ventana de OpenCV (Qt en Linux, Win32 en Windows; ya incluida). La cámara se
 dispara con el VSYNC del HDMI en cada cuadro (60 Hz), así que recibe cuadros continuamente aunque el
 patrón no cambie. Para cada patrón (`CamaraFLIR.capturar_sincronizado`):
 
@@ -27,13 +27,17 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from datos_sistema import compat
 from datos_sistema import configuracion as cfg
 
 VENTANA = "Patrones (proyector)"
 
 
 def pantallas() -> list[dict]:
-    """Pantallas conectadas según xrandr (también funciona en Wayland vía XWayland)."""
+    """Pantallas conectadas: en Linux según xrandr (también en Wayland vía XWayland); en Windows,
+    los monitores del escritorio en píxeles físicos (compat.pantallas_windows)."""
+    if compat.ES_WINDOWS:
+        return compat.pantallas_windows()
     try:
         salida = subprocess.run(["xrandr", "--query"], capture_output=True, text=True, timeout=5).stdout
     except (OSError, subprocess.TimeoutExpired):
@@ -89,6 +93,7 @@ class ProyectorHDMI:
         self.actual: np.ndarray | None = None
 
     def __enter__(self) -> ProyectorHDMI:
+        compat.dpi_consciente()  # Windows: sin esto, con escalado 125 % la imagen se reescala y difumina
         p = ubicar_pantalla(self.ancho, self.alto)
         cv2.namedWindow(VENTANA, cv2.WINDOW_NORMAL)
         cv2.moveWindow(VENTANA, p["x"], p["y"])

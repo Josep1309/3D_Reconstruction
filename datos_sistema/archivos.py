@@ -23,6 +23,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from datos_sistema import compat
 from datos_sistema import configuracion as cfg
 from datos_sistema import rutas
 from datos_sistema import sesiones
@@ -173,8 +174,10 @@ def restaurar(lote_id: str) -> dict:
 
 
 def _restaurar(lote_id: str) -> dict:
+    if not compat.nombre_seguro(lote_id):
+        raise FileNotFoundError(f"no existe el lote {lote_id} en la papelera")
     lote = PAPELERA / lote_id
-    if "/" in lote_id or lote_id.startswith(".") or not lote.is_dir():
+    if not compat.nombre_seguro(lote_id) or not lote.is_dir():
         raise FileNotFoundError(f"no existe el lote {lote_id} en la papelera")
     try:
         meta = json.loads((lote / META).read_text(encoding="utf-8"))

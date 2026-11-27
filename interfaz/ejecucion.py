@@ -10,6 +10,7 @@ import json
 import os
 import queue
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,7 @@ import time
 from pathlib import Path
 
 from comun import RAIZ
+from datos_sistema import compat
 
 
 RE_MARCA = re.compile(r"@@(vivo) (\d+) (\d+)|@@(previa) ([\d.]+)(?: ([\d.]+))?(?: (\d+))?|@@exposicion [\d.]+")
@@ -134,9 +136,12 @@ class Ejecucion:
             ruta = Path(tempfile.mkstemp(prefix="pipeline_", suffix=".json")[1])
             ruta.write_text(json.dumps(conf), encoding="utf-8")
             env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}
+            # Windows: grupo de procesos propio, para poder enviarle Ctrl+Break al detener (es la
+            # única señal que el ejecutor puede atrapar para cerrar la cámara) sin afectar al servidor
+            grupo = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if compat.ES_WINDOWS else {}
             self.proc = subprocess.Popen(
                 [sys.executable, "-u", str(Path(__file__).with_name("ejecutor.py")), str(ruta)],
-                cwd=RAIZ, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                cwd=RAIZ, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **grupo,
             )
             self.etapa, self.esperando, self.inicio, self.ultimo_codigo = None, False, time.time(), None
             self.meta, self.progreso, self.calidades, self.ultimo_error = None, None, [], ""
@@ -272,9 +277,26 @@ class Ejecucion:
         difusor.emitir("log", {"texto": f"  ⏎ {texto or '(Enter)'}"})
         self._emitir_estado()
 
+    def _senal_detener(self) -> None:
+        if not compat.ES_WINDOWS:
+            self.proc.terminate()  # SIGTERM
+            return
+        # terminate() en Windows mata el proceso en el acto (la cámara quedaría tomada). Ctrl+Break
+        # llega como SIGBREAK; si el ejecutor espera una respuesta (input), se cierra su entrada
+        # para que la lectura termine y la interrupción se procese.
+        try:
+            self.proc.send_signal(signal.CTRL_BREAK_EVENT)
+        except OSError:  # sin consola compartida (p. ej. lanzado con pythonw): no hay otra forma
+            self.proc.terminate()
+            return
+        try:
+            self.proc.stdin.close()
+        except OSError:
+            pass
+
     def detener(self) -> None:
         if self.activa:
-            self.proc.terminate()  # el ejecutor lo convierte en KeyboardInterrupt y cierra la cámara
+            self._senal_detener()  # el ejecutor lo convierte en KeyboardInterrupt y cierra la cámara
             try:
                 self.proc.wait(timeout=10)
             except subprocess.TimeoutExpired:

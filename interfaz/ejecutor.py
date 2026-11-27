@@ -39,6 +39,7 @@ matplotlib.use("Agg")  # la interfaz web reemplaza a las ventanas de matplotlib
 import cv2  # noqa: E402
 import numpy as np  # noqa: E402
 
+from datos_sistema import compat  # noqa: E402
 from datos_sistema import configuracion as cfg  # noqa: E402
 import pipeline  # noqa: E402
 
@@ -159,7 +160,7 @@ class VistaEnVivo:
             img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
             tmp = DIR_VIVO / "frame_tmp.jpg"
             cv2.imwrite(str(tmp), img, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            os.replace(tmp, DIR_VIVO / "frame.jpg")  # reemplazo atómico: el navegador nunca lee a medias
+            compat.reemplazar(tmp, DIR_VIVO / "frame.jpg")  # reemplazo atómico: el navegador nunca lee a medias
             self.escrita = version
             # Una sola escritura con salto de línea incluido: print() escribe el texto y el "\n"
             # por separado, y otro hilo podría intercalarse y pegar el mensaje a su línea
@@ -257,7 +258,7 @@ def solo_vista_previa(conf: dict) -> None:
         pass  # «Detener» desde la interfaz: la cámara ya se cerró al salir del `with`
     except Exception as exc:  # noqa: BLE001
         print(f"[ERROR] No se pudo abrir la vista previa: {exc}\n"
-              f"        Posibles causas y soluciones: MANUAL.md §16.3 (o ejecuta .env/bin/python verificar.py)",
+              f"        Posibles causas y soluciones: MANUAL.md §16.3 (o ejecuta {compat.PYTHON} verificar.py)",
               flush=True)
         raise SystemExit(1) from None
     print("[OK] Vista previa cerrada.", flush=True)
@@ -277,7 +278,7 @@ def _input_marcado(prompt: str = "") -> str:
 
 
 def _al_detener(_senal, _marco) -> None:
-    """«Detener» de la interfaz envía SIGTERM. Por defecto Python moriría sin ejecutar los
+    """«Detener» de la interfaz envía SIGTERM (Ctrl+Break en Windows). Por defecto Python moriría sin ejecutar los
     `finally`/`with` y la cámara quedaría abierta (sin DeInit). Se convierte en una interrupción
     normal para que todo se cierre bien."""
     raise KeyboardInterrupt
@@ -330,7 +331,10 @@ def importar_y_elegir(opciones: dict) -> None:
 
 
 def main() -> None:
+    compat.consola_utf8()
     signal.signal(signal.SIGTERM, _al_detener)
+    if compat.ES_WINDOWS:  # Windows no tiene SIGTERM entre procesos: «Detener» envía Ctrl+Break
+        signal.signal(signal.SIGBREAK, _al_detener)
     builtins.input = _input_marcado
     os.environ["TESIS_MARCAS_AVANCE"] = "1"  # avance.py: marcas @@avance para la barra de progreso
     os.environ["TESIS_INTERACTIVO"] = "1"  # organizar puede preguntar (la interfaz muestra botones)

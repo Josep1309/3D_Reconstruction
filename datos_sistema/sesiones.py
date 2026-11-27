@@ -25,6 +25,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
+from datos_sistema import compat
 from datos_sistema import configuracion as cfg
 
 REGISTRO = cfg.DATOS / "procesos_captura.json"
@@ -65,7 +66,7 @@ def escribir_json(ruta: Path, datos, indent: int = 1) -> None:
     tmp = ruta.with_name(f".{ruta.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     with ESCRITURA:
         tmp.write_text(json.dumps(datos, indent=indent, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(ruta)
+        compat.reemplazar(tmp, ruta)
 
 
 _escribir_json = escribir_json

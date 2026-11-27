@@ -25,6 +25,7 @@ import json
 import time
 from pathlib import Path
 
+from datos_sistema import compat
 from datos_sistema import configuracion as cfg
 
 # ==============================================================================
@@ -323,7 +324,7 @@ def main() -> None:
         except Exception as exc:
             print(f"\n[ERROR] La etapa '{etapa}' falló: {exc}")
             print(f"        Posibles causas y soluciones: MANUAL.md {AYUDA_ETAPA.get(etapa, '§16')} "
-                  f"(o ejecuta .env/bin/python verificar.py)")
+                  f"(o ejecuta {compat.PYTHON} verificar.py)")
             raise SystemExit(1) from exc
         print(f"[PIPELINE] '{etapa}' terminada en {time.perf_counter() - t0:.1f} s")
     print(f"\n[PIPELINE] Proceso completo en {time.perf_counter() - t_total:.1f} s. "

@@ -4,18 +4,19 @@ Modifica los parámetros en la sección 'PARÁMETROS DE CONFIGURACIÓN' de abajo
 y ejecuta, desde la carpeta del proyecto:
     .env/bin/python -m captura.configurar_lightcrafter
 
-Si da error de permisos sobre /dev/hidrawX, instala una vez la regla udev:
+En Linux se habla directo con /dev/hidrawX; si da error de permisos, instala una vez la regla udev:
     ./instalar.sh --udev        (ver MANUAL.md §20.4)
+En Windows se usa hidapi (paquete «hidapi», lo instala instalar.bat): no hace falta driver ni permisos.
 """
 
 from __future__ import annotations
 
 import os
-import select
 import struct
 import time
 from pathlib import Path
 
+from datos_sistema import compat
 from datos_sistema import configuracion as cfg
 
 # ==============================================================================
@@ -34,7 +35,7 @@ PERIODO_US = cfg.LCR_PERIODO_US         # 50 ms de período (= pulso de 20 Hz de
 
 REINICIAR_SECUENCIA = True     # True = inicia (START) la proyección tras validar los tiempos
 SOLO_LEER = False              # True = solo consulta los valores actuales sin modificarlos
-DISPOSITIVO_HID = None         # None = buscar automáticamente (o ej. "/dev/hidraw2")
+DISPOSITIVO_HID = None         # None = buscar automáticamente (o ej. "/dev/hidraw2"; en Windows, la ruta de hidapi)
 # ==============================================================================
 
 
@@ -50,12 +51,91 @@ CMD_SEQ_CONTROL = 0x1A24       # 0x00 = Stop, 0x01 = Pause, 0x02 = Start
 CMD_EXPOSURE_PERIOD = 0x1A29   # <II (exposure_us, period_us)
 
 
+class _HidApi:
+    """Transporte HID con hidapi (Windows; también sirve en Linux/macOS si está instalado)."""
+
+    def __init__(self, ruta: str | bytes | None) -> None:
+        try:
+            import hid
+        except ImportError as exc:
+            raise ImportError("Falta el paquete hidapi para hablar con el LightCrafter: "
+                              f"{compat.PYTHON} -m pip install hidapi") from exc
+        self.ruta = ruta or self.buscar()
+        self.dev = hid.device()
+        self.dev.open_path(self.ruta if isinstance(self.ruta, bytes) else str(self.ruta).encode())
+        # no bloqueante: read() sin espera vuelve en el acto (para vaciar el búfer); con espera > 0
+        # hidapi usa hid_read_timeout, que respeta esa espera igual
+        self.dev.set_nonblocking(1)
+
+    @staticmethod
+    def buscar() -> bytes:
+        """La interfaz de control (la 0) del DLPC350 (0451:6401)."""
+        import hid
+
+        lista = hid.enumerate(VID_TI, PID_LCR4500)
+        if not lista:
+            raise FileNotFoundError(
+                "No se detectó el DLP LightCrafter 4500 por USB (VID=0x0451, PID=0x6401).\n"
+                "Verifica que el cable mini-USB del LightCrafter esté conectado a esta PC "
+                "y que el proyector esté encendido.")
+        lista.sort(key=lambda d: (d.get("interface_number", 0) != 0, d.get("usage_page", 0) != 0xFF00))
+        return lista[0]["path"]
+
+    def escribir(self, datos: bytes) -> None:
+        if self.dev.write(datos) < 0:
+            raise OSError(f"hidapi no pudo escribir al LightCrafter: {self.dev.error()}")
+
+    def leer(self, espera_s: float) -> bytes | None:
+        r = self.dev.read(65, int(espera_s * 1000))
+        return bytes(r) if r else None
+
+    def cerrar(self) -> None:
+        self.dev.close()
+
+
+class _HidRaw:
+    """Transporte HID directo de Linux (/dev/hidraw*), sin dependencias."""
+
+    def __init__(self, ruta: str) -> None:
+        self.ruta = ruta
+        try:
+            self.fd = os.open(ruta, os.O_RDWR | os.O_NONBLOCK)
+        except PermissionError as exc:
+            raiz = Path(__file__).resolve().parent.parent  # raíz del proyecto
+            raise PermissionError(
+                f"Sin permisos para abrir '{ruta}'.\n"
+                f"Solución permanente (una sola vez), desde '{raiz}':\n"
+                f"    ./instalar.sh --udev\n"
+                f"y desconecta/conecta el USB del LightCrafter. Solución temporal (hasta reiniciar):\n"
+                f"    sudo chmod a+rw {ruta}\n"
+                f"Más detalles: MANUAL.md §20.4"
+            ) from exc
+
+    def escribir(self, datos: bytes) -> None:
+        os.write(self.fd, datos)
+
+    def leer(self, espera_s: float) -> bytes | None:
+        import select
+
+        r, _, _ = select.select([self.fd], [], [], espera_s)
+        if not r:
+            return None
+        try:
+            return os.read(self.fd, 65)
+        except BlockingIOError:
+            return None
+
+    def cerrar(self) -> None:
+        os.close(self.fd)
+
+
 class LightCrafter4500:
-    """Controlador USB HID directo en Linux (/dev/hidraw*) para DLP LightCrafter 4500."""
+    """Controlador USB HID para DLP LightCrafter 4500: /dev/hidraw* en Linux, hidapi en Windows."""
 
     def __init__(self, device_path: str | None = None) -> None:
-        self.device_path = device_path or self._buscar_hidraw()
-        self.fd: int | None = None
+        self.usar_hidapi = compat.ES_WINDOWS
+        self.device_path = device_path or (None if self.usar_hidapi else self._buscar_hidraw())
+        self.t: _HidApi | _HidRaw | None = None
         self._seq = 1
 
     @staticmethod
@@ -97,24 +177,14 @@ class LightCrafter4500:
         )
 
     def open(self) -> None:
-        if self.fd is None:
-            try:
-                self.fd = os.open(self.device_path, os.O_RDWR | os.O_NONBLOCK)
-            except PermissionError as exc:
-                raiz = Path(__file__).resolve().parent.parent  # raíz del proyecto
-                raise PermissionError(
-                    f"Sin permisos para abrir '{self.device_path}'.\n"
-                    f"Solución permanente (una sola vez), desde '{raiz}':\n"
-                    f"    ./instalar.sh --udev\n"
-                    f"y desconecta/conecta el USB del LightCrafter. Solución temporal (hasta reiniciar):\n"
-                    f"    sudo chmod a+rw {self.device_path}\n"
-                    f"Más detalles: MANUAL.md §20.4"
-                ) from exc
+        if self.t is None:
+            self.t = _HidApi(self.device_path) if self.usar_hidapi else _HidRaw(self.device_path)
+            self.device_path = self.t.ruta
 
     def close(self) -> None:
-        if self.fd is not None:
-            os.close(self.fd)
-            self.fd = None
+        if self.t is not None:
+            self.t.cerrar()
+            self.t = None
 
     def __enter__(self) -> LightCrafter4500:
         self.open()
@@ -124,23 +194,17 @@ class LightCrafter4500:
         self.close()
 
     def _vaciar_buffer_lectura(self) -> None:
-        assert self.fd is not None
-        while True:
-            r, _, _ = select.select([self.fd], [], [], 0.0)
-            if not r:
-                break
-            try:
-                os.read(self.fd, 65)
-            except BlockingIOError:
-                break
+        assert self.t is not None
+        while self.t.leer(0.0):
+            pass
 
     def _enviar_comando(
         self, cmd: int, payload: bytes = b"", lectura: bool = False
     ) -> bytes:
         """Envía un paquete HID de 64 bytes (con Report ID 0x00) al DLPC350."""
-        if self.fd is None:
+        if self.t is None:
             self.open()
-        assert self.fd is not None
+        assert self.t is not None
 
         self._vaciar_buffer_lectura()
 
@@ -158,16 +222,15 @@ class LightCrafter4500:
         struct.pack_into("<H", paquete, 5, cmd)
         paquete[7 : 7 + len(payload)] = payload
 
-        os.write(self.fd, bytes(paquete))
+        self.t.escribir(bytes(paquete))
 
         # Esperar respuesta del controlador DLPC350
-        r, _, _ = select.select([self.fd], [], [], 2.0)
-        if not r:
+        resp = self.t.leer(2.0)
+        if not resp:
             raise TimeoutError(
                 f"Timeout esperando respuesta del LightCrafter para el comando 0x{cmd:04X}"
             )
 
-        resp = os.read(self.fd, 65)
         offset = 1 if len(resp) == 65 else 0
         resp_flags = resp[offset]
         if resp_flags & 0x20:  # Bit 5 indica error NACK del DLPC350

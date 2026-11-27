@@ -44,6 +44,7 @@ from consultas import _cache_errores, _lock_errores, configuracion_por_defecto, 
 
 import cv2
 import numpy as np
+from datos_sistema import compat
 from datos_sistema import configuracion as cfg
 
 
@@ -256,7 +257,7 @@ class Manejador(BaseHTTPRequestHandler):
                 dir_vivo.mkdir(parents=True, exist_ok=True)
                 tmp = dir_vivo / "control.tmp"
                 tmp.write_text(json.dumps({"exposicion_us": us}), encoding="utf-8")
-                tmp.replace(dir_vivo / "control.json")
+                compat.reemplazar(tmp, dir_vivo / "control.json")
                 return self._json({"ok": True, "activa": ejecucion.estado()["ejecutando"]})
             if url.path == "/api/comparacion/guardar":
                 cuerpo = self._cuerpo()
@@ -532,7 +533,34 @@ def _reiniciar() -> None:
     espera a que vuelva y se recarga; no se abre otro navegador."""
     print("[INFO] Reiniciando el servidor para aplicar el montaje nuevo…", flush=True)
     os.environ["TESIS_REINICIO"] = "1"
-    os.execv(sys.executable, [sys.executable, *sys.argv])
+    if not compat.ES_WINDOWS:
+        os.execv(sys.executable, [sys.executable, *sys.argv])
+    # En Windows os.execv lanza otro proceso y termina este, y la consola queda a medias. Con el
+    # lanzador (iniciar_interfaz.bat) se sale con el código 3 y el .bat lo vuelve a abrir; sin él,
+    # se lanza el servidor nuevo y este termina (el nuevo reintenta el puerto mientras se libera).
+    if os.environ.get("TESIS_LANZADOR") == "bat":
+        os._exit(CODIGO_REINICIO)
+    import subprocess
+
+    subprocess.Popen([sys.executable, *sys.argv])
+    os._exit(0)
+
+
+CODIGO_REINICIO = 3
+
+
+def _abrir_servidor(host: str, puerto: int) -> ThreadingHTTPServer:
+    """Tras un reinicio el puerto puede tardar un momento en liberarse: se reintenta unos segundos."""
+    for k in range(40):
+        try:
+            return ThreadingHTTPServer((host, puerto), Manejador)
+        except OSError:
+            if not os.environ.get("TESIS_REINICIO") or k == 39:
+                raise
+            import time
+
+            time.sleep(0.25)
+    raise AssertionError("inalcanzable")
 
 
 def main() -> None:
@@ -542,9 +570,10 @@ def main() -> None:
     parser.add_argument("--puerto", type=int, default=8000)
     parser.add_argument("--sin-navegador", action="store_true", help="No abrir el navegador automáticamente")
     args = parser.parse_args()
+    compat.consola_utf8()
 
     threading.Thread(target=vigilar, daemon=True).start()
-    servidor = ThreadingHTTPServer((args.host, args.puerto), Manejador)
+    servidor = _abrir_servidor(args.host, args.puerto)
     servidor.daemon_threads = True
     servidor.red_abierta = args.host not in ("127.0.0.1", "localhost", "::1")
     url = f"http://{'127.0.0.1' if args.host == '0.0.0.0' else args.host}:{args.puerto}"

@@ -3,6 +3,7 @@
 Uso:
     .env/bin/python verificar.py                 # todo, incluido el hardware conectado
     .env/bin/python verificar.py --sin-hardware  # solo software, patrones, calibración y datos
+    (en Windows: .env\Scripts\python.exe verificar.py, o verificar.bat)
 
 Cada problema indica qué hacer y en qué sección de MANUAL.md hay más detalle.
 Código de salida: 0 si no hay errores (✖), 1 si los hay. Las advertencias (⚠) no impiden usar el
@@ -23,6 +24,8 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent
 sys.path.insert(0, str(RAIZ))
+
+from datos_sistema import compat  # noqa: E402  (sin dependencias: funciona aunque falte numpy)
 
 USA_COLOR = sys.stdout.isatty()
 SIMBOLOS = {"ok": ("✔", "32"), "aviso": ("⚠", "33"), "error": ("✖", "31"), "info": ("·", "0")}
@@ -68,7 +71,7 @@ def verificar_python() -> None:
         informar("error", texto, "Se necesita Python 3.9 o superior (recomendado 3.10).", "§20.1")
     if sys.prefix == sys.base_prefix:
         informar("aviso", "No se está usando un entorno virtual",
-                 "Ejecuta con .env/bin/python (lo crea ./instalar.sh).", "§20.2")
+                 f"Ejecuta con {compat.PYTHON} (lo crea {compat.INSTALADOR}).", "§20.2")
 
 
 def _versiones_requeridas() -> dict[str, str]:
@@ -92,7 +95,7 @@ def verificar_paquetes() -> bool:
             mod = importlib.import_module(modulo)
         except Exception as exc:  # noqa: BLE001
             informar("error", f"{paquete}: no se puede importar ({exc})",
-                     "Ejecuta ./instalar.sh  (o .env/bin/pip install -r requirements.txt)", "§20.2")
+                     f"Ejecuta {compat.INSTALADOR}  (o {compat.PYTHON} -m pip install -r requirements.txt)", "§20.2")
             todo_bien = False
             continue
         version = getattr(mod, "__version__", "?")
@@ -111,7 +114,7 @@ def verificar_camara(con_hardware: bool) -> tuple[int, int] | None:
         import PySpin  # noqa: N813
     except Exception as exc:  # noqa: BLE001
         informar("aviso", f"PySpin no está instalado ({type(exc).__name__}). Solo hace falta para capturar.",
-                 "Instala el Spinnaker SDK y el wheel de PySpin: ./instalar.sh --pyspin <archivo.whl>", "§20.3")
+                 "Instala el Spinnaker SDK y el wheel de PySpin: " + (r"instalar.bat -PySpin <archivo.whl>" if compat.ES_WINDOWS else "./instalar.sh --pyspin <archivo.whl>"), "§20.3")
         return None
     informar("ok", "PySpin importado")
     if not con_hardware:
@@ -149,8 +152,37 @@ def verificar_camara(con_hardware: bool) -> tuple[int, int] | None:
             sistema.ReleaseInstance()
 
 
+def verificar_lightcrafter_windows(con_hardware: bool) -> None:
+    """En Windows el LightCrafter se maneja con hidapi: sin regla udev ni permisos."""
+    try:
+        import hid  # noqa: F401
+        informar("ok", "hidapi instalado (control USB del LightCrafter)")
+    except ImportError:
+        informar("aviso", "Falta hidapi: solo hace falta para el montaje LightCrafter",
+                 f"{compat.PYTHON} -m pip install hidapi", "§20.9")
+        return
+    if not con_hardware:
+        informar("info", "Detección del proyector omitida (--sin-hardware)")
+        return
+    from captura import configurar_lightcrafter as lcr
+
+    try:
+        with lcr.LightCrafter4500() as dispositivo:
+            exp, per = dispositivo.leer_exposicion_y_periodo()
+        informar("ok", f"LightCrafter conectado: exposición {exp} µs, período {per} µs")
+    except FileNotFoundError:
+        informar("aviso", "No se detecta el LightCrafter por USB (solo hace falta para la etapa 'lightcrafter')",
+                 "Conecta el cable mini-USB del proyector y enciéndelo.", "§16.2")
+    except Exception as exc:  # noqa: BLE001
+        informar("aviso", f"LightCrafter detectado, pero no respondió: {exc}",
+                 "Apágalo y enciéndelo; cierra el software de TI (LightCrafter GUI) si está abierto.", "§16.2")
+
+
 def verificar_lightcrafter(con_hardware: bool) -> None:
     titulo("Proyector LightCrafter 4500 (USB)")
+    if compat.ES_WINDOWS:
+        verificar_lightcrafter_windows(con_hardware)
+        return
     if Path("/etc/udev/rules.d/99-lightcrafter.rules").exists():
         informar("ok", "Regla udev instalada (/etc/udev/rules.d/99-lightcrafter.rules)")
     else:
@@ -209,7 +241,7 @@ def verificar_patrones() -> None:
     bmps = sorted(cfg.DIR_PATRONES.glob("f_*.bmp"))
     if len(bmps) != cfg.IMAGENES_POR_CICLO:
         informar("aviso", f"{len(bmps)} de {cfg.IMAGENES_POR_CICLO} patrones en {cfg.DIR_PATRONES}",
-                 "Genera los patrones: .env/bin/python -m captura.secuencia_patrones (deben coincidir con los "
+                 f"Genera los patrones: {compat.PYTHON} -m captura.secuencia_patrones (deben coincidir con los "
                  "cargados en el LightCrafter)", "§6")
         return
     img = cv2.imread(str(bmps[0]), cv2.IMREAD_GRAYSCALE)
@@ -306,9 +338,9 @@ def verificar_interfaz(puerto: int = 8000) -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         if s.connect_ex(("127.0.0.1", puerto)) == 0:
             informar("aviso", f"El puerto {puerto} ya está en uso (¿la interfaz ya está abierta?)",
-                     f"Usa otro: .env/bin/python interfaz/servidor.py --puerto {puerto + 1}", "§16.8")
+                     f"Usa otro: {compat.PYTHON} interfaz/servidor.py --puerto {puerto + 1}", "§16.8")
         else:
-            informar("ok", f"Puerto {puerto} libre: .env/bin/python interfaz/servidor.py")
+            informar("ok", f"Puerto {puerto} libre: {compat.PYTHON} interfaz/servidor.py")
 
 
 def main() -> None:
@@ -316,6 +348,7 @@ def main() -> None:
     parser.add_argument("--sin-hardware", action="store_true", help="No intenta detectar la cámara ni el proyector")
     parser.add_argument("--json", action="store_true", help="Solo imprime el resultado en JSON (para la interfaz)")
     args = parser.parse_args()
+    compat.consola_utf8()
     con_hw = not args.sin_hardware
     if args.json:
         import contextlib
@@ -345,7 +378,7 @@ def main() -> None:
 def _comprobar(con_hw: bool) -> None:
     verificar_python()
     if not verificar_paquetes():
-        print("\nFaltan paquetes básicos: corrige eso primero (./instalar.sh) y vuelve a verificar.")
+        print(f"\nFaltan paquetes básicos: corrige eso primero ({compat.INSTALADOR}) y vuelve a verificar.")
         raise SystemExit(1)
     tamano = verificar_camara(con_hw)
     from datos_sistema import configuracion as cfg

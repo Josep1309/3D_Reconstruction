@@ -9,6 +9,9 @@ numpy==1.26.4
 opencv-python==4.11.0.86
 matplotlib==3.10.9
 
+# Control USB (HID) del LightCrafter en Windows; en Linux se usa /dev/hidraw directamente.
+hidapi>=0.14; sys_platform == "win32"
+
 # La interfaz web solo usa la librería estándar: no necesita paquetes extra.
 #
 # PySpin (cámara FLIR) NO está en PyPI: se instala aparte desde el Spinnaker SDK de FLIR.

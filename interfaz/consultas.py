@@ -164,7 +164,8 @@ def estado_sistema(con_hardware: bool, forzar: bool = False) -> dict:
         return _cache_sistema[clave]["datos"]
     comando = [sys.executable, str(RAIZ / "verificar.py"), "--json"] + ([] if con_hardware else ["--sin-hardware"])
     try:
-        r = subprocess.run(comando, capture_output=True, text=True, timeout=90, cwd=RAIZ, env={**os.environ})
+        r = subprocess.run(comando, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90,
+                           cwd=RAIZ, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         verif = json.loads(r.stdout.strip().splitlines()[-1])
     except (subprocess.TimeoutExpired, json.JSONDecodeError, IndexError) as exc:
         verif = {"resumen": {"ok": 0, "aviso": 0, "error": 1},
